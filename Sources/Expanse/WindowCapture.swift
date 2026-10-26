@@ -72,7 +72,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             let filter = SCContentFilter(desktopIndependentWindow: window)
             SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: config) { sample, error in
                 let ok = sample?.imageBuffer != nil
-                if let self, let sample, ok { FramePump.shared.post(sample, for: self) }
+                if let self, let sample, ok { FramePump.shared.post(sample, for: self, snapshot: true) }
                 if let error { logger.info("snapshot of \(window.windowID) failed: \(error.localizedDescription, privacy: .public)") }
                 DispatchQueue.main.async { completion(ok) }
             }
@@ -142,15 +142,16 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
               sampleBuffer.imageBuffer != nil
         else { return }
 
-        FramePump.shared.post(sampleBuffer, for: self)
+        FramePump.shared.post(sampleBuffer, for: self, snapshot: false)
     }
 
     /// Main thread: show a frame (see FramePump).
-    fileprivate func deliver(_ sample: CMSampleBuffer) {
+    fileprivate func deliver(_ sample: CMSampleBuffer, snapshot: Bool) {
         guard let pixelBuffer = sample.imageBuffer,
               let surface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue() else { return }
-        // Hold a few buffers so ScreenCaptureKit doesn't recycle a surface still on screen.
-        recentSamples.append(sample)
+        // A stream recycles its buffers, so hold a few: one still on screen mustn't be reused.
+        // A snapshot's buffer is its own; the last one is all that's needed.
+        if snapshot { recentSamples = [sample] } else { recentSamples.append(sample) }
         if recentSamples.count > 3 { recentSamples.removeFirst() }
         onFrame?(surface)
     }
@@ -175,12 +176,12 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 private final class FramePump {
     static let shared = FramePump()
     private let lock = NSLock()
-    private var pending: [ObjectIdentifier: (capture: WindowCapture, sample: CMSampleBuffer)] = [:]
+    private var pending: [ObjectIdentifier: (capture: WindowCapture, sample: CMSampleBuffer, snapshot: Bool)] = [:]
     private var scheduled = false
 
-    func post(_ sample: CMSampleBuffer, for capture: WindowCapture) {
+    func post(_ sample: CMSampleBuffer, for capture: WindowCapture, snapshot: Bool) {
         lock.lock()
-        pending[ObjectIdentifier(capture)] = (capture, sample)
+        pending[ObjectIdentifier(capture)] = (capture, sample, snapshot)
         let schedule = !scheduled
         scheduled = true
         lock.unlock()
@@ -196,7 +197,7 @@ private final class FramePump {
         lock.unlock()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for entry in batch.values { entry.capture.deliver(entry.sample) }
+        for entry in batch.values { entry.capture.deliver(entry.sample, snapshot: entry.snapshot) }
         CATransaction.commit()
     }
 }

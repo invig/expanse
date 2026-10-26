@@ -1633,7 +1633,7 @@ final class CanvasController: NSObject {
         }
         // A glide at 100% only streams what's on screen where it starts and where it lands:
         // windows it passes on the way are seen for a few frames, and their pictures are sharp
-        // already (see needsSharpening).
+        // already (see livePictureSize).
         typealias Candidate = (w: ManagedWindow, shown: CGFloat, distance: CGFloat)
         var candidates: [Candidate] = []
         for (w, want) in zip(windows, wants) where want.start && !w.needsFirstFrame {
@@ -1712,7 +1712,7 @@ final class CanvasController: NSObject {
         let byID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         var refresh = snapshotQueue.compactMap { byID[$0] }.filter { due($0, every: 1.5) }
             .sorted { $0.lastSnapshotAt < $1.lastSnapshotAt }
-        let blurry = isActive ? [] : windows.filter(needsSharpening)
+        let blurry = isActive ? [] : windows.filter(pictureNeedsResizing)
         if refresh.isEmpty, now - lastSharpening > 0.25 {
             let centre = camera.center(in: viewSize)
             refresh = blurry.filter { due($0, every: 3) }
@@ -1731,7 +1731,8 @@ final class CanvasController: NSObject {
         for w in next where snapshotsInFlight < 3 {
             snapshotsInFlight += 1
             w.lastSnapshotAt = now
-            w.capture.snapshot(window: w.scWindow, pixelSize: pixelSize(for: w)) { [weak self, weak w] ok in
+            let size = isActive ? pixelSize(for: w) : livePictureSize(for: w)
+            w.capture.snapshot(window: w.scWindow, pixelSize: size) { [weak self, weak w] ok in
                 self?.snapshotsInFlight -= 1
                 if let w { w.snapshotFailures = ok ? 0 : w.snapshotFailures + 1 }
             }
@@ -1740,10 +1741,23 @@ final class CanvasController: NSObject {
 
     private var lastSharpening: CFTimeInterval = 0
 
-    /// At 100%: a parked window not being streamed whose picture is smaller than full size.
-    private func needsSharpening(_ w: ManagedWindow) -> Bool {
-        w.parked && !w.capture.isRunning && !w.needsFirstFrame
-            && CGFloat(w.pictureWidth) < w.canvasFrame.width * screen.backingScaleFactor * 0.9
+    /// At 100%, the picture a window should have: full size near the view (within half a screen
+    /// of it: where a hop is likely to go, so the glide shows it sharp), a quarter of that further
+    /// away (full-size pictures of 50 windows would take the best part of a gigabyte).
+    private func livePictureSize(for w: ManagedWindow) -> CGSize {
+        let view = camera.toCanvas(CGRect(origin: .zero, size: viewSize))
+        let near = view.insetBy(dx: -view.width / 2, dy: -view.height / 2).intersects(w.canvasFrame)
+        let factor: CGFloat = near ? 1 : 0.25
+        let backing = screen.backingScaleFactor
+        return CGSize(width: w.canvasFrame.width * backing * factor, height: w.canvasFrame.height * backing * factor)
+    }
+
+    /// At 100%: a parked window not being streamed whose picture is well off the size it should
+    /// have: a thumbnail from the canvas near the view, or a full-size picture far from it.
+    private func pictureNeedsResizing(_ w: ManagedWindow) -> Bool {
+        guard w.parked, !w.capture.isRunning, !w.needsFirstFrame else { return false }
+        let want = livePictureSize(for: w).width, have = CGFloat(w.pictureWidth)
+        return have < want * 0.9 || have > want * 2.5
     }
 
     private static let streamStartsPerPass = 10
