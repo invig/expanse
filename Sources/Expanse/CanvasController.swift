@@ -76,7 +76,8 @@ final class CanvasController: NSObject {
     private var animation: CameraAnimation?
     private var displayLink: CADisplayLink?
 
-    static let liveFPS = 4
+    /// Parked windows' pictures at the edges of the screen at 100%.
+    static let liveFPS = 2
     /// Window pictures on the zoomed-out canvas: plenty for thumbnails, half the work of 60.
     static let canvasFPS = 30
 
@@ -302,19 +303,32 @@ final class CanvasController: NSObject {
         }
         registerDisplayCallback()
         sync()
-        // Window events from apps already on the canvas trigger a scan straight away (see
-        // handleAXEvent), and so do apps launching, hiding and unhiding; this catches the rest.
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in self?.sync() }
+        // New, closed, minimised and restored windows trigger a scan straight away (every app is
+        // watched; see observeApp and handleAXEvent), and so do apps launching, hiding and
+        // unhiding. A scan costs ScreenCaptureKit tens of milliseconds of LaunchServices lookups,
+        // so the regular one is only a safety net.
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.sync() }
+        let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        for (i, app) in apps.enumerated() {
+            // A few at a time: each asks the app to register, and a busy app takes a while.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5 + Double(i) * 0.05) { [weak self] in
+                self?.observeApp(app.processIdentifier)
+            }
+        }
         for name in [NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification] {
             NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 self?.syncSoon()
             }
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didLaunchApplicationNotification,
-                                                          object: nil, queue: .main) { [weak self] _ in
+                                                          object: nil, queue: .main) { [weak self] note in
             // Its first window usually shows up a moment after launch.
             for delay in [0.5, 1.5] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { self?.syncSoon() }
+            }
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+               app.activationPolicy == .regular {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self?.observeApp(app.processIdentifier) }
             }
         }
         magnifyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .magnify) { [weak self] event in
@@ -484,18 +498,23 @@ final class CanvasController: NSObject {
 
     private func observe(_ w: ManagedWindow) {
         guard let ax = w.ax else { return }
-        if observers[w.pid] == nil {
-            observers[w.pid] = AppObserver(pid: w.pid) { [weak self] element, notification, id in
-                self?.handleAXEvent(element, notification, id: id)
-            }
-        }
+        observeApp(w.pid)
         observers[w.pid]?.observe(window: ax, id: w.id)
+    }
+
+    /// Window created and focus changes for an app, whether or not it has windows on the canvas.
+    private func observeApp(_ pid: pid_t) {
+        guard observers[pid] == nil, pid != getpid() else { return }
+        observers[pid] = AppObserver(pid: pid) { [weak self] element, notification, id in
+            self?.handleAXEvent(element, notification, id: id)
+        }
     }
 
     /// `id`: the window's ID if it's one Expanse observes (looked up without asking the app).
     private func handleAXEvent(_ element: AXUIElement, _ notification: String, id: CGWindowID?) {
         switch notification {
-        case kAXWindowCreatedNotification, kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification:
+        case kAXWindowCreatedNotification, kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification,
+             kAXWindowDeminiaturizedNotification:
             syncSoon()
         case kAXFocusedWindowChangedNotification:
             var pid: pid_t = 0

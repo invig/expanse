@@ -40,7 +40,7 @@ final class AppObserver {
         guard !observedWindows.contains(where: { $0.id == id }) else { return }
         observedWindows.append((element, id))
         for n in [kAXMovedNotification, kAXResizedNotification, kAXUIElementDestroyedNotification,
-                  kAXWindowMiniaturizedNotification] {
+                  kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification] {
             add(element, n)
         }
     }
