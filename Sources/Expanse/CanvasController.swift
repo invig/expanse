@@ -659,12 +659,12 @@ final class CanvasController: NSObject {
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
             // Ask each app for its real window frames here, off the main thread: slow apps take
             // 100ms+ to answer, which would otherwise stall a glide or a key press.
-            let axFrames = Self.axFrames(for: content?.windows ?? [])
+            let ax = Self.axSnapshot(for: content?.windows ?? [])
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.syncing = false
                 if let content, !self.isPaused {
-                    self.apply(content.windows, axFrames: axFrames)
+                    self.apply(content.windows, ax: ax)
                 } else if let error {
                     logger.error("SCShareableContent failed: \(error.localizedDescription)")
                 }
@@ -703,21 +703,33 @@ final class CanvasController: NSObject {
 
     /// True frames (position and size) of ordinary app windows, by window ID, via Accessibility.
     /// ScreenCaptureKit reports transformed frames during Mission Control and similar animations.
-    private static func axFrames(for scWindows: [SCWindow]) -> [CGWindowID: CGRect] {
-        let pids = Set(scWindows.compactMap { $0.windowLayer == 0 ? $0.owningApplication?.processID : nil })
-            .subtracting([getpid()])
+    /// What the Accessibility API says about ordinary app windows: true frames by window ID, and
+    /// which windows are standard document windows (as opposed to sheets, dialogs and panels).
+    private struct AXSnapshot {
         var frames: [CGWindowID: CGRect] = [:]
-        for pid in pids {
-            for element in AX.windows(pid: pid) {
-                guard let id = AX.windowID(element), let p = AX.position(element), let s = AX.size(element),
-                      s.width > 0, s.height > 0 else { continue }
-                frames[id] = CGRect(origin: p, size: s)
-            }
-        }
-        return frames
+        var standard = Set<CGWindowID>()
+        var known = Set<CGWindowID>()
     }
 
-    private func apply(_ scWindows: [SCWindow], axFrames: [CGWindowID: CGRect]) {
+    private static func axSnapshot(for scWindows: [SCWindow]) -> AXSnapshot {
+        let pids = Set(scWindows.compactMap { $0.windowLayer == 0 ? $0.owningApplication?.processID : nil })
+            .subtracting([getpid()])
+        var snapshot = AXSnapshot()
+        for pid in pids {
+            for element in AX.windows(pid: pid) {
+                guard let id = AX.windowID(element) else { continue }
+                snapshot.known.insert(id)
+                if AX.subrole(element) == kAXStandardWindowSubrole as String { snapshot.standard.insert(id) }
+                guard let p = AX.position(element), let s = AX.size(element), s.width > 0, s.height > 0 else { continue }
+                snapshot.frames[id] = CGRect(origin: p, size: s)
+            }
+        }
+        return snapshot
+    }
+
+    private func apply(_ scWindows: [SCWindow], ax: AXSnapshot) {
+        let axFrames = ax.frames
+        if firstSync { logger.info("first sync: \(scWindows.count) SC windows, AX known \(ax.known.count), standard \(ax.standard.count), frames \(ax.frames.count)") }
         let started = CACurrentMediaTime()
         defer {
             let ms = Int((CACurrentMediaTime() - started) * 1000)
@@ -739,6 +751,11 @@ final class CanvasController: NSObject {
 
         let trackedIDs = Set(windows.map(\.id))
         for sc in scWindows where isManageable(sc, tracked: trackedIDs.contains(sc.windowID)) {
+            // Only ordinary document windows live on the canvas. Sheets (like Xcode's Manage
+            // Certificates), dialogs and floating panels belong to their parent window and stay
+            // wherever the app puts them; moving or parking them separately pulls them away from it.
+            if ax.known.contains(sc.windowID) && !ax.standard.contains(sc.windowID) { continue }
+            if !trackedIDs.contains(sc.windowID) && !ax.standard.contains(sc.windowID) { continue }
             seen.insert(sc.windowID)
             if let w = windows.first(where: { $0.id == sc.windowID }) {
                 // Zoomed out, positions aren't followed, so skip asking each app (slow apps
