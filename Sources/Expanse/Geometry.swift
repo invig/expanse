@@ -27,6 +27,7 @@ struct Camera: Equatable {
 
     /// Zooms so the canvas point under `anchor` (view coords) stays put.
     mutating func zoom(to newScale: CGFloat, anchor: CGPoint) {
+        guard newScale.isFinite, anchor.x.isFinite, anchor.y.isFinite else { return }
         let s = min(max(newScale, Camera.minScale), Camera.maxScale)
         let c = toCanvas(anchor)
         scale = s
@@ -35,6 +36,7 @@ struct Camera: Equatable {
 
     /// Moves the content by `d` view points.
     mutating func pan(by d: CGVector) {
+        guard d.dx.isFinite, d.dy.isFinite else { return }
         origin.x -= d.dx / scale
         origin.y -= d.dy / scale
     }

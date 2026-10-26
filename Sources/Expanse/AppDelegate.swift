@@ -59,8 +59,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard url.scheme == "expanse", let command = url.host else { continue }
             let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems ?? []).map { ($0.name, $0.value ?? "") })
-            func number(_ key: String) -> CGFloat? { Double(query[key] ?? "").map { CGFloat($0) } }
+            // Finite numbers only: "nan" and "inf" parse as Doubles and would poison the camera.
+            func number(_ key: String) -> CGFloat? {
+                guard let d = Double(query[key] ?? ""), d.isFinite else { return nil }
+                return CGFloat(d)
+            }
             logger.info("url command \(command, privacy: .public)")
+            // Any app or web page can open expanse:// links. Commands that reach into individual
+            // windows or fake the display are for debugging only and stay off unless enabled with
+            // `defaults write com.invignation.expanse debugURLCommands -bool true`.
+            let debugCommands: Set<String> = ["place", "prefer", "dump", "screen"]
+            if debugCommands.contains(command), !UserDefaults.standard.bool(forKey: "debugURLCommands") {
+                logger.info("ignored debug URL command \(command, privacy: .public) (debugURLCommands is off)")
+                continue
+            }
+            if command == "nav" { runURLCommand(command, query: query, number: number); continue }
+            controller.whenIdle { [weak self] in self?.runURLCommand(command, query: query, number: number) }
+        }
+    }
+
+    private func runURLCommand(_ command: String, query: [String: String], number: (String) -> CGFloat?) {
             switch command {
             case "toggle": controller.toggle()
             case "enter": controller.enter(zoomOut: query["zoomOut"] != "0")
@@ -101,7 +119,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if let w = controller.windows.last(where: { $0.appName.lowercased() == name }) { controller.focus(w) }
             default: break
             }
-        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -157,10 +174,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         screenRecordingItem.title = sr ? "Screen Recording: granted" : "Grant Screen Recording…"
     }
 
-    @objc private func toggleCanvas() { controller.toggle() }
-    @objc private func restoreAll() { controller.restoreAll() }
+    @objc private func toggleCanvas() { controller.whenIdle { [weak self] in self?.controller.toggle() } }
+    @objc private func restoreAll() { controller.whenIdle { [weak self] in self?.controller.restoreAll() } }
     @objc private func showWelcome() { Onboarding.show {} }
-    @objc private func tidy() { controller.tidy() }
+    @objc private func tidy() { controller.whenIdle { [weak self] in self?.controller.tidy() } }
     @objc private func pickCorner(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let corner = HotCorner.Corner(rawValue: raw) else { return }
         controller.hotCorner.corner = corner
@@ -176,7 +193,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.refreshWallpaper()
     }
 
-    @objc private func togglePause() { controller.isPaused ? controller.resume() : controller.pause() }
+    @objc private func togglePause() {
+        controller.whenIdle { [weak self] in
+            guard let c = self?.controller else { return }
+            c.isPaused ? c.resume() : c.pause()
+        }
+    }
 
     @objc private func openAccessibilitySettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)

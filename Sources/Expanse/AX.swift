@@ -52,7 +52,8 @@ enum AX {
     static func focusedWindow(pid: pid_t) -> AXUIElement? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute as CFString,
-                                            &value) == .success, let v = value else { return nil }
+                                            &value) == .success, let v = value,
+              CFGetTypeID(v) == AXUIElementGetTypeID() else { return nil }
         return (v as! AXUIElement)
     }
 
@@ -106,7 +107,7 @@ enum AX {
     static func close(_ element: AXUIElement) {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXCloseButtonAttribute as CFString, &value) == .success,
-              let button = value else { return }
+              let button = value, CFGetTypeID(button) == AXUIElementGetTypeID() else { return }
         AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString)
     }
 }

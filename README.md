@@ -109,8 +109,10 @@ open "expanse://pause"             # windows back to the macOS layout
 open "expanse://resume"
 ```
 
-Also `enter`, `exit`, `fit`, `zoom?scale=0.5`, `pan?dx=100&dy=0`, `restore`, and for debugging
-`dump` and `screen?w=1512&h=982` (pretend the display is that size).
+Also `enter`, `exit`, `fit`, `zoom?scale=0.5`, `pan?dx=100&dy=0` and `restore`. Debugging
+commands (`dump`, `screen?w=1512&h=982` to pretend the display is that size, `place`, `prefer`)
+are off unless you run `defaults write com.invignation.expanse debugURLCommands -bool true`, since
+any app or web page can open `expanse://` links.
 
 ## How it works
 
@@ -144,8 +146,9 @@ Expanse runs on a stock, SIP-enabled Mac. That shapes everything:
 
 Window pictures exist only in memory, on your Mac, to draw the canvas. Nothing is recorded,
 written to disk or sent anywhere. Expanse makes no network connections. The only file it writes
-is its layout (window positions and sizes, app names and window titles) in
-`~/Library/Application Support/Expanse/layout.json`.
+is its layout in `~/Library/Application Support/Expanse/layout.json`: window positions and sizes,
+app names, and a hash of each window's title (enough to recognise the window next time, not to
+read the title). Window titles are redacted in the system log.
 
 ## Limitations
 
@@ -165,7 +168,7 @@ log stream --level info --predicate 'subsystem == "com.invignation.expanse"'
 ```
 
 The log shows every window Expanse moves, resizes or follows, glide timings, and anything slow.
-`open "expanse://dump"` writes the full layout to it.
+With `debugURLCommands` on, `open "expanse://dump"` writes the full layout to it.
 
 ## Thanks
 

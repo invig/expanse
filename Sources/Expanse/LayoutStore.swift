@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 
 /// Saves the canvas (camera + where each window lives) to
 /// ~/Library/Application Support/Expanse/layout.json so it survives restarts.
@@ -58,8 +59,18 @@ enum LayoutStore {
 
     /// Picks the saved entry for a window: same app and title first, then same app.
     /// Matched entries are removed so two windows never claim the same slot.
+    /// Window titles can be private (document names, mail subjects), so the layout file stores
+    /// a hash: enough to recognise the same window next time, not to read the title.
+    static func titleKey(_ title: String) -> String {
+        guard !title.isEmpty else { return "" }
+        let digest = SHA256.hash(data: Data(title.utf8))
+        return "sha256:" + digest.prefix(12).map { String(format: "%02x", $0) }.joined()
+    }
+
     static func takeMatch(bundleID: String, title: String, from pool: inout [SavedLayout.Window]) -> SavedLayout.Window? {
-        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && $0.title == title }) {
+        let key = titleKey(title)
+        // Older layout files stored the title itself.
+        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && ($0.title == key || $0.title == title) }) {
             return pool.remove(at: i)
         }
         if let i = pool.firstIndex(where: { $0.bundleID == bundleID }) {

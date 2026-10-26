@@ -24,6 +24,7 @@ final class CanvasController: NSObject {
 
     private var syncTimer: Timer?
     private var syncing = false
+    private var syncRetryScheduled = false
     private var pendingSyncCompletions: [() -> Void] = []
     private var firstSync = true
     private var resolutionWork: DispatchWorkItem?
@@ -44,7 +45,19 @@ final class CanvasController: NSObject {
     }
     /// Canvas spots of windows that disappeared (minimized, app hidden, closed). Window IDs
     /// are never reused, so a returning ID means the same window coming back.
-    private var recentlyRemoved: [CGWindowID: CGRect] = [:]
+    private var recentlyRemoved: [CGWindowID: Departed] = [:]
+
+    /// Everything Expanse knew about a window that went out of view (app hidden, minimised, on
+    /// another Space) or closed, so it comes back exactly as it was and is still restored on quit.
+    private struct Departed {
+        let pid: pid_t
+        let canvasFrame: CGRect
+        let originalFrame: CGRect
+        let preferredSize: CGSize
+        let home: CGPoint?
+        let parked: Bool
+        let at: Date
+    }
     private var wallpaperTimer: Timer?
     private var lastWallpaperRefresh: CFTimeInterval = 0
 
@@ -88,7 +101,7 @@ final class CanvasController: NSObject {
         // With the lid shut and no external display there can briefly be no screen at all;
         // keep using the last one until a screen appears.
         if let s = NSScreen.screens.first ?? NSScreen.main { lastScreen = s; return s }
-        return lastScreen!
+        return lastScreen ?? NSScreen()
     }
     private var lastScreen: NSScreen? = NSScreen.screens.first ?? NSScreen.main
 
@@ -148,6 +161,7 @@ final class CanvasController: NSObject {
     }
 
     private func displaysWillChange() {
+        guard !isPaused else { return }
         suspendTracking = true
         settleUntil = .distantFuture
         relayoutWork.forEach { $0.cancel() }
@@ -167,6 +181,7 @@ final class CanvasController: NSObject {
     /// Wait for macOS to finish rearranging windows, then put every window back where the
     /// canvas says. A second pass catches windows macOS moved late.
     private func scheduleRelayout(delay: TimeInterval = 1.0) {
+        guard !isPaused else { return }
         suspendTracking = true
         relayoutWork.forEach { $0.cancel() }
         let first = DispatchWorkItem { [weak self] in self?.relayout(final: false) }
@@ -177,6 +192,7 @@ final class CanvasController: NSObject {
     }
 
     private func relayout(final: Bool) {
+        guard !isPaused else { return }
         // No display at all (lid shut, nothing plugged in yet): wait for one.
         guard !NSScreen.screens.isEmpty else {
             logger.info("no display yet; waiting")
@@ -252,6 +268,9 @@ final class CanvasController: NSObject {
     // MARK: Lifecycle
 
     func start() {
+        // A beachballing app must not freeze Expanse (and its full-screen overlay): every
+        // Accessibility call gives up after half a second.
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.5)
         lastViewportSize = viewSize
         // macOS can still shuffle windows while the Mac sits at the lock screen; put everything
         // back once you're in.
@@ -267,6 +286,13 @@ final class CanvasController: NSObject {
         syncTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.sync() }
         magnifyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .magnify) { [weak self] event in
             self?.handleGlobalPinch(event)
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification,
+                                                          object: nil, queue: .main) { [weak self] note in
+            // A pid can be reused by a later app; don't hand it this app's observer.
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                self?.observers[app.processIdentifier] = nil
+            }
         }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appActivated(_:)),
                                                           name: NSWorkspace.didActivateApplicationNotification, object: nil)
@@ -290,7 +316,7 @@ final class CanvasController: NSObject {
 
     func refreshWallpaper() {
         lastWallpaperRefresh = CACurrentMediaTime()
-        guard Wallpaper.enabled else { view.setWallpaper(nil); return }
+        guard Wallpaper.enabled, CGPreflightScreenCaptureAccess() else { view.setWallpaper(nil); return }
         Wallpaper.capture(screen: screen) { [weak self] image in
             guard Wallpaper.enabled else { return }
             self?.view.setWallpaper(image)
@@ -481,7 +507,9 @@ final class CanvasController: NSObject {
     /// `cleanExit` is true only when windows have just been put back in their original
     /// macOS layout (quit / pause). Otherwise the saved originals are what a crash recovery needs.
     func save(cleanExit: Bool = false) {
-        guard !isPaused else { return }
+        // Before the first successful window scan (e.g. no Screen Recording yet) `windows` is
+        // empty, and saving would wipe the layout and the crash-recovery originals.
+        guard !isPaused, hasSynced else { return }
         // While no window is shrunk for a smaller screen, the canvas layout is the home layout.
         if !isDerived { windows.forEach { $0.home = $0.canvasFrame.origin } }
         // Saved positions are canvas coordinates relative to a scale-1 camera.
@@ -491,7 +519,7 @@ final class CanvasController: NSObject {
             centerX: Double(center.x), centerY: Double(center.y),
             cleanExit: cleanExit,
             windows: windows.map {
-                SavedLayout.Window(bundleID: $0.bundleID, appName: $0.appName, title: $0.title,
+                SavedLayout.Window(bundleID: $0.bundleID, appName: $0.appName, title: LayoutStore.titleKey($0.title),
                                    x: Double($0.canvasFrame.minX), y: Double($0.canvasFrame.minY),
                                    w: Double($0.canvasFrame.width), h: Double($0.canvasFrame.height),
                                    hx: Double(($0.home ?? $0.canvasFrame.origin).x),
@@ -499,7 +527,7 @@ final class CanvasController: NSObject {
                                    pw: Double($0.preferredSize.width), ph: Double($0.preferredSize.height),
                                    ox: Double($0.originalFrame.minX), oy: Double($0.originalFrame.minY),
                                    ow: Double($0.originalFrame.width), oh: Double($0.originalFrame.height))
-            })
+            } + savedPool.prefix(60))   // windows not open right now keep their saved spots
         guard let data = try? JSONEncoder().encode(layout), data != lastSavedLayout else { return }
         lastSavedLayout = data
         LayoutStore.save(layout)
@@ -527,7 +555,9 @@ final class CanvasController: NSObject {
     /// Put every window back exactly where macOS had it before Expanse, and stop managing.
     func pause() {
         guard !isPaused else { return }
+        guard !gliding else { whenIdle { [weak self] in self?.pause() }; return }
         cancelAnimation()
+        settleBackgroundMoves()
         if isActive {
             isActive = false
             camera = Camera.centered(on: camera.center(in: viewSize), scale: 1, viewSize: viewSize)
@@ -548,6 +578,7 @@ final class CanvasController: NSObject {
         saved = LayoutStore.load()
         savedPool = saved?.windows ?? []
         firstSync = true
+        hasSynced = false
         lastSavedLayout = nil
         overlay.level = OverlayWindow.backdropLevel
         overlay.orderFrontRegardless()
@@ -555,20 +586,52 @@ final class CanvasController: NSObject {
         logger.info("resumed")
     }
 
+    /// Finish any window moves still running on the background queue, and stop a glide from
+    /// handing back afterwards, so nothing lands after windows have been restored.
+    private func settleBackgroundMoves() {
+        glideGeneration += 1
+        gliding = false
+        axQueue.sync {}
+    }
+
     private func restoreOriginals() {
-        let vp = viewport
         for w in windows {
             guard let ax = w.ax else { continue }
-            var r = w.originalFrame
-            guard r.width > 0, r.height > 0 else { continue }
-            // If the original spot is gone (smaller screen now), bring it back into view.
-            if !r.insetBy(dx: 40, dy: 40).intersects(vp) {
-                r.origin = CGPoint(x: vp.midX - r.width / 2, y: vp.minY + 40)
-            }
-            if r.size != w.canvasFrame.size { AX.setSize(ax, r.size) }
-            AX.setPosition(ax, r.origin)
+            restore(ax, to: w.originalFrame, currentSize: w.canvasFrame.size)
             w.lastPlaced = nil
             w.parked = false
+        }
+        // Windows out of view right now (hidden app, minimised, another Space) still go back.
+        for (id, gone) in recentlyRemoved {
+            guard let ax = AX.windows(pid: gone.pid).first(where: { AX.windowID($0) == id }) else { continue }
+            restore(ax, to: gone.originalFrame, currentSize: AX.size(ax) ?? gone.canvasFrame.size)
+        }
+        recentlyRemoved = [:]
+    }
+
+    private func restore(_ ax: AXUIElement, to original: CGRect, currentSize: CGSize) {
+        var r = original
+        guard r.width > 0, r.height > 0 else { return }
+        let vp = viewport
+        // If the original spot is gone (smaller screen now), bring it back into view.
+        if !r.insetBy(dx: 40, dy: 40).intersects(vp) {
+            r.origin = CGPoint(x: vp.midX - r.width / 2, y: vp.minY + 40)
+        }
+        // Move first: macOS won't grow a window past the screen edge from the parking corner.
+        AX.setPosition(ax, r.origin)
+        if r.size != currentSize {
+            AX.setSize(ax, r.size)
+            AX.setPosition(ax, r.origin)
+        }
+    }
+
+    /// Run `action` now, or once the glide in flight has handed back. Camera actions mid-glide
+    /// would cut it short and leave the overlay stuck up.
+    func whenIdle(attempts: Int = 60, _ action: @escaping () -> Void) {
+        if !gliding { action(); return }
+        guard attempts > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.whenIdle(attempts: attempts - 1, action)
         }
     }
 
@@ -576,9 +639,18 @@ final class CanvasController: NSObject {
 
     func sync(completion: (() -> Void)? = nil) {
         guard !isPaused else { return }
+        // Until Screen Recording is in effect (granted, and Expanse relaunched), any
+        // ScreenCaptureKit call makes macOS show its permission prompt again, every time.
+        guard CGPreflightScreenCaptureAccess() else { completion?(); return }
         // Window discovery queries every app; don't let it land in the middle of a glide.
         if gliding || view.isDragging || (animation != nil && completion == nil) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.sync(completion: completion) }
+            if let completion { pendingSyncCompletions.append(completion) }
+            guard !syncRetryScheduled else { return }
+            syncRetryScheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.syncRetryScheduled = false
+                self?.sync()
+            }
             return
         }
         if let completion { pendingSyncCompletions.append(completion) }
@@ -702,7 +774,7 @@ final class CanvasController: NSObject {
             view.render()
         }
         firstSync = false
-        savedPool = []
+        hasSynced = true
         if isActive { view.render() }
         scheduleSave()
     }
@@ -723,11 +795,16 @@ final class CanvasController: NSObject {
         }
 
         var restored = false
-        let returning = recentlyRemoved[w.id] != nil
+        var returning = recentlyRemoved[w.id] != nil
         if let back = recentlyRemoved.removeValue(forKey: w.id) {
-            // Came back (minimized, hidden, briefly missing during a display change): same spot.
-            w.canvasFrame.origin = back.origin
-        } else if firstSync, let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, from: &savedPool) {
+            // Came back (minimised, hidden, another Space, briefly missing during a display
+            // change): same spot, same macOS original and chosen size.
+            w.canvasFrame.origin = back.canvasFrame.origin
+            w.originalFrame = back.originalFrame
+            w.preferredSize = back.preferredSize
+            w.home = back.home
+        } else if let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, from: &savedPool) {
+            // A saved spot: at launch, or an app opened later that had windows last time.
             w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
             if let pw = match.pw, let ph = match.ph { w.preferredSize = CGSize(width: pw, height: ph) }
             if let hx = match.hx, let hy = match.hy { w.home = CGPoint(x: hx, y: hy) }
@@ -738,6 +815,7 @@ final class CanvasController: NSObject {
                 w.canvasFrame.size = actual
                 logger.info("restore size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(f.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
             }
+            if !firstSync { returning = true }
             if saved?.cleanExit != true, let ox = match.ox, let oy = match.oy, let ow = match.ow, let oh = match.oh {
                 // Last run didn't put windows back; its record of the macOS layout is the real one.
                 w.originalFrame = CGRect(x: ox, y: oy, width: ow, height: oh)
@@ -776,7 +854,7 @@ final class CanvasController: NSObject {
         }
         w.capture.start(window: sc, pixelSize: pixelSize(for: w), fps: isActive ? Self.canvasFPS : Self.liveFPS)
         observe(w)
-        logger.info("tracking \(w.appName, privacy: .public) [\(w.id)] \(w.title, privacy: .public)")
+        logger.info("tracking \(w.appName, privacy: .public) [\(w.id)] \(w.title, privacy: .private)")
         if arriving { arrive(w, anchor: anchor, live: live, returning: returning) }
         return restored
     }
@@ -787,6 +865,8 @@ final class CanvasController: NSObject {
     /// A live-mode glide is running: the overlay is up, but it isn't canvas mode.
     private(set) var gliding = false
     private var glideGeneration = 0
+    /// At least one window scan has succeeded since launch / resume.
+    private var hasSynced = false
     /// The 100% view you left when zooming out; leaving the canvas returns there unless you've
     /// panned or zoomed since.
     private var returnCamera: Camera?
@@ -928,6 +1008,7 @@ final class CanvasController: NSObject {
     /// Shown zoomed out.
     func tidy() {
         guard !isPaused else { return }
+        guard !gliding else { whenIdle { [weak self] in self?.tidy() }; return }
         guard isActive else {
             enter(zoomOut: false)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
@@ -1183,7 +1264,16 @@ final class CanvasController: NSObject {
         observers[w.pid]?.forget(w.id)
         view.removeNode(w.node)
         windows.removeAll { $0 === w }
-        if !isPaused { recentlyRemoved[w.id] = w.canvasFrame }
+        if !isPaused {
+            recentlyRemoved[w.id] = Departed(pid: w.pid, canvasFrame: w.canvasFrame, originalFrame: w.originalFrame,
+                                             preferredSize: w.preferredSize, home: w.home, parked: w.parked, at: Date())
+            // Closed windows never come back; don't keep them forever.
+            let weekAgo = Date().addingTimeInterval(-7 * 24 * 3600)
+            recentlyRemoved = recentlyRemoved.filter { $0.value.at > weekAgo }
+            if recentlyRemoved.count > 300, let oldest = recentlyRemoved.min(by: { $0.value.at < $1.value.at })?.key {
+                recentlyRemoved.removeValue(forKey: oldest)
+            }
+        }
         if view.hovered === w { view.hovered = nil }
         if isActive { view.render() }
     }
@@ -1413,6 +1503,8 @@ final class CanvasController: NSObject {
     }
 
     func shutdown() {
+        cancelAnimation()
+        settleBackgroundMoves()
         if !isPaused {
             save(cleanExit: true)
             isPaused = true

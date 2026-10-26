@@ -7,6 +7,15 @@ import SwiftUI
 enum Onboarding {
     static let doneKey = "onboardingDone"
     private static var window: NSWindow?
+    private static let closer = Closer()
+
+    /// Closing with the title-bar button releases the window, its view and the permission timer.
+    private final class Closer: NSObject, NSWindowDelegate {
+        func windowWillClose(_ notification: Notification) {
+            Onboarding.window?.contentView = nil
+            Onboarding.window = nil
+        }
+    }
 
     /// First launch, or a permission is missing.
     static var needed: Bool {
@@ -22,7 +31,6 @@ enum Onboarding {
         let view = OnboardingView {
             UserDefaults.standard.set(true, forKey: doneKey)
             window?.close()
-            window = nil
             onFinish()
         }
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 540),
@@ -34,6 +42,7 @@ enum Onboarding {
         // Above the canvas overlay, which sits just under the menu bar while zoomed out.
         w.level = .modalPanel
         w.contentView = NSHostingView(rootView: view)
+        w.delegate = closer
         w.center()
         window = w
         NSApp.activate(ignoringOtherApps: true)
@@ -142,7 +151,11 @@ struct OnboardingView: View {
                     .keyboardShortcut(.leftArrow, modifiers: [])
             }
             Button(page == pages - 1 ? "Start using Expanse" : "Continue") {
-                if page == pages - 1 { finish() } else { withAnimation(.easeOut(duration: 0.25)) { page += 1 } }
+                // Screen Recording only takes effect after a relaunch; do it for them.
+                if page == pages - 1 {
+                    finish()
+                    if permissions.screenRecordingRequested && !permissions.screenRecording { permissions.relaunch() }
+                } else { withAnimation(.easeOut(duration: 0.25)) { page += 1 } }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -273,10 +286,11 @@ private struct PermissionsPage: View {
                            action: model.requestAccessibility)
             PermissionCard(symbol: "rectangle.dashed.badge.record", title: "Screen Recording",
                            why: "To show live pictures of your windows while you're zoomed out. On screen at 100%, windows aren't captured.",
-                           granted: model.screenRecording, actionTitle: "Allow",
-                           action: model.requestScreenRecording,
-                           footnote: model.screenRecordingRequested ? "Switched it on? Expanse needs a quick relaunch." : nil,
-                           footnoteAction: ("Reopen Expanse", model.relaunch))
+                           granted: model.screenRecording,
+                           actionTitle: model.screenRecordingRequested ? "Reopen Expanse" : "Allow",
+                           action: model.screenRecordingRequested ? model.relaunch : model.requestScreenRecording,
+                           footnote: model.screenRecordingRequested
+                               ? "Once the switch is on, reopen Expanse: macOS only applies it after a relaunch." : nil)
             Text("In each list, turn on the switch next to Expanse. If it's missing, press + and choose Expanse.app.")
                 .font(.system(size: 12)).foregroundStyle(.secondary).padding(.top, 4)
         }
