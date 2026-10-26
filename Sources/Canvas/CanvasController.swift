@@ -751,6 +751,11 @@ final class CanvasController: NSObject {
     /// A live-mode glide is running: the overlay is up, but it isn't canvas mode.
     private(set) var gliding = false
     private var glideGeneration = 0
+    /// The 100% view you left when zooming out; leaving the canvas returns there unless you've
+    /// panned or zoomed since.
+    private var returnCamera: Camera?
+
+    func cameraMovedByUser() { returnCamera = nil }
     /// Where the glide in flight is heading.
     private var glideTarget: ManagedWindow?
 
@@ -1133,7 +1138,11 @@ final class CanvasController: NSObject {
             self.overlay.level = OverlayWindow.canvasLevel
             self.overlay.makeKeyAndOrderFront(nil)
             self.overlay.makeFirstResponder(self.view)
-            if zoomOut { self.animate(to: self.overviewCamera()) }
+            self.returnCamera = nil
+            if zoomOut {
+                self.returnCamera = self.camera
+                self.animate(to: self.overviewCamera())
+            }
         }
     }
 
@@ -1146,9 +1155,10 @@ final class CanvasController: NSObject {
             fitToScreen(focus)
             target = focusCamera(for: focus)
         } else {
-            target = Camera.centered(on: camera.center(in: viewSize), scale: 1, viewSize: viewSize)
+            // Straight back where you were, unless you've moved around since zooming out.
+            target = returnCamera ?? Camera.centered(on: camera.center(in: viewSize), scale: 1, viewSize: viewSize)
         }
-        animate(to: target, duration: 0.32) { [weak self] in
+        animate(to: target, duration: 0.18) { [weak self] in
             guard let self else { return }
             self.commit()
             let toFocus = focus ?? self.windows.last(where: { !$0.parked })
@@ -1325,6 +1335,7 @@ final class CanvasController: NSObject {
     // MARK: Camera manipulation (called by the view)
 
     func pan(by d: CGVector) {
+        returnCamera = nil
         guard isActive else { return }
         cancelAnimation()
         camera.pan(by: d)
@@ -1332,6 +1343,7 @@ final class CanvasController: NSObject {
     }
 
     func zoom(by factor: CGFloat, at anchor: CGPoint) {
+        returnCamera = nil
         guard isActive else { return }
         cancelAnimation()
         camera.zoom(to: camera.scale * factor, anchor: anchor)
@@ -1339,6 +1351,7 @@ final class CanvasController: NSObject {
     }
 
     func center(on canvasPoint: CGPoint) {
+        returnCamera = nil
         guard isActive else { return }
         cancelAnimation()
         camera = Camera.centered(on: canvasPoint, scale: camera.scale, viewSize: viewSize)
@@ -1346,6 +1359,7 @@ final class CanvasController: NSObject {
     }
 
     func toggleOverview(at anchor: CGPoint) {
+        returnCamera = nil
         if camera.scale < 0.95 {
             var target = camera
             target.zoom(to: 1, anchor: anchor)
@@ -1356,6 +1370,7 @@ final class CanvasController: NSObject {
     }
 
     func zoomAnimated(to scale: CGFloat) {
+        returnCamera = nil
         var target = camera
         target.zoom(to: scale, anchor: CGPoint(x: viewSize.width / 2, y: viewSize.height / 2))
         animate(to: target)
@@ -1368,7 +1383,7 @@ final class CanvasController: NSObject {
 
     // MARK: Animation
 
-    func animate(to target: Camera, duration: CFTimeInterval = 0.38, completion: (() -> Void)? = nil) {
+    func animate(to target: Camera, duration: CFTimeInterval = 0.22, completion: (() -> Void)? = nil) {
         animation = CameraAnimation(from: camera, to: target, start: CACurrentMediaTime(), duration: duration, completion: completion)
         if displayLink == nil {
             let link = view.displayLink(target: self, selector: #selector(tick(_:)))

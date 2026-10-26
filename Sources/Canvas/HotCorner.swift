@@ -27,7 +27,7 @@ final class HotCorner {
     private var timer: Timer?
     private var enteredAt: CFTimeInterval?
     private var armed = true
-    private static let dwell: CFTimeInterval = 0.15
+    private static let dwell: CFTimeInterval = 0.06
     private static let tolerance: CGFloat = 3
 
     init() {

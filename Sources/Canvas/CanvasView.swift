@@ -402,6 +402,7 @@ final class CanvasView: NSView {
         case kVK_Return:
             controller.exit(focus: hovered ?? controller.windows.last)
         case kVK_ANSI_0:
+            controller.cameraMovedByUser()
             controller.animate(to: controller.fitCamera())
         case kVK_ANSI_T:
             controller.tidy()
@@ -410,10 +411,12 @@ final class CanvasView: NSView {
         case kVK_ANSI_Minus:
             var t = controller.camera
             t.zoom(to: t.scale / 1.5, anchor: center)
+            controller.cameraMovedByUser()
             controller.animate(to: t, duration: 0.22)
         case kVK_ANSI_Equal:
             var t = controller.camera
             t.zoom(to: t.scale * 1.5, anchor: center)
+            controller.cameraMovedByUser()
             controller.animate(to: t, duration: 0.22)
         case kVK_ANSI_W where e.modifierFlags.contains(.command):
             if let w = hovered { controller.close(w) }
