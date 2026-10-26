@@ -11,7 +11,8 @@ final class HotKey {
         HotKey.handlers[id] = handler
         HotKey.installHandlerIfNeeded()
         let hotKeyID = EventHotKeyID(signature: OSType(0x434E_5653), id: id) // 'CNVS'
-        RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &ref)
+        let status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), hotKeyID, GetApplicationEventTarget(), 0, &ref)
+        logger.info("hotkey \(id) register status \(status)")
     }
 
     deinit {
@@ -27,6 +28,7 @@ final class HotKey {
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                               nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
             let id = hotKeyID.id
+            logger.info("hotkey \(id) pressed")
             DispatchQueue.main.async { HotKey.handlers[id]?() }
             return noErr
         }, 1, &spec, nil, nil)

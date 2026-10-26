@@ -49,8 +49,12 @@ final class ManagedWindow {
     func place(at point: CGPoint) {
         guard let ax else { return }
         if let last = lastPlaced, last.distance(to: point) < 0.5 { return }
+        let before = AX.position(ax)
         AX.setPosition(ax, point)
         lastPlaced = AX.position(ax) ?? point
+        if let before, before.distance(to: lastPlaced!) >= 1 {
+            logger.info("move \(self.appName, privacy: .public)[\(self.id)] \(NSStringFromPoint(before), privacy: .public) -> \(NSStringFromPoint(self.lastPlaced!), privacy: .public) (asked \(NSStringFromPoint(point), privacy: .public))")
+        }
     }
 }
 

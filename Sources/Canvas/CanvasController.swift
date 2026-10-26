@@ -121,6 +121,7 @@ final class CanvasController: NSObject {
     private var settleUntil = Date.distantPast
     private var reassertWork: DispatchWorkItem?
     private var focusSettleWork: DispatchWorkItem?
+    private var lastHiddenHint: CGWindowID?
     static let settleDuration: TimeInterval = 6
 
     private func registerDisplayCallback() {
@@ -269,9 +270,15 @@ final class CanvasController: NSObject {
               let w = windows.first(where: { $0.id == id }) else { return }
         let r = camera.toView(w.canvasFrame)
         let fullyVisible = !w.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r)
-        // With auto-centre off, windows already (partly) on screen stay put so several apps can
-        // be used side by side; a window that's fully hidden is still brought into view.
-        if !fullyVisible && (autoCentre || w.parked) { glide(to: w) }
+        guard !fullyVisible else { return }
+        if autoCentre {
+            glide(to: w)
+        } else if w.parked, lastHiddenHint != w.id {
+            // Off means off: macOS often focuses a hidden window by itself (after a close or
+            // minimize), so never move the canvas; just say where the window went.
+            lastHiddenHint = w.id
+            Toast.show("\(w.appName) is off-screen · ⌥` to find it")
+        }
     }
 
     /// Center `w` at 100% and make it the active window, from either mode.
@@ -283,6 +290,7 @@ final class CanvasController: NSObject {
     /// with the real windows), animates, commits, then sinks again. It never takes key focus,
     /// so typing keeps going to the window that was just clicked.
     private func glide(to w: ManagedWindow) {
+        logger.info("glide to \(w.appName, privacy: .public)[\(w.id)]")
         guard !isActive, animation == nil else { return }
         isActive = true
         bringToFront(w)
@@ -342,6 +350,7 @@ final class CanvasController: NSObject {
             if let last = w.lastPlaced, last.distance(to: pos) < 2 {
                 // Our own placement.
             } else {
+                logger.info("follow \(w.appName, privacy: .public)[\(w.id)] moved to \(NSStringFromPoint(pos), privacy: .public) (last placed \(w.lastPlaced.map { NSStringFromPoint($0) } ?? "never", privacy: .public))")
                 w.lastPlaced = nil
                 w.parked = false
                 w.canvasFrame.origin = canvasPoint(forGlobal: pos)
@@ -615,9 +624,12 @@ final class CanvasController: NSObject {
     /// New windows go to an empty spot next to what you were working on; windows coming back
     /// from minimize / hide go back where they were.
     private func arrive(_ w: ManagedWindow, anchor: ManagedWindow?, live: Bool) {
+        var returning = false
         if let back = recentlyRemoved.removeValue(forKey: w.id) {
             w.canvasFrame.origin = back.origin
-        } else if AX.subrole(w.ax) == kAXStandardWindowSubrole as String, let spot = freeSpot(for: w, near: anchor) {
+            returning = true
+        } else if AX.subrole(w.ax) == kAXStandardWindowSubrole as String,
+                  let spot = freeSpot(for: w, near: anchor, onScreenOnly: !autoCentre) {
             w.canvasFrame.origin = spot
             logger.info("placed new window \(w.appName, privacy: .public) at \(NSStringFromPoint(spot), privacy: .public)")
         } else {
@@ -628,6 +640,10 @@ final class CanvasController: NSObject {
         if CGRect(origin: .zero, size: viewSize).contains(r) {
             w.place(at: CGPoint(x: (r.minX + viewport.minX).rounded(), y: (r.minY + viewport.minY).rounded()))
             w.parked = false
+            view.render()
+        } else if returning {
+            // Back from minimize / hide: quietly return to its spot; focus decides whether to glide.
+            commit()
             view.render()
         } else {
             glideWhenIdle(to: w)
@@ -650,7 +666,7 @@ final class CanvasController: NSObject {
 
     /// The nearest canvas position for `w` that overlaps nothing: beside, below, left of or above
     /// existing windows, closest to the anchor. Spots already on screen win.
-    private func freeSpot(for w: ManagedWindow, near anchor: ManagedWindow?) -> CGPoint? {
+    private func freeSpot(for w: ManagedWindow, near anchor: ManagedWindow?, onScreenOnly: Bool) -> CGPoint? {
         let others = windows.filter { $0 !== w }.map(\.canvasFrame)
         guard !others.isEmpty else { return nil }
         let gap: CGFloat = 24
@@ -672,6 +688,7 @@ final class CanvasController: NSObject {
         for (origin, bias) in candidates {
             let r = CGRect(origin: origin, size: size)
             if others.contains(where: { $0.insetBy(dx: -gap / 2, dy: -gap / 2).intersects(r) }) { continue }
+            if onScreenOnly && !visible.contains(r) { continue }
             let score = r.center.distance(to: target) + bias + (visible.contains(r) ? 0 : 1500)
             if score < (best?.1 ?? .infinity) { best = (origin, score) }
         }
@@ -858,6 +875,7 @@ final class CanvasController: NSObject {
                             height: min(w.preferredSize.height, viewSize.height - margin * 2).rounded())
         guard let ax = w.ax,
               abs(target.width - w.canvasFrame.width) > 1 || abs(target.height - w.canvasFrame.height) > 1 else { return }
+        logger.info("resize \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(target), privacy: .public)")
         AX.setSize(ax, target)
         let actual = AX.size(ax) ?? target
         w.lastSized = actual
