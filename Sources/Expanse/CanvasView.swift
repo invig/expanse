@@ -18,6 +18,7 @@ final class CanvasView: NSView {
     private(set) var selected = Set<CGWindowID>()
     private var spaceHeld = false
     private let minimap = Minimap()
+    private let spacesBar = SpacesBar()
     var hovered: ManagedWindow?
 
     private enum Drag {
@@ -61,6 +62,7 @@ final class CanvasView: NSView {
             root.addSublayer(l)
         }
         root.addSublayer(minimap)
+        root.addSublayer(spacesBar)
         applyAppearance()
     }
 
@@ -78,6 +80,7 @@ final class CanvasView: NSView {
         // Pinned exactly where the real desktop picture is: the top strip sits under the menu bar.
         wallpaper.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + menuBarHeight)
         minimap.frame.origin = CGPoint(x: bounds.maxX - Minimap.size.width - 16, y: 16)
+        placeSpacesBar()
         CATransaction.commit()
         render()
     }
@@ -86,6 +89,7 @@ final class CanvasView: NSView {
         super.viewDidChangeBackingProperties()
         let s = window?.backingScaleFactor ?? 2
         minimap.setContentsScale(s)
+        spacesBar.setContentsScale(s)
         controller?.windows.forEach { $0.node.setContentsScale(s) }
     }
 
@@ -95,6 +99,19 @@ final class CanvasView: NSView {
     }
 
     private var isDark: Bool { effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
+
+    /// The Spaces beside the minimap (see SpacesBar).
+    func updateSpaces(_ spaces: [Spaces.Space], active: UInt64?) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        spacesBar.update(spaces: spaces, active: active, wallpaper: wallpaper.contents.map { $0 as! CGImage })
+        placeSpacesBar()
+        CATransaction.commit()
+    }
+
+    private func placeSpacesBar() {
+        spacesBar.frame.origin = CGPoint(x: minimap.frame.minX - 12 - spacesBar.bounds.width, y: 16)
+    }
 
     func setWallpaper(_ image: CGImage?) {
         CATransaction.begin()
@@ -244,6 +261,13 @@ final class CanvasView: NSView {
         return minimap.bounds.contains(p) ? p : nil
     }
 
+    /// Over the Spaces bar: which tile, if any (`nil` tile over the bar's background).
+    private func spacesBarHit(_ e: NSEvent) -> (over: Bool, tile: Int?) {
+        guard let root = layer, !spacesBar.isHidden else { return (false, nil) }
+        let p = spacesBar.convert(convert(e.locationInWindow, from: nil), from: root)
+        return (spacesBar.bounds.contains(p), spacesBar.tile(at: p))
+    }
+
     // MARK: Trackpad
 
     override func scrollWheel(with e: NSEvent) {
@@ -282,6 +306,12 @@ final class CanvasView: NSView {
         }
         controller.cancelAnimation()
         dragged = false
+        let bar = spacesBarHit(e)
+        if bar.over {
+            drag = .none
+            if let i = bar.tile { controller.switchToSpace(spacesBar.spaces[i]) }
+            return
+        }
         if let mp = minimapPoint(e) {
             drag = .minimap
             controller.center(on: minimap.canvasPoint(at: mp))
@@ -405,7 +435,9 @@ final class CanvasView: NSView {
 
     override func mouseMoved(with e: NSEvent) {
         guard controller.isActive else { return }
-        let w = minimapPoint(e) == nil ? controller.window(atView: point(e)) : nil
+        let bar = spacesBarHit(e)
+        spacesBar.hovered = bar.tile
+        let w = minimapPoint(e) == nil && !bar.over ? controller.window(atView: point(e)) : nil
         if w !== hovered {
             hovered?.node.label.string = hovered?.appName
             hovered = w

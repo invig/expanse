@@ -364,6 +364,7 @@ final class CanvasController: NSObject {
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
             self?.refreshWallpaper()
+            self?.refreshSpaces()
             self?.syncSoon()
         }
     }
@@ -801,18 +802,25 @@ final class CanvasController: NSObject {
         let s0 = CACurrentMediaTime()
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
             let s1 = CACurrentMediaTime()
+            // Full-screen windows have Spaces of their own and stay off the canvas. On a full-screen
+            // app's Space, the canvas's windows aren't on screen at all: the scan can't say anything
+            // about them, so it isn't applied (or they'd all be dropped, and the app's adopted).
+            let inFullScreenSpace = Spaces.inFullScreenSpace
+            let fullScreen = Spaces.fullScreenWindows()
+            let found = (content?.windows ?? []).filter { !fullScreen.contains($0.windowID) }
             // Ask apps about their windows here, off the main thread: slow apps take 100ms+ to
             // answer, which would otherwise stall a glide or a key press.
-            var ax = Self.axSnapshot(for: content?.windows ?? [], input: input)
+            var ax = inFullScreenSpace ? AXSnapshot() : Self.axSnapshot(for: found, input: input)
             if input.live { ax.order = Self.windowServerOrder() }
             let s2 = CACurrentMediaTime()
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.syncing = false
-                self.windowKinds = ax.kinds
+                if !inFullScreenSpace { self.windowKinds = ax.kinds }
                 // Asked for while this scan ran, so it may have missed what that was about.
                 var again = self.syncAgain
-                if let content, !self.isPaused {
+                self.refreshSpaces()
+                if content != nil, !self.isPaused, !inFullScreenSpace {
                     let s3 = CACurrentMediaTime()
                     // Windows moved (a glide, leaving the canvas) or the camera changed while the
                     // scan ran: its frames say where windows were, which would read as you moving
@@ -820,7 +828,7 @@ final class CanvasController: NSObject {
                     let liveNow = !self.isActive && !self.suspendTracking
                     let stale = input.live != liveNow
                         || (liveNow && (input.moves != ManagedWindow.moves || input.camera != self.camera))
-                    self.apply(content.windows, ax: ax, stale: stale)
+                    self.apply(found, ax: ax, stale: stale)
                     // A window still opening (see axSnapshot) is looked at again shortly too.
                     again = again || stale || ax.pending
                     let ms = Int((CACurrentMediaTime() - s0) * 1000)
@@ -2000,6 +2008,7 @@ final class CanvasController: NSObject {
         // first would stop streams still warm from the last time.
         if !zoomOut { updateStreaming() }
         if CACurrentMediaTime() - lastWallpaperRefresh > 30 { refreshWallpaper() }
+        refreshSpaces()
         NSApp.activate(ignoringOtherApps: true)
         overlay.level = OverlayWindow.canvasLevel
         overlay.makeKeyAndOrderFront(nil)
@@ -2011,8 +2020,48 @@ final class CanvasController: NSObject {
         }
     }
 
+    func refreshSpaces() {
+        let (spaces, active) = Spaces.list()
+        view.updateSpaces(spaces, active: active)
+    }
+
+    /// A tile in the Spaces bar: go to that Space. Focusing a window is what makes macOS switch
+    /// Spaces, so a full-screen app's gets its window focused; for a desktop, a window on it.
+    func switchToSpace(_ space: Spaces.Space) {
+        guard isActive, !gliding else { return }
+        if let pid = space.pid {
+            logger.info("switching to \(space.name, privacy: .public)'s full-screen Space")
+            let id = space.window
+            exit(then: { [weak self] in
+                self?.axQueue.async {
+                    let window = id.flatMap { id in AX.windows(pid: pid).first { AX.windowID($0) == id } }
+                    AX.focus(window, pid: pid)
+                }
+            })
+            return
+        }
+        // The canvas's own desktop: straight back to where you were.
+        let canvasDesktop = windows.last.flatMap { Spaces.spaces(of: $0.id).first }
+        if canvasDesktop == nil || canvasDesktop == space.id {
+            exit()
+            return
+        }
+        // Another desktop: any window on it.
+        guard let (pid, id) = Spaces.someWindow(on: space.id) else {
+            Toast.show("Nothing open on \(space.name) to switch to")
+            return
+        }
+        logger.info("switching to \(space.name, privacy: .public)")
+        exit(then: { [weak self] in
+            self?.axQueue.async {
+                AX.focus(AX.windows(pid: pid).first { AX.windowID($0) == id }, pid: pid)
+            }
+        })
+    }
+
     /// Animate to 100% (onto `focus` if given), put real windows where the camera says, drop the overlay.
-    func exit(focus: ManagedWindow? = nil) {
+    /// `then`, if given, runs instead of focusing a window (going to another Space, say).
+    func exit(focus: ManagedWindow? = nil, then: (() -> Void)? = nil) {
         guard isActive else { return }
         let target: Camera
         if let focus {
@@ -2028,8 +2077,9 @@ final class CanvasController: NSObject {
             // Like a glide's last step: input waits while the real windows move in the background.
             self.gliding = true
             self.commitAsync {
-                let toFocus = focus ?? self.windows.last(where: { !$0.parked })
-                if let toFocus {
+                if let then {
+                    then()
+                } else if let toFocus = focus ?? self.windows.last(where: { !$0.parked }) {
                     self.focusWindow(toFocus)
                 }
                 // Give the window server a beat to show the moved windows, then sink the overlay

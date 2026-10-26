@@ -107,6 +107,7 @@ tells you which ones are in the way; to change them yourself:
 | <kbd>Return</kbd> · <kbd>Esc</kbd> | Dive into the highlighted window · clear selection, then back to 100% |
 | Hover <kbd>×</kbd>, or <kbd>⌘</kbd><kbd>W</kbd> | Close the hovered window, or every selected window at once |
 | <kbd>⌥</kbd><kbd>⇧</kbd><kbd>`</kbd> | Auto-centre on or off. Off: clicking a window that's partly on screen leaves the canvas where it is, for side-by-side work |
+| Spaces, beside the minimap | Jump to a full-screen app (they live in Spaces of their own), or back to the canvas |
 | Menu bar icon | Hot corner choice, desktop picture, Pause, Tidy Up, Restore All Windows, Welcome & Shortcuts |
 
 ### Scripting
@@ -153,6 +154,10 @@ Expanse runs on a stock, SIP-enabled Mac. That shapes everything:
   silently get no frames. So the sixteen most visible windows stream; every other window in view
   is refreshed with one-off snapshots in turn, and new windows get their first picture the same
   way.
+- **Full-screen apps** get a Space of their own from macOS, so they aren't on the canvas: Expanse
+  leaves their windows alone, and lists the Spaces (read from the window server, the list
+  Mission Control shows) beside the minimap. Clicking one focuses its window, which is what
+  makes macOS switch there.
 - **Display changes.** While macOS reshuffles windows after a display change, Expanse ignores
   their moves, then restores sizes and derives the layout for the new screen from the home
   layout.
