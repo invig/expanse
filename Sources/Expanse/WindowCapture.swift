@@ -79,20 +79,21 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
-    /// Capture at a new size. ScreenCaptureKit can reconfigure a running stream, but a stream
-    /// asked to change size sends nothing until the change is through, which takes seconds when
-    /// several change at once; starting a new stream is quicker, and the layer keeps the last
-    /// picture meanwhile. Frame rates are set when a stream starts: a change takes seconds to
-    /// apply, by which time it rarely matters.
+    /// Capture at a new size or rate. ScreenCaptureKit can reconfigure a running stream, but a
+    /// stream asked to change size sends nothing until the change is through, which takes seconds
+    /// when several change at once, and a new frame rate takes seconds to apply; starting a new
+    /// stream is quicker, and the layer keeps the last picture meanwhile. So the stream restarts
+    /// for a new size, or a rate at least twice or half the old one (a glide's 30 fps back to
+    /// 2 at rest, say); smaller rate changes wait for the next restart.
     func update(pixelSize: CGSize, fps: Int) {
-        guard pixelSize != self.pixelSize else { return }
         self.pixelSize = pixelSize
         self.fps = fps
         restartIfResized()
     }
 
     private func restartIfResized() {
-        guard stream != nil, wanted, pixelSize != configured.size, let window else { return }
+        let rateChanged = fps >= configured.fps * 2 || fps * 2 <= configured.fps
+        guard stream != nil, wanted, pixelSize != configured.size || rateChanged, let window else { return }
         pause()
         start(window: window, pixelSize: pixelSize, fps: fps)
     }

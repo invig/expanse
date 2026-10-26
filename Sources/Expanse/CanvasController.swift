@@ -200,6 +200,9 @@ final class CanvasController: NSObject {
 
     private func relayout(final: Bool) {
         guard !isPaused else { return }
+        // Windows still moving in the background (the last pass, or a glide): wait for them, or
+        // they'd land where the last screen wanted them.
+        guard !gliding else { scheduleRelayout(delay: 0.5); return }
         // No display at all (lid shut, nothing plugged in yet): wait for one.
         guard !NSScreen.screens.isEmpty else {
             logger.info("no display yet; waiting")
@@ -400,14 +403,22 @@ final class CanvasController: NSObject {
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return }
         let pid = app.processIdentifier
         // Asking the app which window has focus waits on the app; do that off the main thread.
+        // An answer that comes back after you've moved on (another app, or a glide started) is
+        // dropped: acting on it would pull you back.
+        focusQuery += 1
+        let query = focusQuery
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             guard let focused = AX.focusedWindow(pid: pid), let id = AX.windowID(focused) else { return }
             DispatchQueue.main.async {
-                self?.focusedWindowByApp[pid] = id
-                self?.focusSettled(on: id)
+                guard let self, query == self.focusQuery,
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+                self.focusedWindowByApp[pid] = id
+                self.focusSettled(on: id)
             }
         }
     }
+
+    private var focusQuery = 0
 
     private func focusSettled(on id: CGWindowID) {
         guard !isActive, !isPaused, !suspendTracking, animation == nil,
@@ -436,6 +447,7 @@ final class CanvasController: NSObject {
     /// so typing keeps going to the window that was just clicked.
     private func glide(to w: ManagedWindow) {
         logger.info("glide to \(w.appName, privacy: .public)[\(w.id)]")
+        focusQuery += 1   // a focus answer still on its way is out of date now
         let t0 = CACurrentMediaTime()
         if !gliding {
             guard !isActive, animation == nil else { return }
@@ -771,7 +783,14 @@ final class CanvasController: NSObject {
                 self.windowKinds = ax.kinds
                 if let content, !self.isPaused {
                     let s3 = CACurrentMediaTime()
-                    self.apply(content.windows, ax: ax)
+                    // Windows moved (a glide, leaving the canvas) or the camera changed while the
+                    // scan ran: its frames say where windows were, which would read as you moving
+                    // them. Take only what's new from it and scan again.
+                    let liveNow = !self.isActive && !self.suspendTracking
+                    let stale = input.live != liveNow
+                        || (liveNow && (input.moves != ManagedWindow.moves || input.camera != self.camera))
+                    self.apply(content.windows, ax: ax, stale: stale)
+                    if stale { self.syncSoon() }
                     let ms = Int((CACurrentMediaTime() - s0) * 1000)
                     if ms > 120 {
                         logger.info("slow: window scan took \(ms)ms (ScreenCaptureKit \(Int((s1 - s0) * 1000))ms, \(ax.calls) Accessibility calls and window order \(Int((s2 - s1) * 1000))ms, main thread \(Int((CACurrentMediaTime() - s3) * 1000))ms)")
@@ -832,6 +851,10 @@ final class CanvasController: NSObject {
         var live = false
         /// Top-left of the parking corner (see inParkingCorner).
         var corner = CGPoint.zero
+        /// Window moves so far and the camera, when the scan started: if either has changed by
+        /// the time it's applied, its frames are out of date (see apply).
+        var moves = 0
+        var camera = Camera()
     }
 
     /// Whether a window is a standard document window, as Accessibility said when last asked.
@@ -845,7 +868,8 @@ final class CanvasController: NSObject {
 
     private func scanInput() -> ScanInput {
         var input = ScanInput(kinds: windowKinds, live: !isActive && !suspendTracking,
-                              corner: CGPoint(x: screenRectCG.maxX - 12, y: screenRectCG.maxY - 80))
+                              corner: CGPoint(x: screenRectCG.maxX - 12, y: screenRectCG.maxY - 80),
+                              moves: ManagedWindow.moves, camera: camera)
         let vp = viewport
         for w in windows {
             var expected: CGRect?
@@ -941,7 +965,8 @@ final class CanvasController: NSObject {
     /// Windows open now (see LayoutStore.takeMatch), from the last scan.
     private var openWindowKeys = Set<String>()
 
-    private func apply(_ scWindows: [SCWindow], ax: AXSnapshot) {
+    /// `stale`: the windows' frames are out of date; only new and gone windows count.
+    private func apply(_ scWindows: [SCWindow], ax: AXSnapshot, stale: Bool = false) {
         let axFrames = ax.frames
         if firstSync { logger.info("first sync: \(scWindows.count) SC windows, AX known \(ax.known.count), standard \(ax.standard.count), frames \(ax.frames.count)") }
         let started = CACurrentMediaTime()
@@ -950,7 +975,7 @@ final class CanvasController: NSObject {
             if ms > 30 { logger.info("slow: window sync took \(ms)ms") }
         }
         noteSystemPrompts(scWindows)
-        let live = !isActive && !suspendTracking
+        let live = !isActive && !suspendTracking && !stale
         var seen = Set<CGWindowID>()
         var restoredAny = false
         if firstSync, let saved {
@@ -1002,8 +1027,8 @@ final class CanvasController: NSObject {
                         w.canvasFrame.origin = canvasPoint(forGlobal: f.origin)
                     }
                 }
-                adoptSize(w, f.size)
-            } else {
+                if !stale { adoptSize(w, f.size) }
+            } else if !stale {
                 restoredAny = add(sc, live: live, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) || restoredAny
             }
         }
@@ -2001,6 +2026,7 @@ final class CanvasController: NSObject {
         }
         let work = jobs.map { (ax: $0.1, target: $0.2, parked: $0.3) }
         let started = CACurrentMediaTime()
+        ManagedWindow.moves += 1
         axQueue.async {
             var landed = [CGPoint?](repeating: nil, count: work.count)
             var slowest: (pid: pid_t, ms: Int) = (0, 0)
@@ -2030,6 +2056,7 @@ final class CanvasController: NSObject {
             }
             DispatchQueue.main.async {
                 let now = CACurrentMediaTime()
+                ManagedWindow.moves += 1
                 for ((w, _, target, parked), at) in zip(jobs, landed) {
                     w.lastPlaced = at ?? target
                     w.lastPlacedAt = now
@@ -2212,6 +2239,7 @@ final class CanvasController: NSObject {
     func cancelAnimation() {
         animation = nil
         stopDisplayLink()
+        if !gliding { pathRegion = nil }
     }
 
     private func stopDisplayLink() {

@@ -65,10 +65,15 @@ final class ManagedWindow {
         return axElement
     }
 
+    /// Real window moves made so far (main thread), so a window scan can tell its frames are out
+    /// of date.
+    static var moves = 0
+
     /// Moves the real window to `point` (global CG coords) and records where it landed.
     func place(at point: CGPoint) {
         guard let ax else { return }
         if let last = lastPlaced, last.distance(to: point) < 0.5 { return }
+        Self.moves += 1
         let before = lastPlaced
         AX.setPosition(ax, point)
         lastPlaced = AX.position(ax) ?? point
