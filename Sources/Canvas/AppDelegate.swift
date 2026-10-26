@@ -66,6 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "fit": controller.animate(to: controller.fitCamera())
             case "restore": controller.restoreAll()
             case "tidy": controller.tidy()
+            case "place":
+                if let id = number("id"), let x = number("x"), let y = number("y") {
+                    controller.setCanvasOrigin(CGWindowID(id), CGPoint(x: x, y: y), commit: query["commit"] == "1")
+                }
             case "prefer":
                 // Repair: set the size a window should have (by window ID), e.g. after it was lost.
                 if let id = number("id"), let w = number("w"), let h = number("h") {

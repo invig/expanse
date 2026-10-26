@@ -594,14 +594,17 @@ final class CanvasController: NSObject {
         }
     }
 
-    private func isManageable(_ w: SCWindow) -> Bool {
+    /// `tracked`: Canvas already manages this window. The on-screen test is only for discovering
+    /// new windows (so other displays' windows aren't adopted); a tracked window stays tracked
+    /// wherever it is, e.g. parked beyond the edge of a screen that just got smaller.
+    private func isManageable(_ w: SCWindow, tracked: Bool) -> Bool {
         guard w.windowLayer == 0, w.isOnScreen,
               w.frame.width >= 100, w.frame.height >= 60,
               let app = w.owningApplication, app.processID != getpid(),
               let running = NSRunningApplication(processIdentifier: app.processID),
               running.activationPolicy == .regular
         else { return false }
-        return screenRectCG.intersects(w.frame)
+        return tracked || screenRectCG.intersects(w.frame)
     }
 
     /// The window's true frame. ScreenCaptureKit reports transformed frames during
@@ -653,7 +656,8 @@ final class CanvasController: NSObject {
             }
         }
 
-        for sc in scWindows where isManageable(sc) {
+        let trackedIDs = Set(windows.map(\.id))
+        for sc in scWindows where isManageable(sc, tracked: trackedIDs.contains(sc.windowID)) {
             seen.insert(sc.windowID)
             if let w = windows.first(where: { $0.id == sc.windowID }) {
                 // Zoomed out, positions aren't followed, so skip asking each app (slow apps
@@ -710,7 +714,11 @@ final class CanvasController: NSObject {
         }
 
         var restored = false
-        if firstSync, let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, from: &savedPool) {
+        let returning = recentlyRemoved[w.id] != nil
+        if let back = recentlyRemoved.removeValue(forKey: w.id) {
+            // Came back (minimized, hidden, briefly missing during a display change): same spot.
+            w.canvasFrame.origin = back.origin
+        } else if firstSync, let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, from: &savedPool) {
             w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
             if let pw = match.pw, let ph = match.ph { w.preferredSize = CGSize(width: pw, height: ph) }
             if let sw = match.w, let sh = match.h, let ax = w.ax,
@@ -754,7 +762,7 @@ final class CanvasController: NSObject {
         w.capture.start(window: sc, pixelSize: pixelSize(for: w), fps: isActive ? Self.canvasFPS : Self.liveFPS)
         observe(w)
         logger.info("tracking \(w.appName, privacy: .public) [\(w.id)] \(w.title, privacy: .public)")
-        if arriving { arrive(w, anchor: anchor, live: live) }
+        if arriving { arrive(w, anchor: anchor, live: live, returning: returning) }
         return restored
     }
 
@@ -1009,6 +1017,18 @@ final class CanvasController: NSObject {
         }
     }
 
+    /// Repair / scripting: put a window at a canvas position; `commit` then moves real windows.
+    func setCanvasOrigin(_ id: CGWindowID, _ origin: CGPoint, commit commitNow: Bool) {
+        if let w = windows.first(where: { $0.id == id }) { w.canvasFrame.origin = origin }
+        guard commitNow else { return }
+        if !isActive {
+            windows.forEach { $0.lastPlaced = nil }
+            commit()
+        }
+        view.render()
+        scheduleSave()
+    }
+
     func setPreferredSize(_ id: CGWindowID, _ size: CGSize) {
         guard let w = windows.first(where: { $0.id == id }) else { return }
         w.preferredSize = size
@@ -1020,11 +1040,9 @@ final class CanvasController: NSObject {
 
     /// New windows go to an empty spot next to what you were working on; windows coming back
     /// from minimize / hide go back where they were.
-    private func arrive(_ w: ManagedWindow, anchor: ManagedWindow?, live: Bool) {
-        var returning = false
-        if let back = recentlyRemoved.removeValue(forKey: w.id) {
-            w.canvasFrame.origin = back.origin
-            returning = true
+    private func arrive(_ w: ManagedWindow, anchor: ManagedWindow?, live: Bool, returning: Bool) {
+        if returning {
+            // add() already put it back at its old spot.
         } else if AX.subrole(w.ax) == kAXStandardWindowSubrole as String,
                   let spot = freeSpot(for: w, near: anchor, onScreenOnly: !autoCentre) {
             w.canvasFrame.origin = spot
