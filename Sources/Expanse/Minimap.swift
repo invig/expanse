@@ -13,6 +13,8 @@ final class Minimap: CALayer {
     private var mapScale: CGFloat = 1
     private var mapCanvasOrigin: CGPoint = .zero
     private var mapOffset: CGPoint = .zero
+    /// What the window blocks were last drawn for: redrawn only when this changes.
+    private var drawn: (windows: [CGRect], bounds: CGRect)?
 
     override init() {
         mapArea = CGRect(x: 10, y: 26, width: Minimap.size.width - 20, height: Minimap.size.height - 36)
@@ -59,13 +61,17 @@ final class Minimap: CALayer {
         mapOffset = CGPoint(x: mapArea.minX + (mapArea.width - bounds.width * mapScale) / 2,
                             y: mapArea.minY + (mapArea.height - bounds.height * mapScale) / 2)
 
-        let path = CGMutablePath()
-        for r in windows {
-            path.addRoundedRect(in: toMap(r), cornerWidth: 1.5, cornerHeight: 1.5)
+        if drawn?.windows != windows || drawn?.bounds != bounds {
+            drawn = (windows, bounds)
+            let path = CGMutablePath()
+            for r in windows {
+                path.addRoundedRect(in: toMap(r), cornerWidth: 1.5, cornerHeight: 1.5)
+            }
+            windowsShape.path = path
         }
-        windowsShape.path = path
         viewportShape.path = CGPath(roundedRect: toMap(viewport), cornerWidth: 2, cornerHeight: 2, transform: nil)
-        zoomText.string = "\(Int((scale * 100).rounded()))%"
+        let zoom = "\(Int((scale * 100).rounded()))%"
+        if zoomText.string as? String != zoom { zoomText.string = zoom }
     }
 
     /// Minimap point (this layer's coords) -> canvas point.

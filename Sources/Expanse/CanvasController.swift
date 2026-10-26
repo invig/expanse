@@ -27,7 +27,6 @@ final class CanvasController: NSObject {
     private var syncRetryScheduled = false
     private var pendingSyncCompletions: [() -> Void] = []
     private var firstSync = true
-    private var resolutionWork: DispatchWorkItem?
     private var saveWork: DispatchWorkItem?
     private var pinchAccumulator: CGFloat = 0
     private var magnifyMonitor: Any?
@@ -290,7 +289,21 @@ final class CanvasController: NSObject {
         }
         registerDisplayCallback()
         sync()
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.sync() }
+        // Window events from apps already on the canvas trigger a scan straight away (see
+        // handleAXEvent), and so do apps launching, hiding and unhiding; this catches the rest.
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in self?.sync() }
+        for name in [NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.syncSoon()
+            }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didLaunchApplicationNotification,
+                                                          object: nil, queue: .main) { [weak self] _ in
+            // Its first window usually shows up a moment after launch.
+            for delay in [0.5, 1.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { self?.syncSoon() }
+            }
+        }
         magnifyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .magnify) { [weak self] event in
             self?.handleGlobalPinch(event)
         }
@@ -299,6 +312,7 @@ final class CanvasController: NSObject {
             // A pid can be reused by a later app; don't hand it this app's observer.
             if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
                 self?.observers[app.processIdentifier] = nil
+                self?.focusedWindowByApp[app.processIdentifier] = nil
             }
         }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appActivated(_:)),
@@ -318,6 +332,7 @@ final class CanvasController: NSObject {
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
             self?.refreshWallpaper()
+            self?.syncSoon()
         }
     }
 
@@ -338,15 +353,13 @@ final class CanvasController: NSObject {
             activationRequest = nil
         }
         guard !isPaused, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              app.processIdentifier != getpid(),
-              let focused = AX.focusedWindow(pid: app.processIdentifier),
-              let id = AX.windowID(focused) else { return }
-        windowFocused(id)
+              app.processIdentifier != getpid() else { return }
+        windowFocused()
     }
 
     /// A window got focus (click, ⌘-Tab, Dock). Focus often bounces between windows for a moment
     /// (opening a document focuses the old window, then the new one), so act on where it settles.
-    private func windowFocused(_ id: CGWindowID) {
+    private func windowFocused() {
         focusSettleWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.focusSettled() }
         focusSettleWork = work
@@ -357,8 +370,19 @@ final class CanvasController: NSObject {
     private func focusSettled() {
         // Clicking a big window would otherwise bury an open system prompt.
         raiseSystemPrompts()
-        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid(),
-              let focused = AX.focusedWindow(pid: app.processIdentifier), let id = AX.windowID(focused) else { return }
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return }
+        let pid = app.processIdentifier
+        // Asking the app which window has focus waits on the app; do that off the main thread.
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            guard let focused = AX.focusedWindow(pid: pid), let id = AX.windowID(focused) else { return }
+            DispatchQueue.main.async {
+                self?.focusedWindowByApp[pid] = id
+                self?.focusSettled(on: id)
+            }
+        }
+    }
+
+    private func focusSettled(on id: CGWindowID) {
         guard !isActive, !isPaused, !suspendTracking, animation == nil,
               let w = windows.first(where: { $0.id == id }) else { return }
         let r = camera.toView(w.canvasFrame)
@@ -390,7 +414,6 @@ final class CanvasController: NSObject {
             guard !isActive, animation == nil else { return }
             isActive = true
             gliding = true
-            updateStreaming()
             view.render()
             // Cover the screen first, so resizing (which may briefly move the window) isn't seen.
             overlay.level = OverlayWindow.canvasLevel
@@ -424,6 +447,7 @@ final class CanvasController: NSObject {
                 self.overlay.level = OverlayWindow.backdropLevel
                 self.isActive = false
                 self.gliding = false
+                self.pathRegion = nil
                 self.updateStreamingSoon()
                 self.glideTarget = nil
                 self.view.render()
@@ -435,7 +459,11 @@ final class CanvasController: NSObject {
     private func focusWindow(_ w: ManagedWindow) {
         activationRequest = (w.pid, CACurrentMediaTime())
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid { activationRequest = nil }
-        AX.focus(w.ax, pid: w.pid)
+        // The app has to answer each of these; a busy one takes 30ms+, so they go on the
+        // Accessibility queue (after any moves still running there), not the main thread.
+        let ax = w.ax, pid = w.pid
+        focusedWindowByApp[pid] = w.id
+        axQueue.async { AX.focus(ax, pid: pid) }
         raiseSystemPrompts()
     }
 
@@ -444,42 +472,71 @@ final class CanvasController: NSObject {
     private func observe(_ w: ManagedWindow) {
         guard let ax = w.ax else { return }
         if observers[w.pid] == nil {
-            observers[w.pid] = AppObserver(pid: w.pid) { [weak self] element, notification in
-                self?.handleAXEvent(element, notification)
+            observers[w.pid] = AppObserver(pid: w.pid) { [weak self] element, notification, id in
+                self?.handleAXEvent(element, notification, id: id)
             }
         }
         observers[w.pid]?.observe(window: ax, id: w.id)
     }
 
-    private func handleAXEvent(_ element: AXUIElement, _ notification: String) {
+    /// `id`: the window's ID if it's one Expanse observes (looked up without asking the app).
+    private func handleAXEvent(_ element: AXUIElement, _ notification: String, id: CGWindowID?) {
         switch notification {
         case kAXWindowCreatedNotification, kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification:
             syncSoon()
         case kAXFocusedWindowChangedNotification:
-            if let id = AX.windowID(element) { windowFocused(id) }
+            var pid: pid_t = 0
+            if let id, AXUIElementGetPid(element, &pid) == .success { focusedWindowByApp[pid] = id }
+            windowFocused()
         case kAXMovedNotification, kAXResizedNotification:
             // Mid-glide these are our own moves; querying the app here would stall the animation.
             guard !isActive, animation == nil else { return }
-            guard let id = AX.windowID(element), let w = windows.first(where: { $0.id == id }) else { return }
-            realWindowChanged(w, element)
+            // (The observer knows its windows' IDs; asking the app is the fallback.)
+            guard let id = id ?? AX.windowID(element), let w = windows.first(where: { $0.id == id }) else { return }
+            let mouseDown = NSEvent.pressedMouseButtons & 1 != 0
+            // The echo of a move we just made (it can arrive after a glide hands back). Asking
+            // the app where its window is costs two round trips; a slow app with a dozen
+            // windows would stall the main thread for half a second right after every glide.
+            // (Not around a display change, when macOS shoving windows back must be noticed.)
+            if !suspendTracking, CACurrentMediaTime() - w.lastPlacedAt < 0.6, !mouseDown { return }
+            // A drag sends dozens of these a second; look at each window at most every 50ms.
+            changedWindows[id] = (element, mouseDown || changedWindows[id]?.mouseDown == true)
+            guard !changedWindowsScheduled else { return }
+            changedWindowsScheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                guard let self else { return }
+                let changed = self.changedWindows
+                self.changedWindows = [:]
+                self.changedWindowsScheduled = false
+                guard !self.isActive, self.animation == nil else { return }
+                for (id, change) in changed {
+                    if let w = self.windows.first(where: { $0.id == id }) {
+                        self.realWindowChanged(w, change.element, userDragging: change.mouseDown)
+                    }
+                }
+            }
         default:
             break
         }
     }
 
+    private var changedWindows: [CGWindowID: (element: AXUIElement, mouseDown: Bool)] = [:]
+    private var changedWindowsScheduled = false
+
     /// A real window moved or resized. In live mode, a move we didn't make means the user
     /// dragged it: the canvas follows.
-    private func realWindowChanged(_ w: ManagedWindow, _ element: AXUIElement) {
+    /// `userDragging`: the mouse button was down when the change was reported.
+    private func realWindowChanged(_ w: ManagedWindow, _ element: AXUIElement, userDragging: Bool) {
         guard !isPaused else { return }
-        if let size = AX.size(element) { adoptSize(w, size, fromUser: NSEvent.pressedMouseButtons & 1 != 0) }
+        if let size = AX.size(element) { adoptSize(w, size, fromUser: userDragging) }
+        let pos = isActive ? nil : AX.position(element)
         // Around a display change macOS keeps shoving windows for a while; only a drag with the
         // mouse button down counts as you moving a window then.
-        let userDragging = NSEvent.pressedMouseButtons & 1 != 0
         if suspendTracking, !userDragging, !isActive, settleUntil != .distantFuture, Date() < settleUntil,
-           let last = w.lastPlaced, let pos = AX.position(element), last.distance(to: pos) > 2 {
+           let last = w.lastPlaced, let pos, last.distance(to: pos) > 2 {
             reassertSoon()
         }
-        if !isActive, !suspendTracking || userDragging, animation == nil, let pos = AX.position(element) {
+        if !isActive, !suspendTracking || userDragging, animation == nil, let pos {
             if let last = w.lastPlaced, last.distance(to: pos) < 2 {
                 // Our own placement.
             } else if inParkingCorner(pos) {
@@ -666,15 +723,26 @@ final class CanvasController: NSObject {
         if let completion { pendingSyncCompletions.append(completion) }
         guard !syncing else { return }
         syncing = true
+        let input = scanInput()
+        let s0 = CACurrentMediaTime()
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
-            // Ask each app for its real window frames here, off the main thread: slow apps take
-            // 100ms+ to answer, which would otherwise stall a glide or a key press.
-            let ax = Self.axSnapshot(for: content?.windows ?? [])
+            let s1 = CACurrentMediaTime()
+            // Ask apps about their windows here, off the main thread: slow apps take 100ms+ to
+            // answer, which would otherwise stall a glide or a key press.
+            var ax = Self.axSnapshot(for: content?.windows ?? [], input: input)
+            if input.live { ax.order = Self.windowServerOrder() }
+            let s2 = CACurrentMediaTime()
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.syncing = false
+                self.windowKinds = ax.kinds
                 if let content, !self.isPaused {
+                    let s3 = CACurrentMediaTime()
                     self.apply(content.windows, ax: ax)
+                    let ms = Int((CACurrentMediaTime() - s0) * 1000)
+                    if ms > 120 {
+                        logger.info("slow: window scan took \(ms)ms (ScreenCaptureKit \(Int((s1 - s0) * 1000))ms, \(ax.calls) Accessibility calls and window order \(Int((s2 - s1) * 1000))ms, main thread \(Int((CACurrentMediaTime() - s3) * 1000))ms)")
+                    }
                 } else if let error {
                     logger.error("SCShareableContent failed: \(error.localizedDescription)")
                 }
@@ -688,15 +756,29 @@ final class CanvasController: NSObject {
     /// `tracked`: Expanse already manages this window. The on-screen test is only for discovering
     /// new windows (so other displays' windows aren't adopted); a tracked window stays tracked
     /// wherever it is, e.g. parked beyond the edge of a screen that just got smaller.
-    private func isManageable(_ w: SCWindow, tracked: Bool) -> Bool {
+    private func isManageable(_ w: SCWindow, tracked: Bool, regular: (pid_t) -> Bool) -> Bool {
         guard w.windowLayer == 0, w.isOnScreen,
               w.frame.width >= 100, w.frame.height >= 60,
-              let app = w.owningApplication, app.processID != getpid(),
-              let running = NSRunningApplication(processIdentifier: app.processID),
-              running.activationPolicy == .regular
+              let app = w.owningApplication, app.processID != getpid(), regular(app.processID)
         else { return false }
         return tracked || screenRectCG.intersects(w.frame)
     }
+
+    /// Ordinary apps (with a Dock icon), not menu-bar extras or background agents. Asking is a
+    /// LaunchServices lookup (around a millisecond), and window scans ask for every app, so the
+    /// answer is kept for half a minute. Thread-safe.
+    static func isRegularApp(_ pid: pid_t) -> Bool {
+        appPolicyLock.lock()
+        defer { appPolicyLock.unlock() }
+        let now = CACurrentMediaTime()
+        if let cached = appPolicies[pid], now - cached.at < 30 { return cached.regular }
+        let regular = NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular
+        appPolicies[pid] = (regular, now)
+        return regular
+    }
+
+    private static let appPolicyLock = NSLock()
+    nonisolated(unsafe) private static var appPolicies: [pid_t: (regular: Bool, at: CFTimeInterval)] = [:]
 
     /// The window's true frame. ScreenCaptureKit reports transformed frames during
     /// Mission Control and similar animations; the Accessibility API doesn't.
@@ -707,29 +789,119 @@ final class CanvasController: NSObject {
         return sc.frame
     }
 
-    /// True frames (position and size) of ordinary app windows, by window ID, via Accessibility.
-    /// ScreenCaptureKit reports transformed frames during Mission Control and similar animations.
-    /// What the Accessibility API says about ordinary app windows: true frames by window ID, and
-    /// which windows are standard document windows (as opposed to sheets, dialogs and panels).
+    /// What a window scan needs to know about tracked windows, gathered on the main thread.
+    private struct ScanInput {
+        /// Tracked windows: their Accessibility element, where the real window should be, and
+        /// whether it's parked (then anywhere in the corner will do).
+        var tracked: [CGWindowID: (ax: AXUIElement?, expected: CGRect?, parked: Bool)] = [:]
+        var kinds: [CGWindowID: WindowKind] = [:]
+        /// Live mode: tracked windows' real frames matter (zoomed out, they aren't followed).
+        var live = false
+        /// Top-left of the parking corner (see inParkingCorner).
+        var corner = CGPoint.zero
+    }
+
+    /// Whether a window is a standard document window, as Accessibility said when last asked.
+    struct WindowKind {
+        var standard: Bool
+        var at: CFTimeInterval
+    }
+    /// Window kinds don't change, so each window is asked once. "Not standard" is asked again
+    /// after a while: a brand-new window can briefly report no subrole.
+    private var windowKinds: [CGWindowID: WindowKind] = [:]
+
+    private func scanInput() -> ScanInput {
+        var input = ScanInput(kinds: windowKinds, live: !isActive && !suspendTracking,
+                              corner: CGPoint(x: screenRectCG.maxX - 12, y: screenRectCG.maxY - 80))
+        let vp = viewport
+        for w in windows {
+            var expected: CGRect?
+            if let last = w.lastPlaced {
+                expected = CGRect(origin: last, size: w.canvasFrame.size)
+            } else if !w.parked, !isActive {
+                expected = camera.toView(w.canvasFrame).offsetBy(dx: vp.minX, dy: vp.minY)
+            }
+            input.tracked[w.id] = (w.knownAX, expected, w.parked)
+        }
+        return input
+    }
+
+    /// What the Accessibility API says about windows: true frames by window ID (ScreenCaptureKit
+    /// reports transformed frames during Mission Control and similar animations), which windows
+    /// are standard document windows (as opposed to sheets, dialogs and panels), and elements for
+    /// new ones. Apps are only asked about windows that need it: a tracked window whose
+    /// ScreenCaptureKit frame is where it should be is left alone, and each window's kind is
+    /// asked once, so a scan with nothing new costs no Accessibility calls at all.
     private struct AXSnapshot {
         var frames: [CGWindowID: CGRect] = [:]
         var standard = Set<CGWindowID>()
         var known = Set<CGWindowID>()
+        var elements: [CGWindowID: AXUIElement] = [:]
+        var kinds: [CGWindowID: WindowKind] = [:]
+        var calls = 0
+        /// Window server stacking order (live mode only).
+        var order: [CGWindowID: Int] = [:]
     }
 
-    private static func axSnapshot(for scWindows: [SCWindow]) -> AXSnapshot {
-        let pids = Set(scWindows.compactMap { $0.windowLayer == 0 ? $0.owningApplication?.processID : nil })
-            .subtracting([getpid()])
+    private static func axSnapshot(for scWindows: [SCWindow], input: ScanInput) -> AXSnapshot {
         var snapshot = AXSnapshot()
-        for pid in pids {
-            for element in AX.windows(pid: pid) {
-                guard let id = AX.windowID(element) else { continue }
+        let now = CACurrentMediaTime()
+        var kinds = input.kinds
+        var toClassify: [pid_t: Set<CGWindowID>] = [:]
+        var regularApps: [pid_t: Bool] = [:]
+        func close(_ a: CGRect, _ b: CGRect) -> Bool {
+            abs(a.minX - b.minX) < 1 && abs(a.minY - b.minY) < 1 && abs(a.width - b.width) < 1 && abs(a.height - b.height) < 1
+        }
+        for sc in scWindows where sc.windowLayer == 0 {
+            guard let pid = sc.owningApplication?.processID, pid != getpid() else { continue }
+            let id = sc.windowID
+            if let tracked = input.tracked[id] {
+                guard input.live else { continue }
+                if let expected = tracked.expected, close(sc.frame, expected) { continue }
+                if tracked.parked, sc.frame.minX >= input.corner.x, sc.frame.minY >= input.corner.y { continue }
+                if let ax = tracked.ax, let p = AX.position(ax), let s = AX.size(ax), s.width > 0, s.height > 0 {
+                    snapshot.frames[id] = CGRect(origin: p, size: s)
+                }
+                snapshot.calls += 2
+                continue
+            }
+            // Not manageable anyway (see isManageable): no need to ask.
+            guard sc.isOnScreen, sc.frame.width >= 100, sc.frame.height >= 60 else { continue }
+            if regularApps[pid] == nil { regularApps[pid] = isRegularApp(pid) }
+            guard regularApps[pid] == true else { continue }
+            if let kind = kinds[id], !kind.standard, now - kind.at < 10 {
                 snapshot.known.insert(id)
-                if AX.subrole(element) == kAXStandardWindowSubrole as String { snapshot.standard.insert(id) }
-                guard let p = AX.position(element), let s = AX.size(element), s.width > 0, s.height > 0 else { continue }
-                snapshot.frames[id] = CGRect(origin: p, size: s)
+                continue
+            }
+            // Standard but untracked (new, or back on screen): its element and frame are needed.
+            toClassify[pid, default: []].insert(id)
+        }
+        for (pid, ids) in toClassify {
+            var found = Set<CGWindowID>()
+            snapshot.calls += 1
+            for element in AX.windows(pid: pid) {
+                guard let id = AX.windowID(element), ids.contains(id) else { continue }
+                found.insert(id)
+                snapshot.known.insert(id)
+                let standard = kinds[id]?.standard == true || AX.subrole(element) == kAXStandardWindowSubrole as String
+                snapshot.calls += 1
+                kinds[id] = WindowKind(standard: standard, at: now)
+                guard standard else { continue }
+                snapshot.standard.insert(id)
+                snapshot.elements[id] = element
+                if let p = AX.position(element), let s = AX.size(element), s.width > 0, s.height > 0 {
+                    snapshot.frames[id] = CGRect(origin: p, size: s)
+                }
+                snapshot.calls += 2
+            }
+            // Not one of the app's Accessibility windows (yet): not managed; look again later.
+            for id in ids.subtracting(found) {
+                kinds[id] = WindowKind(standard: false, at: now)
+                snapshot.known.insert(id)
             }
         }
+        let onScreen = Set(scWindows.map(\.windowID))
+        snapshot.kinds = kinds.filter { onScreen.contains($0.key) || input.tracked[$0.key] != nil }
         return snapshot
     }
 
@@ -755,15 +927,22 @@ final class CanvasController: NSObject {
             }
         }
 
-        let trackedIDs = Set(windows.map(\.id))
-        for sc in scWindows where isManageable(sc, tracked: trackedIDs.contains(sc.windowID)) {
+        let byID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var regularApps: [pid_t: Bool] = [:]
+        func regular(_ pid: pid_t) -> Bool {
+            if let known = regularApps[pid] { return known }
+            let r = Self.isRegularApp(pid)
+            regularApps[pid] = r
+            return r
+        }
+        for sc in scWindows where isManageable(sc, tracked: byID[sc.windowID] != nil, regular: regular) {
             // Only ordinary document windows live on the canvas. Sheets (like Xcode's Manage
             // Certificates), dialogs and floating panels belong to their parent window and stay
             // wherever the app puts them; moving or parking them separately pulls them away from it.
             if ax.known.contains(sc.windowID) && !ax.standard.contains(sc.windowID) { continue }
-            if !trackedIDs.contains(sc.windowID) && !ax.standard.contains(sc.windowID) { continue }
+            if byID[sc.windowID] == nil && !ax.standard.contains(sc.windowID) { continue }
             seen.insert(sc.windowID)
-            if let w = windows.first(where: { $0.id == sc.windowID }) {
+            if let w = byID[sc.windowID] {
                 // Zoomed out, positions aren't followed, so skip asking each app (slow apps
                 // would stall dragging); ScreenCaptureKit's frame is good enough for sizes.
                 let f = live ? (axFrames[sc.windowID] ?? sc.frame) : sc.frame
@@ -786,7 +965,7 @@ final class CanvasController: NSObject {
                 }
                 adoptSize(w, f.size)
             } else {
-                restoredAny = add(sc, live: live) || restoredAny
+                restoredAny = add(sc, live: live, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) || restoredAny
             }
         }
 
@@ -794,7 +973,7 @@ final class CanvasController: NSObject {
             remove(w)
         }
 
-        if live { orderByWindowServer() }
+        if live { orderByWindowServer(ax.order) }
         if firstSync && restoredAny {
             commit()
             view.render()
@@ -807,9 +986,10 @@ final class CanvasController: NSObject {
 
     /// Returns true if the window was put back where a saved layout had it.
     @discardableResult
-    private func add(_ sc: SCWindow, live: Bool) -> Bool {
+    private func add(_ sc: SCWindow, live: Bool, element: AXUIElement? = nil, frame: CGRect? = nil) -> Bool {
         let w = ManagedWindow(scWindow: sc, canvasFrame: .zero)
-        let f = realFrame(of: sc, ax: w.ax)
+        if let element { w.adopt(ax: element) }
+        let f = frame ?? realFrame(of: sc, ax: w.ax)
         w.preferredSize = f.size
         w.originalFrame = f
         var global = f.origin
@@ -865,14 +1045,12 @@ final class CanvasController: NSObject {
         view.addNode(w.node)
         w.capture.onFrame = { [weak self, weak w] surface in
             guard let self, let w else { return }
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
+            // Runs inside the frame pump's transaction (actions disabled).
             w.node.content.contents = surface
-            w.node.content.backgroundColor = nil
-            CATransaction.commit()
+            if w.node.content.backgroundColor != nil { w.node.content.backgroundColor = nil }
             if w.needsFirstFrame {
                 w.needsFirstFrame = false
-                if !self.needsCapture(w) { w.capture.pause() }
+                if !self.wantsCapture(w, in: self.captureRegion).keep { w.capture.pause() }
             }
         }
         w.capture.onStop = { [weak self, weak w] in
@@ -920,9 +1098,7 @@ final class CanvasController: NSObject {
         if isActive {
             from = (view.hovered ?? windows.last)?.canvasFrame
                 ?? CGRect(origin: camera.center(in: viewSize), size: .zero)
-        } else if let app = NSWorkspace.shared.frontmostApplication,
-                  let focused = AX.focusedWindow(pid: app.processIdentifier), let id = AX.windowID(focused),
-                  let w = windows.first(where: { $0.id == id }) {
+        } else if let app = NSWorkspace.shared.frontmostApplication, let w = focusedWindow(of: app.processIdentifier) {
             from = w.canvasFrame
         } else {
             from = CGRect(origin: camera.center(in: viewSize), size: .zero)
@@ -945,6 +1121,17 @@ final class CanvasController: NSObject {
         } else {
             glide(to: target)
         }
+    }
+
+    /// Each app's focused window, kept from its focus-change notifications and our own focusing,
+    /// so a hop doesn't wait on the app to say (50ms+ for a busy one) before it can start.
+    private var focusedWindowByApp: [pid_t: CGWindowID] = [:]
+
+    private func focusedWindow(of pid: pid_t) -> ManagedWindow? {
+        if let id = focusedWindowByApp[pid], let w = windows.first(where: { $0.id == id }) { return w }
+        guard let focused = AX.focusedWindow(pid: pid), let id = AX.windowID(focused) else { return nil }
+        focusedWindowByApp[pid] = id
+        return windows.first { $0.id == id }
     }
 
     /// The nearest window in `direction`. A window sharing the row (for left / right) or column
@@ -1005,7 +1192,7 @@ final class CanvasController: NSObject {
                   // Apple's background prompt processes only (universalAccessAuthWarn,
                   // SecurityAgent, UserNotificationCenter, CoreServicesUIAgent, …).
                   w.owningApplication?.bundleIdentifier.hasPrefix("com.apple.") == true,
-                  let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy != .regular
+                  NSRunningApplication(processIdentifier: pid) != nil, !Self.isRegularApp(pid)
             else { return nil }
             return (pid, w.windowID)
         }
@@ -1017,10 +1204,14 @@ final class CanvasController: NSObject {
 
     /// Raise every known system prompt above app windows (without taking focus).
     func raiseSystemPrompts() {
-        for prompt in systemPrompts {
-            guard let ax = AX.windows(pid: prompt.pid).first(where: { AX.windowID($0) == prompt.id }) else { continue }
-            AXUIElementPerformAction(ax, kAXRaiseAction as CFString)
-            logger.info("raised system prompt [\(prompt.id)]")
+        let prompts = systemPrompts
+        guard !prompts.isEmpty else { return }
+        axQueue.async {
+            for prompt in prompts {
+                guard let ax = AX.windows(pid: prompt.pid).first(where: { AX.windowID($0) == prompt.id }) else { continue }
+                AXUIElementPerformAction(ax, kAXRaiseAction as CFString)
+                logger.info("raised system prompt [\(prompt.id)]")
+            }
         }
     }
 
@@ -1311,14 +1502,21 @@ final class CanvasController: NSObject {
         if isActive { view.render() }
     }
 
-    /// Match canvas stacking to the real window stacking (front-most last).
-    private func orderByWindowServer() {
+    /// The window server's stacking order (0 = front-most). It takes 10-80ms with many windows
+    /// open, so it's fetched off the main thread, during a window scan.
+    private static func windowServerOrder() -> [CGWindowID: Int] {
         guard let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
-                as? [[String: Any]] else { return }
+                as? [[String: Any]] else { return [:] }
         var rank: [CGWindowID: Int] = [:]
         for (i, entry) in info.enumerated() {
             if let n = entry[kCGWindowNumber as String] as? Int { rank[CGWindowID(n)] = i }
         }
+        return rank
+    }
+
+    /// Match canvas stacking to the real window stacking (front-most last).
+    private func orderByWindowServer(_ rank: [CGWindowID: Int]) {
+        guard !rank.isEmpty else { return }
         let sorted = windows.sorted { (rank[$0.id] ?? .max) > (rank[$1.id] ?? .max) }
         guard sorted.map(\.id) != windows.map(\.id) else { return }
         windows = sorted
@@ -1327,23 +1525,108 @@ final class CanvasController: NSObject {
 
     // MARK: Capture
 
-    /// macOS marks every window being captured with a purple indicator. At 100% a window that's
-    /// on screen is the real thing, so Expanse only captures windows it needs a picture of: all of
-    /// them on the canvas and during glides (the overlay covers the indicators), hidden ones (their
-    /// indicator is off-screen) always. The last picture stays on the layer meanwhile.
-    private func needsCapture(_ w: ManagedWindow) -> Bool {
-        isActive || w.parked || w.needsFirstFrame
+    /// Canvas area the camera sweeps through in the animation or glide under way (nil when still).
+    private var pathRegion: CGRect?
+
+    /// The canvas area whose pictures can be on screen now.
+    private var captureRegion: CGRect {
+        let inView = camera.toCanvas(CGRect(origin: .zero, size: viewSize))
+        return pathRegion.map { $0.union(inView) } ?? inView
+    }
+
+    /// Every stream costs the window server work, and macOS marks every captured window with a
+    /// purple indicator, so Expanse only captures pictures that can be seen: on the canvas and
+    /// during glides, windows in view or on the camera's path (the overlay covers the indicators);
+    /// at 100%, parked windows whose stand-in shows on the backdrop. Each window is captured once
+    /// when first seen; a paused window keeps its last picture. `start`: capture it; `keep`: don't
+    /// stop yet (a wider margin, so panning back and forth doesn't restart streams).
+    private func wantsCapture(_ w: ManagedWindow, in region: CGRect) -> (start: Bool, keep: Bool) {
+        if w.needsFirstFrame { return (true, true) }
+        guard isActive || w.parked else { return (false, false) }
+        let near = region.insetBy(dx: -region.width * 0.1, dy: -region.height * 0.1)
+        let far = region.insetBy(dx: -region.width * 0.35, dy: -region.height * 0.35)
+        // Parked windows' streams linger a few seconds after the canvas or a glide (nothing on
+        // screen shows they're captured), so going straight back reuses them instead of
+        // restarting dozens of streams.
+        let lingering = !isActive && CACurrentMediaTime() < lingerUntil
+        return (near.intersects(w.canvasFrame), lingering || far.intersects(w.canvasFrame))
+    }
+
+    private var lingerUntil: CFTimeInterval = 0
+    private var lingerWork: DispatchWorkItem?
+
+    /// After leaving the canvas or a glide: stop on-screen windows' streams now, the rest later.
+    private func updateStreamingLingering() {
+        lingerUntil = CACurrentMediaTime() + 5
+        updateStreaming()
+        lingerWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isActive else { return }
+            self.updateStreaming()
+        }
+        lingerWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.05, execute: work)
     }
 
     func updateStreaming() {
-        for w in windows {
-            if needsCapture(w) {
-                if !w.capture.isRunning {
-                    w.capture.start(window: w.scWindow, pixelSize: pixelSize(for: w), fps: isActive ? Self.canvasFPS : Self.liveFPS)
+        let t0 = CACurrentMediaTime()
+        let region = captureRegion
+        let wants = windows.map { wantsCapture($0, in: region) }
+        captureLoad = wants.filter(\.start).count
+        var toStart: [ManagedWindow] = []
+        for (w, want) in zip(windows, wants) {
+            if want.start {
+                if w.capture.isRunning {
+                    updateCapture(w)
+                } else {
+                    toStart.append(w)
                 }
-            } else if w.capture.isRunning {
+            } else if want.keep, w.capture.isRunning {
+                // Kept warm, not in view: same size, fewer frames.
+                w.capture.update(pixelSize: w.capture.pixelSize, fps: captureFPS(for: w))
+            } else if !want.keep, w.capture.isRunning {
                 w.capture.pause()
             }
+        }
+        // Starting a stream costs the main thread a millisecond or more, so a few start per pass
+        // (nearest the camera first, or the place it's heading) and the rest on the next ones;
+        // a zoom-out that needs 50 pictures doesn't hold up its first frame.
+        let focus = (animation?.to ?? camera).center(in: viewSize)
+        toStart.sort { $0.canvasFrame.center.distance(to: focus) < $1.canvasFrame.center.distance(to: focus) }
+        for w in toStart.prefix(Self.streamStartsPerPass) {
+            w.capture.start(window: w.scWindow, pixelSize: pixelSize(for: w), fps: captureFPS(for: w))
+        }
+        if toStart.count > Self.streamStartsPerPass, !moreStartsQueued {
+            moreStartsQueued = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
+                self?.moreStartsQueued = false
+                self?.updateStreaming()
+            }
+        }
+        let running = windows.filter { $0.capture.isRunning }.count
+        if running != lastCaptureCount {
+            lastCaptureCount = running
+            logger.info("capturing \(running) of \(self.windows.count) windows")
+        }
+        let ms = (CACurrentMediaTime() - t0) * 1000
+        if ms > 8 { logger.info("slow: updating captures took \(Int(ms))ms (\(min(toStart.count, Self.streamStartsPerPass)) started)") }
+    }
+
+    private static let streamStartsPerPass = 10
+    private var moreStartsQueued = false
+    private var lastCaptureCount = -1
+
+    private var captureUpdatePending = false
+
+    /// While the camera moves: start streams for windows coming into view and stop the ones that
+    /// left, at most every 0.15s.
+    private func scheduleCaptureUpdate() {
+        guard !captureUpdatePending else { return }
+        captureUpdatePending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self else { return }
+            self.captureUpdatePending = false
+            self.updateStreaming()
         }
     }
 
@@ -1355,7 +1638,7 @@ final class CanvasController: NSObject {
         streamingWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.isActive else { return }
-            self.updateStreaming()
+            self.updateStreamingLingering()
         }
         streamingWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
@@ -1363,41 +1646,47 @@ final class CanvasController: NSObject {
 
     // MARK: Capture resolution
 
-    /// Streams are captured at roughly the on-screen pixel size, in power-of-two steps.
+    /// The zoom a window is seen at: now, or where the camera is heading if that's closer, so a
+    /// window being zoomed into is sharp on arrival and one being zoomed away from starts small.
+    private func viewScale(for w: ManagedWindow) -> CGFloat {
+        guard isActive else { return 1 }
+        let screen = CGRect(origin: .zero, size: viewSize)
+        var s: CGFloat = camera.toView(w.canvasFrame).intersects(screen) ? camera.scale : 0
+        if let a = animation, a.to.toView(w.canvasFrame).intersects(screen) { s = max(s, a.to.scale) }
+        return s > 0 ? s : camera.scale
+    }
+
+    /// Streams are captured at roughly the on-screen pixel size, in power-of-two steps (so zooming
+    /// doesn't reconfigure them all the time), down to 1/16.
     private func pixelSize(for w: ManagedWindow) -> CGSize {
         let backing = screen.backingScaleFactor
+        let s = viewScale(for: w)
         var factor: CGFloat = 1
-        if isActive {
-            let s = camera.scale
-            factor = s >= 0.7 ? 1 : s >= 0.35 ? 0.5 : 0.25
-        }
+        while factor > 1.0 / 16, s < factor * 0.7 { factor /= 2 }
         return CGSize(width: w.canvasFrame.width * backing * factor, height: w.canvasFrame.height * backing * factor)
     }
 
-    /// Zoomed-out pictures are captured at reduced resolution. Before zooming in, switch every
-    /// window that will be on screen at `target` to full resolution, so it's sharp on arrival.
-    private func sharpen(for target: Camera) {
-        resolutionWork?.cancel()
-        let backing = screen.backingScaleFactor
-        let arriving = CGRect(origin: .zero, size: viewSize)
-        for w in windows where target.toView(w.canvasFrame).intersects(arriving) {
-            w.capture.update(pixelSize: CGSize(width: w.canvasFrame.width * backing, height: w.canvasFrame.height * backing),
-                             fps: Self.canvasFPS)
+    /// How many windows are being captured for the view (set by updateStreaming).
+    private var captureLoad = 0
+
+    /// Small pictures don't need 30 frames a second, and with dozens of windows in view they
+    /// share a budget of about 240 frames a second (every frame costs the window server a render
+    /// and Expanse a hand-off), but never drop below 5.
+    private func captureFPS(for w: ManagedWindow) -> Int {
+        // At 100%: parked windows showing on the backdrop at the live rate; ones only kept warm
+        // (lingering after the canvas) at 1, since even unchanged windows send every frame.
+        guard isActive else {
+            let onScreen = camera.toView(w.canvasFrame).intersects(CGRect(origin: .zero, size: viewSize))
+            return onScreen ? Self.liveFPS : 1
         }
+        let width = w.canvasFrame.width * viewScale(for: w)
+        let bySize = width >= 500 ? Self.canvasFPS : width >= 200 ? 15 : 8
+        let share = 240 / max(captureLoad, 1)
+        return max(5, min(bySize, share))
     }
 
     private func updateCapture(_ w: ManagedWindow) {
-        w.capture.update(pixelSize: pixelSize(for: w), fps: isActive ? Self.canvasFPS : Self.liveFPS)
-    }
-
-    private func scheduleResolutionUpdate() {
-        resolutionWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.windows.forEach(self.updateCapture)
-        }
-        resolutionWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        w.capture.update(pixelSize: pixelSize(for: w), fps: captureFPS(for: w))
     }
 
     // MARK: Modes
@@ -1407,24 +1696,34 @@ final class CanvasController: NSObject {
             if zoomOut { animate(to: overviewCamera()) }
             return
         }
-        sync { [weak self] in
-            guard let self, !self.isActive else { return }
-            self.isActive = true
-            self.camera.scale = 1
-            self.updateOverlayFrame()
-            self.view.render()
-            self.updateStreaming()
-            self.windows.forEach(self.updateCapture)
-            if CACurrentMediaTime() - self.lastWallpaperRefresh > 30 { self.refreshWallpaper() }
-            NSApp.activate(ignoringOtherApps: true)
-            self.overlay.level = OverlayWindow.canvasLevel
-            self.overlay.makeKeyAndOrderFront(nil)
-            self.overlay.makeFirstResponder(self.view)
-            self.returnCamera = nil
-            if zoomOut {
-                self.returnCamera = self.camera
-                self.animate(to: self.overviewCamera())
+        // Live tracking keeps the canvas current, so don't wait for a window scan (ScreenCaptureKit
+        // can take a second to answer when it's busy); one runs right after to catch anything new.
+        if hasSynced, !gliding {
+            enterNow(zoomOut: zoomOut)
+            sync()
+        } else {
+            sync { [weak self] in
+                guard let self, !self.isActive else { return }
+                self.enterNow(zoomOut: zoomOut)
             }
+        }
+    }
+
+    private func enterNow(zoomOut: Bool) {
+        isActive = true
+        camera.scale = 1
+        updateOverlayFrame()
+        view.render()
+        updateStreaming()
+        if CACurrentMediaTime() - lastWallpaperRefresh > 30 { refreshWallpaper() }
+        NSApp.activate(ignoringOtherApps: true)
+        overlay.level = OverlayWindow.canvasLevel
+        overlay.makeKeyAndOrderFront(nil)
+        overlay.makeFirstResponder(view)
+        returnCamera = nil
+        if zoomOut {
+            returnCamera = camera
+            animate(to: overviewCamera())
         }
     }
 
@@ -1440,22 +1739,25 @@ final class CanvasController: NSObject {
             // Straight back where you were, unless you've moved around since zooming out.
             target = returnCamera ?? Camera.centered(on: camera.center(in: viewSize), scale: 1, viewSize: viewSize)
         }
-        sharpen(for: target)
         animate(to: target, duration: 0.18) { [weak self] in
             guard let self else { return }
-            self.commit()
-            let toFocus = focus ?? self.windows.last(where: { !$0.parked })
-            if let toFocus {
-                self.focusWindow(toFocus)
-            }
-            // Give the window server a beat to show the moved windows, then sink the overlay
-            // beneath them so it becomes the desktop.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                self.overlay.level = OverlayWindow.backdropLevel
-                self.isActive = false
-                self.view.render()
-                self.windows.forEach(self.updateCapture)
-                self.updateStreamingSoon()
+            // Like a glide's last step: input waits while the real windows move in the background.
+            self.gliding = true
+            self.commitAsync {
+                let toFocus = focus ?? self.windows.last(where: { !$0.parked })
+                if let toFocus {
+                    self.focusWindow(toFocus)
+                }
+                // Give the window server a beat to show the moved windows, then sink the overlay
+                // beneath them so it becomes the desktop.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    self.overlay.level = OverlayWindow.backdropLevel
+                    self.isActive = false
+                    self.gliding = false
+                    self.pathRegion = nil
+                    self.view.render()
+                    self.updateStreamingLingering()
+                }
             }
         }
     }
@@ -1463,7 +1765,7 @@ final class CanvasController: NSObject {
     /// Requires camera.scale == 1.
     private func commit() {
         for (w, target, parked) in commitPlan() {
-            w.place(at: target)
+            if !alreadyAt(w, target, parked: parked) { w.place(at: target) }
             w.parked = parked
         }
         // Newly hidden windows need a live picture for the backdrop; newly visible ones don't.
@@ -1489,30 +1791,66 @@ final class CanvasController: NSObject {
 
     private let axQueue = DispatchQueue(label: "com.invignation.expanse.ax", qos: .userInteractive)
 
+    /// The real window is already where `target` would put it: where we last placed it, or, for
+    /// a parked window, anywhere in the corner (macOS nudges parked windows, so they never land
+    /// exactly on the park point and would otherwise be re-parked on every move).
+    private func alreadyAt(_ w: ManagedWindow, _ target: CGPoint, parked: Bool) -> Bool {
+        guard let last = w.lastPlaced else { return false }
+        return last.distance(to: target) < 0.5 || (parked && w.parked && inParkingCorner(last))
+    }
+
     /// Like commit(), but the Accessibility calls run off the main thread: a slow app (Chromium
-    /// apps animate AX moves) can't stall animations or key presses. Apps with Chromium's
-    /// enhanced-UI mode get it switched off while their windows move, then back on.
+    /// apps animate AX moves) can't stall animations or key presses. Each app gets a thread of its
+    /// own: apps answer Accessibility calls one at a time, so a slow one (a browser with many
+    /// windows) only holds up its own windows. The glide's target moves first. Apps with
+    /// Chromium's enhanced-UI mode get it switched off while their windows move, then back on.
     private func commitAsync(_ completion: @escaping () -> Void) {
         let jobs = commitPlan().compactMap { (w, target, parked) -> (ManagedWindow, AXUIElement, CGPoint, Bool)? in
-            if let last = w.lastPlaced, last.distance(to: target) < 0.5 { w.parked = parked; return nil }
+            if alreadyAt(w, target, parked: parked) { w.parked = parked; return nil }
             guard let ax = w.ax else { return nil }
             return (w, ax, target, parked)
         }
         guard !jobs.isEmpty else { scheduleSave(); completion(); return }
-        let work = jobs.map { (pid: $0.0.pid, ax: $0.1, target: $0.2) }
+        let first = glideTarget?.id
+        var byApp: [pid_t: [Int]] = [:]
+        for (i, job) in jobs.enumerated() { byApp[job.0.pid, default: []].append(i) }
+        let batches = byApp.map { pid, indices in
+            (pid: pid, jobs: indices.filter { jobs[$0].0.id == first } + indices.filter { jobs[$0].0.id != first })
+        }
+        let work = jobs.map { (ax: $0.1, target: $0.2, parked: $0.3) }
+        let started = CACurrentMediaTime()
         axQueue.async {
-            var landed: [CGPoint?] = []
-            let pids = Set(work.map(\.pid))
-            let enhanced = pids.filter { AX.enhancedUserInterface(pid: $0) }
-            enhanced.forEach { AX.setEnhancedUserInterface(false, pid: $0) }
-            for job in work {
-                AX.setPosition(job.ax, job.target)
-                landed.append(AX.position(job.ax))
+            var landed = [CGPoint?](repeating: nil, count: work.count)
+            var slowest: (pid: pid_t, ms: Int) = (0, 0)
+            let lock = NSLock()
+            DispatchQueue.concurrentPerform(iterations: batches.count) { b in
+                let batch = batches[b]
+                let t0 = CACurrentMediaTime()
+                let enhanced = AX.enhancedUserInterface(pid: batch.pid)
+                if enhanced { AX.setEnhancedUserInterface(false, pid: batch.pid) }
+                var results: [(Int, CGPoint?)] = []
+                for i in batch.jobs {
+                    AX.setPosition(work[i].ax, work[i].target)
+                    // Where exactly a parked window lands doesn't matter (see alreadyAt).
+                    results.append((i, work[i].parked ? nil : AX.position(work[i].ax)))
+                }
+                if enhanced { AX.setEnhancedUserInterface(true, pid: batch.pid) }
+                let ms = Int((CACurrentMediaTime() - t0) * 1000)
+                lock.lock()
+                for (i, p) in results { landed[i] = p }
+                if ms > slowest.ms { slowest = (batch.pid, ms) }
+                lock.unlock()
             }
-            enhanced.forEach { AX.setEnhancedUserInterface(true, pid: $0) }
+            let total = Int((CACurrentMediaTime() - started) * 1000)
+            if total > 150 {
+                let name = NSRunningApplication(processIdentifier: slowest.pid)?.localizedName ?? "pid \(slowest.pid)"
+                logger.info("slow: moving \(work.count) windows took \(total)ms (\(name, privacy: .public): \(slowest.ms)ms)")
+            }
             DispatchQueue.main.async {
+                let now = CACurrentMediaTime()
                 for ((w, _, target, parked), at) in zip(jobs, landed) {
                     w.lastPlaced = at ?? target
+                    w.lastPlacedAt = now
                     w.parked = parked
                 }
                 self.scheduleSave()
@@ -1549,10 +1887,10 @@ final class CanvasController: NSObject {
 
     /// expanse://dump — geometry for debugging alignment between proxies and real windows.
     func dump() {
-        logger.info("dump viewport=\(NSStringFromRect(self.viewport), privacy: .public) overlay=\(NSStringFromRect(self.overlay.frame), privacy: .public) view=\(NSStringFromRect(self.view.bounds), privacy: .public) camera=\(NSStringFromPoint(self.camera.origin), privacy: .public)@\(self.camera.scale) active=\(self.isActive)")
+        logger.info("dump viewport=\(NSStringFromRect(self.viewport), privacy: .public) overlay=\(NSStringFromRect(self.overlay.frame), privacy: .public) view=\(NSStringFromRect(self.view.bounds), privacy: .public) camera=\(NSStringFromPoint(self.camera.origin), privacy: .public)@\(self.camera.scale) active=\(self.isActive) gliding=\(self.gliding) animating=\(self.animation != nil) paused=\(self.isPaused) frontmost=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-", privacy: .public) focusedByApp=\(self.focusedWindowByApp.description, privacy: .public)")
         for w in windows {
             let axPos = w.ax.flatMap(AX.position).map { NSStringFromPoint($0) } ?? "nil"
-            logger.info("dump \(w.appName, privacy: .public)[\(w.id)] sc=\(NSStringFromRect(w.scWindow.frame), privacy: .public) ax=\(axPos, privacy: .public) canvas=\(NSStringFromRect(w.canvasFrame), privacy: .public) layer=\(NSStringFromRect(w.node.container.frame), privacy: .public) parked=\(w.parked) lastPlaced=\(w.lastPlaced.map { NSStringFromPoint($0) } ?? "nil", privacy: .public)")
+            logger.info("dump \(w.appName, privacy: .public)[\(w.id)] sc=\(NSStringFromRect(w.scWindow.frame), privacy: .public) ax=\(axPos, privacy: .public) canvas=\(NSStringFromRect(w.canvasFrame), privacy: .public) layer=\(NSStringFromRect(w.node.container.frame), privacy: .public) parked=\(w.parked) capturing=\(w.capture.isRunning) first=\(w.needsFirstFrame) lastPlaced=\(w.lastPlaced.map { NSStringFromPoint($0) } ?? "nil", privacy: .public)")
         }
     }
 
@@ -1669,13 +2007,19 @@ final class CanvasController: NSObject {
 
     private func cameraChanged() {
         view.render()
-        scheduleResolutionUpdate()
+        scheduleCaptureUpdate()
     }
 
     // MARK: Animation
 
     func animate(to target: Camera, duration: CFTimeInterval = 0.22, completion: (() -> Void)? = nil) {
         animation = CameraAnimation(from: camera, to: target, start: CACurrentMediaTime(), duration: duration, completion: completion)
+        if isActive {
+            // Pictures for everything the camera will pass over, before it gets there.
+            let screen = CGRect(origin: .zero, size: viewSize)
+            pathRegion = (pathRegion ?? .null).union(camera.toCanvas(screen)).union(target.toCanvas(screen))
+            updateStreaming()
+        }
         if displayLink == nil {
             let link = view.displayLink(target: self, selector: #selector(tick(_:)))
             link.add(to: .main, forMode: .common)
@@ -1707,9 +2051,12 @@ final class CanvasController: NSObject {
         camera = Camera.centered(on: CGPoint(x: lerp(c0.x, c1.x, e), y: lerp(c0.y, c1.y, e)), scale: s, viewSize: viewSize)
         if t >= 1 {
             lastAnimationStats = "first frame after \(Int((a.firstFrame - a.start) * 1000))ms, \(a.frames) frames, max gap \(Int(a.maxGap * 1000))ms"
+            if a.maxGap > 0.034 || a.firstFrame - a.start > 0.034 { logger.info("slow: animation \(self.lastAnimationStats, privacy: .public)") }
             camera = a.to
             animation = nil
             stopDisplayLink()
+            // A glide keeps its path until it hands back; elsewhere the view is all that's left.
+            if !gliding { pathRegion = nil }
             cameraChanged()
             a.completion?()
         } else {

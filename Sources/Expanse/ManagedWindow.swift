@@ -17,6 +17,8 @@ final class ManagedWindow {
     /// Where the real window actually ended up the last time we placed it (global CG coords).
     /// If the window is later found somewhere else, the user (or the app) moved it.
     var lastPlaced: CGPoint?
+    /// When we last placed it (CACurrentMediaTime), to recognise the echo of our own move.
+    var lastPlacedAt: CFTimeInterval = 0
     /// The size the user chose. On a small screen the real window may be shrunk to fit.
     var preferredSize: CGSize = .zero
     /// The size we last set, so our own resizes aren't mistaken for the user's.
@@ -44,6 +46,14 @@ final class ManagedWindow {
         node.label.string = appName
     }
 
+    /// The element if it's been looked up already (no Accessibility call).
+    var knownAX: AXUIElement? { axElement }
+
+    /// An element found elsewhere (a window scan), saving a lookup.
+    func adopt(ax element: AXUIElement) {
+        if axElement == nil { axElement = element }
+    }
+
     var ax: AXUIElement? {
         if let axElement { return axElement }
         axElement = AX.windows(pid: pid).first { AX.windowID($0) == id }
@@ -54,9 +64,10 @@ final class ManagedWindow {
     func place(at point: CGPoint) {
         guard let ax else { return }
         if let last = lastPlaced, last.distance(to: point) < 0.5 { return }
-        let before = AX.position(ax)
+        let before = lastPlaced
         AX.setPosition(ax, point)
         lastPlaced = AX.position(ax) ?? point
+        lastPlacedAt = CACurrentMediaTime()
         if let before, before.distance(to: lastPlaced!) >= 1 {
             logger.info("move \(self.appName, privacy: .public)[\(self.id)] \(NSStringFromPoint(before), privacy: .public) -> \(NSStringFromPoint(self.lastPlaced!), privacy: .public) (asked \(NSStringFromPoint(point), privacy: .public))")
         }
@@ -126,6 +137,7 @@ final class WindowNode {
         label.alignmentMode = .left
         label.truncationMode = .end
         label.isWrapped = false
+        label.anchorPoint = .zero
     }
 
     func setContentsScale(_ s: CGFloat) {
@@ -158,7 +170,10 @@ final class WindowNode {
         container.isHidden = !visible
         label.isHidden = !visible || screenRect.width < 70
         guard visible else { return }
-        label.frame = CGRect(x: screenRect.minX + 2, y: screenRect.maxY + 5, width: max(screenRect.width - 4, 60), height: 15)
+        // Text layers redraw when resized, so while zooming the width only changes in 32pt steps.
+        let width = max((max(screenRect.width - 4, 60) / 32).rounded(.down) * 32, 60)
+        if label.bounds.width != width { label.bounds = CGRect(x: 0, y: 0, width: width, height: 15) }
+        label.position = CGPoint(x: screenRect.minX + 2, y: screenRect.maxY + 5)
         if let styled, styled.scale == s, styled.hovered == hovered, styled.selected == selected { return }
         styled = (s, hovered, selected)
         highlight.borderWidth = (selected ? 3 : hovered ? 2 : 0) / s

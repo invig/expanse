@@ -7,10 +7,13 @@ final class AppObserver {
     let pid: pid_t
     private let app: AXUIElement
     private var observer: AXObserver?
-    private var observedWindows = Set<CGWindowID>()
-    private let handler: (AXUIElement, String) -> Void
+    /// Observed windows' elements and IDs. Asking an element for its window ID is a round trip
+    /// to the app; comparing elements (CFEqual) is local.
+    private var observedWindows: [(element: AXUIElement, id: CGWindowID)] = []
+    /// Called with the element, the notification and, for an observed window, its ID.
+    private let handler: (AXUIElement, String, CGWindowID?) -> Void
 
-    init?(pid: pid_t, handler: @escaping (AXUIElement, String) -> Void) {
+    init?(pid: pid_t, handler: @escaping (AXUIElement, String, CGWindowID?) -> Void) {
         self.pid = pid
         self.app = AXUIElementCreateApplication(pid)
         self.handler = handler
@@ -18,7 +21,7 @@ final class AppObserver {
         let callback: AXObserverCallback = { _, element, notification, refcon in
             guard let refcon else { return }
             let me = Unmanaged<AppObserver>.fromOpaque(refcon).takeUnretainedValue()
-            me.handler(element, notification as String)
+            me.handler(element, notification as String, me.windowID(of: element))
         }
         guard AXObserverCreate(pid, callback, &created) == .success, let created else { return nil }
         observer = created
@@ -34,7 +37,8 @@ final class AppObserver {
     }
 
     func observe(window element: AXUIElement, id: CGWindowID) {
-        guard observedWindows.insert(id).inserted else { return }
+        guard !observedWindows.contains(where: { $0.id == id }) else { return }
+        observedWindows.append((element, id))
         for n in [kAXMovedNotification, kAXResizedNotification, kAXUIElementDestroyedNotification,
                   kAXWindowMiniaturizedNotification] {
             add(element, n)
@@ -42,7 +46,11 @@ final class AppObserver {
     }
 
     func forget(_ id: CGWindowID) {
-        observedWindows.remove(id)
+        observedWindows.removeAll { $0.id == id }
+    }
+
+    private func windowID(of element: AXUIElement) -> CGWindowID? {
+        observedWindows.first { CFEqual($0.element, element) }?.id
     }
 
     private func add(_ element: AXUIElement, _ notification: String) {

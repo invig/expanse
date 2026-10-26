@@ -7,7 +7,7 @@ let logger = Logger(subsystem: "com.invignation.expanse", category: "canvas")
 /// One ScreenCaptureKit stream per window. Desktop-independent window capture keeps
 /// delivering content while the window is covered by the overlay or parked off-screen.
 final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
-    /// Called on the main thread with each new frame.
+    /// Called on the main thread with the newest frame (see FramePump).
     var onFrame: ((IOSurface) -> Void)?
     /// Called on the main thread when the stream dies (usually: window closed).
     var onStop: (() -> Void)?
@@ -15,8 +15,10 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "com.invignation.expanse.capture", qos: .userInteractive)
     private var recentSamples: [CMSampleBuffer] = []
+    /// What the stream should be configured as; `configured` is what it was last told.
     private(set) var pixelSize: CGSize = .zero
     private(set) var fps: Int = 0
+    private var configured: (size: CGSize, fps: Int) = (.zero, 0)
     private var starting = false
     /// Whether the stream should be running; a pause during start-up stops it once it's up.
     private var wanted = false
@@ -27,39 +29,54 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         wanted = true
         guard !isRunning else { return }
         starting = true
-        let filter = SCContentFilter(desktopIndependentWindow: window)
-        let config = Self.configuration(pixelSize: pixelSize, fps: fps)
-        let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        do {
-            try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
-        } catch {
-            logger.error("addStreamOutput failed: \(error.localizedDescription)")
-            starting = false
-            return
-        }
         self.pixelSize = pixelSize
         self.fps = fps
-        stream.startCapture { [weak self] error in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.starting = false
-                if let error {
-                    logger.error("startCapture failed for \(window.windowID): \(error.localizedDescription)")
-                    self.onStop?()
-                } else {
-                    self.stream = stream
-                    if !self.wanted { self.pause() }
+        configured = (pixelSize, fps)
+        let config = Self.configuration(pixelSize: pixelSize, fps: fps)
+        // Setting a stream up takes a millisecond or two; do it on the capture queue, so starting
+        // dozens at once (zooming out) doesn't hold up the main thread.
+        queue.async { [weak self] in
+            guard let self else { return }
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            let stream = SCStream(filter: filter, configuration: config, delegate: self)
+            do {
+                try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.queue)
+            } catch {
+                logger.error("addStreamOutput failed: \(error.localizedDescription)")
+                DispatchQueue.main.async { self.starting = false }
+                return
+            }
+            stream.startCapture { [weak self] error in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.starting = false
+                    if let error {
+                        logger.error("startCapture failed for \(window.windowID): \(error.localizedDescription)")
+                        self.onStop?()
+                    } else {
+                        self.stream = stream
+                        if !self.wanted { self.pause() } else { self.applyConfiguration() }
+                    }
                 }
             }
         }
     }
 
+    /// Takes effect once the stream is up if it's still starting.
     func update(pixelSize: CGSize, fps: Int) {
-        guard let stream, pixelSize != self.pixelSize || fps != self.fps else { return }
         self.pixelSize = pixelSize
         self.fps = fps
-        stream.updateConfiguration(Self.configuration(pixelSize: pixelSize, fps: fps)) { error in
-            if let error { logger.error("updateConfiguration failed: \(error.localizedDescription)") }
+        applyConfiguration()
+    }
+
+    private func applyConfiguration() {
+        guard let stream, pixelSize != configured.size || fps != configured.fps else { return }
+        configured = (pixelSize, fps)
+        let config = Self.configuration(pixelSize: pixelSize, fps: fps)
+        queue.async {
+            stream.updateConfiguration(config) { error in
+                if let error { logger.error("updateConfiguration failed: \(error.localizedDescription)") }
+            }
         }
     }
 
@@ -67,14 +84,16 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// keeps showing the last frame meanwhile.
     func pause() {
         wanted = false
+        // Only the picture on the layer is needed now; let ScreenCaptureKit have the rest back.
+        if recentSamples.count > 1 { recentSamples.removeFirst(recentSamples.count - 1) }
         guard let stream else { return }
-        stream.stopCapture(completionHandler: nil)
+        queue.async { stream.stopCapture(completionHandler: nil) }
         self.stream = nil
     }
 
     func stop() {
         wanted = false
-        stream?.stopCapture(completionHandler: nil)
+        if let stream { queue.async { stream.stopCapture(completionHandler: nil) } }
         stream = nil
         onFrame = nil
         onStop = nil
@@ -103,17 +122,20 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
               let info = attachments.first,
               let rawStatus = info[.status] as? Int,
               SCFrameStatus(rawValue: rawStatus) == .complete,
-              let pixelBuffer = sampleBuffer.imageBuffer,
-              let surface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue()
+              sampleBuffer.imageBuffer != nil
         else { return }
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            // Hold a few buffers so ScreenCaptureKit doesn't recycle a surface still on screen.
-            self.recentSamples.append(sampleBuffer)
-            if self.recentSamples.count > 3 { self.recentSamples.removeFirst() }
-            self.onFrame?(surface)
-        }
+        FramePump.shared.post(sampleBuffer, for: self)
+    }
+
+    /// Main thread: show a frame (see FramePump).
+    fileprivate func deliver(_ sample: CMSampleBuffer) {
+        guard let pixelBuffer = sample.imageBuffer,
+              let surface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue() else { return }
+        // Hold a few buffers so ScreenCaptureKit doesn't recycle a surface still on screen.
+        recentSamples.append(sample)
+        if recentSamples.count > 3 { recentSamples.removeFirst() }
+        onFrame?(surface)
     }
 
     // MARK: SCStreamDelegate
@@ -125,5 +147,39 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             self.stream = nil
             self.onStop?()
         }
+    }
+}
+
+/// Hands frames from every stream to the main thread in batches: each window's newest frame,
+/// all applied in one Core Animation transaction, at most every 8ms. With 50 windows streaming
+/// on the canvas that's a few hundred frames a second, and one main-thread hop and transaction
+/// each would cost more than drawing them. A frame that arrives while an older one from the
+/// same window is still waiting replaces it, so a busy main thread never works through a backlog.
+private final class FramePump {
+    static let shared = FramePump()
+    private let lock = NSLock()
+    private var pending: [ObjectIdentifier: (capture: WindowCapture, sample: CMSampleBuffer)] = [:]
+    private var scheduled = false
+
+    func post(_ sample: CMSampleBuffer, for capture: WindowCapture) {
+        lock.lock()
+        pending[ObjectIdentifier(capture)] = (capture, sample)
+        let schedule = !scheduled
+        scheduled = true
+        lock.unlock()
+        guard schedule else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.008) { self.drain() }
+    }
+
+    private func drain() {
+        lock.lock()
+        let batch = pending
+        pending = [:]
+        scheduled = false
+        lock.unlock()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for entry in batch.values { entry.capture.deliver(entry.sample) }
+        CATransaction.commit()
     }
 }
