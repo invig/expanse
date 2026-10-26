@@ -1696,14 +1696,20 @@ final class CanvasController: NSObject {
         }
         candidates.sort { $0.shown != $1.shown ? $0.shown > $1.shown : $0.distance < $1.distance }
         let ranked: [ManagedWindow] = candidates.map { $0.w }
-        var streamed = Set(ranked.prefix(Self.streamBudget).map(\.id))
-        // Spare places keep streams that are still nearby running (no churn at the margins).
-        for (w, want) in zip(windows, wants) where streamed.count < Self.streamBudget
+        // At 100% nothing streams: what shows of parked windows is a sliver at the edge of the
+        // screen, and a snapshot every second or so looks the same as a stream for a fraction of
+        // the memory (a stream keeps a pool of full-size buffers).
+        let budget = isActive ? Self.streamBudget : 0
+        var streamed = Set(ranked.prefix(budget).map(\.id))
+        // Spare places keep streams that are still nearby running (no churn at the margins, and
+        // streams linger after the canvas; see wantsCapture).
+        let keepRunning = isActive || CACurrentMediaTime() < lingerUntil
+        for (w, want) in zip(windows, wants) where keepRunning && streamed.count < Self.streamBudget
             && want.keep && w.capture.isRunning && !w.needsFirstFrame {
             streamed.insert(w.id)
         }
-        snapshotQueue = ranked.dropFirst(Self.streamBudget).map(\.id)
-        captureLoad = min(ranked.count, Self.streamBudget)
+        snapshotQueue = ranked.filter { !streamed.contains($0.id) }.map(\.id)
+        captureLoad = min(ranked.count, budget)
         var toStart: [ManagedWindow] = []
         for w in ranked where streamed.contains(w.id) {
             if !w.capture.isRunning {
@@ -1764,7 +1770,8 @@ final class CanvasController: NSObject {
         }
         let firsts = windows.filter { $0.needsFirstFrame && !$0.capture.isRunning && due($0, every: 2) }
         let byID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        var refresh = snapshotQueue.compactMap { byID[$0] }.filter { due($0, every: 1.5) }
+        // (At 100% they're slivers at the edge of the screen: every 3s is plenty.)
+        var refresh = snapshotQueue.compactMap { byID[$0] }.filter { due($0, every: isActive ? 1.5 : 3) }
             .sorted { $0.lastSnapshotAt < $1.lastSnapshotAt }
         let blurry = isActive ? [] : windows.filter(pictureNeedsResizing)
         if refresh.isEmpty, now - lastSharpening > 0.25 {

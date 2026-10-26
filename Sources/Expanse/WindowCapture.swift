@@ -123,7 +123,9 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         c.height = max(2, Int(pixelSize.height.rounded()))
         c.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, fps)))
         c.pixelFormat = kCVPixelFormatType_32BGRA
-        c.queueDepth = 5
+        // Each buffer in the pool is a full picture (tens of MB for a big window at full size): a
+        // pool of four covers the two held below plus one in flight to the main thread.
+        c.queueDepth = 4
         c.showsCursor = false
         c.scalesToFit = true
         c.ignoreShadowsSingleWindow = true
@@ -150,10 +152,10 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     fileprivate func deliver(_ sample: CMSampleBuffer, snapshot: Bool) {
         guard let pixelBuffer = sample.imageBuffer,
               let surface = CVPixelBufferGetIOSurface(pixelBuffer)?.takeUnretainedValue() else { return }
-        // A stream recycles its buffers, so hold a few: one still on screen mustn't be reused.
-        // A snapshot's buffer is its own; the last one is all that's needed.
+        // A stream recycles its buffers, so hold the one on screen and the one before (the window
+        // server may still be drawing it). A snapshot's buffer is its own; one is enough.
         if snapshot { recentSamples = [sample] } else { recentSamples.append(sample) }
-        if recentSamples.count > 3 { recentSamples.removeFirst() }
+        if recentSamples.count > 2 { recentSamples.removeFirst() }
         onFrame?(surface)
     }
 

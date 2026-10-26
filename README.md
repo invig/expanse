@@ -141,8 +141,9 @@ Expanse runs on a stock, SIP-enabled Mac. That shapes everything:
   hidden, on a background thread.
 - **Capture only what can be seen.** Every stream costs the window server work, and macOS marks
   every captured window with a purple indicator. Expanse streams the windows in view while zoomed
-  out or gliding (when the backdrop covers them anyway), and at 100% only parked windows whose
-  picture shows on the backdrop. Pictures are captured at the size they're drawn.
+  out or gliding (when the backdrop covers them anyway); at 100% nothing streams, and the slivers
+  of parked windows showing at the screen's edges are refreshed with snapshots. Pictures are
+  captured at the size they're drawn.
 - **Sixteen streams at most.** The system service behind every screen capture on the Mac runs
   out of file descriptors at a few dozen streams (other apps' included), after which new streams
   silently get no frames. So the sixteen most visible windows stream; every other window in view
