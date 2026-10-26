@@ -219,6 +219,7 @@ final class CanvasView: NSView {
     // MARK: Trackpad
 
     override func scrollWheel(with e: NSEvent) {
+        guard !controller.gliding else { return }
         guard controller.isActive else { controller.enter(zoomOut: false); return }
         if e.modifierFlags.contains(.command) {
             let k: CGFloat = e.hasPreciseScrollingDeltas ? 0.006 : 0.06
@@ -230,11 +231,13 @@ final class CanvasView: NSView {
     }
 
     override func magnify(with e: NSEvent) {
+        guard !controller.gliding else { return }
         guard controller.isActive else { controller.enter(zoomOut: false); return }
         controller.zoom(by: 1 + e.magnification, at: point(e))
     }
 
     override func smartMagnify(with e: NSEvent) {
+        guard !controller.gliding else { return }
         guard controller.isActive else { controller.enter(zoomOut: true); return }
         controller.toggleOverview(at: point(e))
     }
@@ -242,6 +245,7 @@ final class CanvasView: NSView {
     // MARK: Mouse
 
     override func mouseDown(with e: NSEvent) {
+        guard !controller.gliding else { return }
         guard controller.isActive else {
             // Live mode: a click on a parked window's picture on the backdrop goes to that window.
             drag = .none
@@ -287,6 +291,7 @@ final class CanvasView: NSView {
     }
 
     override func mouseDragged(with e: NSEvent) {
+        guard !controller.gliding else { return }
         guard controller.isActive else { controller.enter(zoomOut: false); return }
         let p = point(e)
         let s = controller.camera.scale
@@ -359,6 +364,7 @@ final class CanvasView: NSView {
     // MARK: Keyboard
 
     override func keyDown(with e: NSEvent) {
+        guard !controller.gliding else { return }
         guard controller.isActive else { super.keyDown(with: e); return }
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         switch Int(e.keyCode) {

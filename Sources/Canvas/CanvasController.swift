@@ -327,6 +327,7 @@ final class CanvasController: NSObject {
         logger.info("glide to \(w.appName, privacy: .public)[\(w.id)]")
         guard !isActive, animation == nil else { return }
         isActive = true
+        gliding = true
         bringToFront(w)
         view.render()
         // Cover the screen first, so resizing (which may briefly move the window) isn't seen.
@@ -343,7 +344,12 @@ final class CanvasController: NSObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                 self.overlay.level = OverlayWindow.backdropLevel
                 self.isActive = false
+                self.gliding = false
                 self.view.render()
+                if let next = self.pendingNavigation {
+                    self.pendingNavigation = nil
+                    self.navigate(next)
+                }
             }
         }
     }
@@ -452,6 +458,7 @@ final class CanvasController: NSObject {
 
     func toggle() {
         if isPaused { resume(); return }
+        guard !gliding else { return }
         isActive ? exit() : enter(zoomOut: true)
     }
 
@@ -671,11 +678,17 @@ final class CanvasController: NSObject {
     // MARK: Spatial navigation
 
     enum Direction { case left, right, up, down }
+    /// A live-mode glide is running: the overlay is up, but it isn't canvas mode.
+    private(set) var gliding = false
+    private var pendingNavigation: Direction?
 
     /// ⌃ + arrow: go to the nearest window that way. At 100% it's focused (gliding to it if it
     /// isn't fully on screen); on the zoomed-out canvas the highlight moves and the view follows.
     func navigate(_ direction: Direction) {
-        guard !isPaused, animation == nil else { return }
+        guard !isPaused else { return }
+        // Mid-glide the overlay is up but this isn't canvas mode: run the hop once it lands.
+        if gliding { pendingNavigation = direction; return }
+        guard animation == nil else { return }
         let from: CGRect
         if isActive {
             from = (view.hovered ?? windows.last)?.canvasFrame
@@ -706,34 +719,46 @@ final class CanvasController: NSObject {
         }
     }
 
-    /// The window whose centre lies in `direction` from `from`, preferring ones that share a row
-    /// (for left / right) or column (for up / down), then the shortest hop.
+    /// The nearest window in `direction`. A window sharing the row (for left / right) or column
+    /// (for up / down) wins outright, nearest first; failing that, the closest window within ~35°
+    /// of straight that way. Windows mostly above or below never count as left or right.
     private func nearest(_ direction: Direction, from: CGRect) -> ManagedWindow? {
-        func gap(_ a0: CGFloat, _ a1: CGFloat, _ b0: CGFloat, _ b1: CGFloat) -> CGFloat {
-            max(0, max(a0, b0) - min(a1, b1))   // 0 when the ranges overlap
+        Self.nearest(direction, from: from, in: windows.map(\.canvasFrame)).map { windows[$0] }
+    }
+
+    static func nearest(_ direction: Direction, from: CGRect, in frames: [CGRect]) -> Int? {
+        func shared(_ a0: CGFloat, _ a1: CGFloat, _ b0: CGFloat, _ b1: CGFloat) -> Bool {
+            // Overlap of at least a third of the smaller span.
+            min(a1, b1) - max(a0, b0) >= min(a1 - a0, b1 - b0) / 3
         }
-        var best: (ManagedWindow, CGFloat)?
-        for w in windows where w.canvasFrame != from {
-            let r = w.canvasFrame
-            let along: CGFloat, across: CGFloat
+        var inLine: (Int, CGFloat)?
+        var inCone: (Int, CGFloat)?
+        for (i, r) in frames.enumerated() where r != from {
+            let dx = r.midX - from.midX, dy = r.midY - from.midY
+            let ahead: Bool, gap: CGFloat, sameLine: Bool, withinCone: Bool
             switch direction {
             case .right:
-                guard r.midX > from.midX + 1 else { continue }
-                along = max(0, r.minX - from.maxX); across = gap(r.minY, r.maxY, from.minY, from.maxY)
+                ahead = dx > 1 && r.minX > from.minX; gap = r.minX - from.maxX
+                sameLine = shared(r.minY, r.maxY, from.minY, from.maxY); withinCone = abs(dy) <= dx * 0.7
             case .left:
-                guard r.midX < from.midX - 1 else { continue }
-                along = max(0, from.minX - r.maxX); across = gap(r.minY, r.maxY, from.minY, from.maxY)
+                ahead = dx < -1 && r.maxX < from.maxX; gap = from.minX - r.maxX
+                sameLine = shared(r.minY, r.maxY, from.minY, from.maxY); withinCone = abs(dy) <= -dx * 0.7
             case .down:
-                guard r.midY > from.midY + 1 else { continue }
-                along = max(0, r.minY - from.maxY); across = gap(r.minX, r.maxX, from.minX, from.maxX)
+                ahead = dy > 1 && r.minY > from.minY; gap = r.minY - from.maxY
+                sameLine = shared(r.minX, r.maxX, from.minX, from.maxX); withinCone = abs(dx) <= dy * 0.7
             case .up:
-                guard r.midY < from.midY - 1 else { continue }
-                along = max(0, from.minY - r.maxY); across = gap(r.minX, r.maxX, from.minX, from.maxX)
+                ahead = dy < -1 && r.maxY < from.maxY; gap = from.minY - r.maxY
+                sameLine = shared(r.minX, r.maxX, from.minX, from.maxX); withinCone = abs(dx) <= -dy * 0.7
             }
-            let score = along + across * 3 + r.center.distance(to: from.center) * 0.1
-            if score < (best?.1 ?? .infinity) { best = (w, score) }
+            guard ahead else { continue }
+            if sameLine {
+                if gap < (inLine?.1 ?? .infinity) { inLine = (i, gap) }
+            } else if withinCone {
+                let d = r.center.distance(to: from.center)
+                if d < (inCone?.1 ?? .infinity) { inCone = (i, d) }
+            }
         }
-        return best?.0
+        return inLine?.0 ?? inCone?.0
     }
 
     // MARK: System prompts
