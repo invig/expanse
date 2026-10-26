@@ -35,6 +35,9 @@ final class CanvasController: NSObject {
     private var saved: SavedLayout?
     private var savedPool: [SavedLayout.Window] = []
     private var lastSavedLayout: Data?
+    let hotCorner = HotCorner()
+    private var wallpaperTimer: Timer?
+    private var lastWallpaperRefresh: CFTimeInterval = 0
 
     private struct CameraAnimation {
         var from: Camera
@@ -94,6 +97,7 @@ final class CanvasController: NSObject {
         let f = screen.frame
         let vp = viewport
         overlay.setFrame(NSRect(x: f.minX + vp.minX, y: f.maxY - vp.maxY, width: vp.width, height: vp.height), display: false)
+        view.menuBarHeight = vp.minY
     }
 
     // MARK: Display changes
@@ -159,6 +163,7 @@ final class CanvasController: NSObject {
         }
         lastViewportSize = newSize
         updateOverlayFrame()
+        if final { refreshWallpaper() }
         // Whatever macOS did to the real windows, re-place all of them.
         windows.forEach { $0.lastPlaced = nil }
         if !isActive { commit() }
@@ -203,6 +208,29 @@ final class CanvasController: NSObject {
                                                           name: NSWorkspace.didActivateApplicationNotification, object: nil)
         overlay.level = OverlayWindow.backdropLevel
         overlay.orderFrontRegardless()
+
+        hotCorner.onTrigger = { [weak self] in
+            guard let self, !self.isPaused else { return }
+            self.toggle()
+        }
+        hotCorner.start()
+
+        refreshWallpaper()
+        // Dynamic wallpapers change through the day; Spaces can each have their own picture.
+        wallpaperTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in self?.refreshWallpaper() }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
+                                                          object: nil, queue: .main) { [weak self] _ in
+            self?.refreshWallpaper()
+        }
+    }
+
+    func refreshWallpaper() {
+        lastWallpaperRefresh = CACurrentMediaTime()
+        guard Wallpaper.enabled else { view.setWallpaper(nil); return }
+        Wallpaper.capture(screen: screen) { [weak self] image in
+            guard Wallpaper.enabled else { return }
+            self?.view.setWallpaper(image)
+        }
     }
 
     /// ⌘-Tab / Dock to an app whose window is parked: jump the canvas to that window.
@@ -619,6 +647,7 @@ final class CanvasController: NSObject {
             self.updateOverlayFrame()
             self.view.render()
             self.windows.forEach(self.updateCapture)
+            if CACurrentMediaTime() - self.lastWallpaperRefresh > 30 { self.refreshWallpaper() }
             NSApp.activate(ignoringOtherApps: true)
             self.overlay.level = OverlayWindow.canvasLevel
             self.overlay.makeKeyAndOrderFront(nil)

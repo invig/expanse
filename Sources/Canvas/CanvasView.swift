@@ -6,8 +6,11 @@ import Carbon.HIToolbox
 final class CanvasView: NSView {
     weak var controller: CanvasController!
 
+    private let wallpaper = CALayer()
     private let world = CALayer()
     private let labels = CALayer()
+    /// Height of the menu bar strip the wallpaper extends under, so it lines up with the real desktop.
+    var menuBarHeight: CGFloat = 0 { didSet { needsLayout = true } }
     private let guides = CAShapeLayer()
     private let minimap = Minimap()
     var hovered: ManagedWindow?
@@ -26,6 +29,10 @@ final class CanvasView: NSView {
         wantsLayer = true
         layerContentsRedrawPolicy = .never
         guard let root = layer else { return }
+        root.masksToBounds = true
+        wallpaper.contentsGravity = .resizeAspectFill
+        wallpaper.actions = ["contents": NSNull()]
+        root.addSublayer(wallpaper)
         for l in [world, labels, guides] {
             l.actions = ["sublayers": NSNull()]
             root.addSublayer(l)
@@ -47,6 +54,8 @@ final class CanvasView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for l in [world, labels, guides] { l.frame = bounds }
+        // Pinned exactly where the real desktop picture is: the top strip sits under the menu bar.
+        wallpaper.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + menuBarHeight)
         minimap.frame.origin = CGPoint(x: bounds.maxX - Minimap.size.width - 16, y: 16)
         CATransaction.commit()
         render()
@@ -66,11 +75,35 @@ final class CanvasView: NSView {
 
     private var isDark: Bool { effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
 
+    func setWallpaper(_ image: CGImage?) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        wallpaper.contents = image
+        wallpaper.isHidden = image == nil
+        CATransaction.commit()
+        applyAppearance()
+    }
+
+    private var hasWallpaper: Bool { wallpaper.contents != nil && !wallpaper.isHidden }
+
     private func applyAppearance() {
         let background = (isDark ? NSColor(white: 0.13, alpha: 1) : NSColor(white: 0.85, alpha: 1)).cgColor
         layer?.backgroundColor = background
-        let labelColor = isDark ? NSColor(white: 0.7, alpha: 1) : NSColor(white: 0.3, alpha: 1)
-        controller?.windows.forEach { $0.node.label.foregroundColor = labelColor.cgColor }
+        controller?.windows.forEach { styleLabel($0.node.label) }
+    }
+
+    /// White with a shadow over a desktop picture; quiet grey over the plain background.
+    private func styleLabel(_ label: CATextLayer) {
+        if hasWallpaper {
+            label.foregroundColor = NSColor(white: 1, alpha: 0.95).cgColor
+            label.shadowColor = NSColor.black.cgColor
+            label.shadowOpacity = 0.7
+            label.shadowRadius = 2
+            label.shadowOffset = CGSize(width: 0, height: -1)
+        } else {
+            label.foregroundColor = (isDark ? NSColor(white: 0.7, alpha: 1) : NSColor(white: 0.3, alpha: 1)).cgColor
+            label.shadowOpacity = 0
+        }
     }
 
     override func updateTrackingAreas() {
@@ -84,8 +117,7 @@ final class CanvasView: NSView {
     func addNode(_ n: WindowNode) {
         world.addSublayer(n.container)
         labels.addSublayer(n.label)
-        let labelColor = isDark ? NSColor(white: 0.7, alpha: 1) : NSColor(white: 0.3, alpha: 1)
-        n.label.foregroundColor = labelColor.cgColor
+        styleLabel(n.label)
     }
 
     func removeNode(_ n: WindowNode) {

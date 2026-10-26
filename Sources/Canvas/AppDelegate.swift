@@ -7,6 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotKey: HotKey?
     private var signalSources: [DispatchSourceSignal] = []
     private let accessibilityItem = NSMenuItem(title: "", action: #selector(openAccessibilitySettings), keyEquivalent: "")
+    private let cornerMenu = NSMenu()
+    private let wallpaperItem = NSMenuItem(title: "Desktop Picture Background", action: #selector(toggleWallpaper), keyEquivalent: "")
     private let pauseItem = NSMenuItem(title: "Pause Canvas", action: #selector(togglePause), keyEquivalent: "")
     private let screenRecordingItem = NSMenuItem(title: "", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
 
@@ -81,6 +83,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         open.keyEquivalentModifierMask = [.option]
         menu.addItem(open)
         menu.addItem(pauseItem)
+        menu.addItem(.separator())
+        let cornerItem = NSMenuItem(title: "Hot Corner", action: nil, keyEquivalent: "")
+        cornerItem.submenu = cornerMenu
+        for corner in HotCorner.Corner.allCases {
+            let item = NSMenuItem(title: corner.title, action: #selector(pickCorner(_:)), keyEquivalent: "")
+            item.representedObject = corner.rawValue
+            item.target = self
+            cornerMenu.addItem(item)
+        }
+        menu.addItem(cornerItem)
+        menu.addItem(wallpaperItem)
         menu.addItem(NSMenuItem(title: "Restore All Windows", action: #selector(restoreAll), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(accessibilityItem)
@@ -94,6 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         let ax = AX.isTrusted(prompt: false)
         let sr = CGPreflightScreenCaptureAccess()
+        for item in cornerMenu.items {
+            item.state = (item.representedObject as? String) == controller.hotCorner.corner.rawValue ? .on : .off
+        }
+        wallpaperItem.state = Wallpaper.enabled ? .on : .off
         pauseItem.title = controller.isPaused ? "Resume Canvas" : "Pause Canvas (back to macOS layout)"
         accessibilityItem.title = ax ? "Accessibility: granted" : "Grant Accessibility…"
         screenRecordingItem.title = sr ? "Screen Recording: granted" : "Grant Screen Recording…"
@@ -101,6 +118,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleCanvas() { controller.toggle() }
     @objc private func restoreAll() { controller.restoreAll() }
+    @objc private func pickCorner(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let corner = HotCorner.Corner(rawValue: raw) else { return }
+        controller.hotCorner.corner = corner
+    }
+
+    @objc private func toggleWallpaper() {
+        Wallpaper.enabled.toggle()
+        controller.refreshWallpaper()
+    }
+
     @objc private func togglePause() { controller.isPaused ? controller.resume() : controller.pause() }
 
     @objc private func openAccessibilitySettings() {
