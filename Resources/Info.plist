@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.invignation.canvas</string>
+    <string>com.invignation.expanse</string>
     <key>CFBundleName</key>
-    <string>Canvas</string>
+    <string>Expanse</string>
     <key>CFBundleDisplayName</key>
-    <string>Canvas</string>
+    <string>Expanse</string>
     <key>CFBundleExecutable</key>
-    <string>Canvas</string>
+    <string>Expanse</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -26,10 +26,10 @@
     <array>
         <dict>
             <key>CFBundleURLName</key>
-            <string>com.invignation.canvas</string>
+            <string>com.invignation.expanse</string>
             <key>CFBundleURLSchemes</key>
             <array>
-                <string>canvas</string>
+                <string>expanse</string>
             </array>
         </dict>
     </array>

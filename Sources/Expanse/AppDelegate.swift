@@ -12,15 +12,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let accessibilityItem = NSMenuItem(title: "", action: #selector(openAccessibilitySettings), keyEquivalent: "")
     private let cornerMenu = NSMenu()
     private let wallpaperItem = NSMenuItem(title: "Desktop Picture Background", action: #selector(toggleWallpaper), keyEquivalent: "")
-    private let pauseItem = NSMenuItem(title: "Pause Canvas", action: #selector(togglePause), keyEquivalent: "")
+    private let pauseItem = NSMenuItem(title: "Pause Expanse", action: #selector(togglePause), keyEquivalent: "")
     private let screenRecordingItem = NSMenuItem(title: "", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setUpStatusItem()
 
-        let trusted = AX.isTrusted(prompt: true)
-        let canRecord = CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
+        // No system permission prompts out of the blue: the walkthrough explains each one first.
+        let trusted = AX.isTrusted(prompt: false)
+        let canRecord = CGPreflightScreenCaptureAccess()
         logger.info("accessibility=\(trusted) screenRecording=\(canRecord)")
+        if Onboarding.needed { Onboarding.show {} }
 
         // ⌥` toggles the canvas.
         hotKey = HotKey(keyCode: kVK_ANSI_Grave, modifiers: optionKey, id: 1) { [weak self] in
@@ -51,10 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.start()
     }
 
-    /// canvas://toggle | enter | exit | fit | restore | zoom?scale=0.5 | pan?dx=100&dy=0 | focus?app=Safari
+    /// expanse://toggle | enter | exit | fit | restore | zoom?scale=0.5 | pan?dx=100&dy=0 | focus?app=Safari
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
-            guard url.scheme == "canvas", let command = url.host else { continue }
+            guard url.scheme == "expanse", let command = url.host else { continue }
             let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems ?? []).map { ($0.name, $0.value ?? "") })
             func number(_ key: String) -> CGFloat? { Double(query[key] ?? "").map { CGFloat($0) } }
@@ -108,11 +110,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setUpStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "rectangle.3.group", accessibilityDescription: "Canvas")
+        statusItem.button?.image = NSImage(systemSymbolName: "rectangle.3.group", accessibilityDescription: "Expanse")
 
         let menu = NSMenu()
         menu.delegate = self
-        let open = NSMenuItem(title: "Open Canvas", action: #selector(toggleCanvas), keyEquivalent: "`")
+        let open = NSMenuItem(title: "Open Expanse", action: #selector(toggleCanvas), keyEquivalent: "`")
         open.keyEquivalentModifierMask = [.option]
         menu.addItem(open)
         menu.addItem(pauseItem)
@@ -132,11 +134,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(wallpaperItem)
         menu.addItem(NSMenuItem(title: "Tidy Up Windows", action: #selector(tidy), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Restore All Windows", action: #selector(restoreAll), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Welcome & Shortcuts…", action: #selector(showWelcome), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(accessibilityItem)
         menu.addItem(screenRecordingItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit Canvas", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Expanse", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         for item in menu.items where item.action != #selector(NSApplication.terminate(_:)) { item.target = self }
         statusItem.menu = menu
     }
@@ -149,13 +152,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         wallpaperItem.state = Wallpaper.enabled ? .on : .off
         centreItem.state = controller.autoCentre ? .on : .off
-        pauseItem.title = controller.isPaused ? "Resume Canvas" : "Pause Canvas (back to macOS layout)"
+        pauseItem.title = controller.isPaused ? "Resume Expanse" : "Pause Expanse (back to macOS layout)"
         accessibilityItem.title = ax ? "Accessibility: granted" : "Grant Accessibility…"
         screenRecordingItem.title = sr ? "Screen Recording: granted" : "Grant Screen Recording…"
     }
 
     @objc private func toggleCanvas() { controller.toggle() }
     @objc private func restoreAll() { controller.restoreAll() }
+    @objc private func showWelcome() { Onboarding.show {} }
     @objc private func tidy() { controller.tidy() }
     @objc private func pickCorner(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let corner = HotCorner.Corner(rawValue: raw) else { return }

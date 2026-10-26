@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" width="1200" height="560" role="img" aria-labelledby="title desc">
+  <title id="title">Expanse</title>
+  <desc id="desc">Windows arranged on an infinite canvas, seen zoomed out, with a minimap in the corner.</desc>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#28205c"/>
+      <stop offset="0.55" stop-color="#6b388c"/>
+      <stop offset="1" stop-color="#ee8c6b"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.28"/>
+    </filter>
+    <symbol id="win" viewBox="0 0 100 70" preserveAspectRatio="none">
+      <rect width="100" height="70" rx="3" fill="#fbfbfd"/>
+    </symbol>
+  </defs>
+  <rect width="1200" height="560" rx="20" fill="url(#sky)"/>
+
+  <!-- A cluster of windows, snapped together with even gaps -->
+  <g filter="url(#shadow)" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Helvetica, Arial, sans-serif">
+    <!-- browser -->
+    <g transform="translate(120 120)">
+      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Browser</text>
+      <rect width="300" height="200" rx="9" fill="#fbfbfd"/>
+      <rect width="300" height="26" rx="9" fill="#e8e8ef"/><rect y="17" width="300" height="9" fill="#e8e8ef"/>
+      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
+      <rect x="20" y="44" width="170" height="12" rx="3" fill="#7d6cf2" fill-opacity="0.55"/>
+      <rect x="20" y="66" width="260" height="7" rx="3" fill="#c9c8d6"/><rect x="20" y="80" width="230" height="7" rx="3" fill="#c9c8d6"/>
+      <rect x="20" y="102" width="120" height="78" rx="6" fill="#efe9ff"/><rect x="152" y="102" width="128" height="78" rx="6" fill="#ffe9e1"/>
+    </g>
+    <!-- editor -->
+    <g transform="translate(440 120)">
+      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Editor</text>
+      <rect width="250" height="200" rx="9" fill="#1f2130"/>
+      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
+      <rect x="18" y="40" width="80" height="7" rx="3" fill="#c792ea"/><rect x="104" y="40" width="110" height="7" rx="3" fill="#82aaff"/>
+      <rect x="32" y="56" width="140" height="7" rx="3" fill="#89ddff" fill-opacity="0.8"/><rect x="32" y="72" width="170" height="7" rx="3" fill="#c3e88d" fill-opacity="0.8"/>
+      <rect x="32" y="88" width="96" height="7" rx="3" fill="#f78c6c" fill-opacity="0.8"/><rect x="18" y="104" width="40" height="7" rx="3" fill="#c792ea"/>
+      <rect x="18" y="128" width="150" height="7" rx="3" fill="#676e95"/><rect x="18" y="144" width="190" height="7" rx="3" fill="#676e95"/>
+    </g>
+    <!-- chat, the focused window -->
+    <g transform="translate(710 120)">
+      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Messages</text>
+      <rect width="170" height="200" rx="9" fill="#fbfbfd"/>
+      <rect width="170" height="200" rx="9" fill="none" stroke="#fff" stroke-width="3"/>
+      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
+      <rect x="14" y="40" width="96" height="22" rx="11" fill="#e9e9ef"/><rect x="60" y="72" width="96" height="22" rx="11" fill="#7d6cf2"/>
+      <rect x="14" y="104" width="120" height="22" rx="11" fill="#e9e9ef"/><rect x="74" y="136" width="82" height="22" rx="11" fill="#7d6cf2"/>
+    </g>
+    <!-- second row -->
+    <g transform="translate(120 360)">
+      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Calendar</text>
+      <rect width="420" height="120" rx="9" fill="#fbfbfd"/>
+      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
+      <rect x="16" y="36" width="90" height="26" rx="4" fill="#d9f2e3"/><rect x="118" y="52" width="90" height="34" rx="4" fill="#e3e6ff"/>
+      <rect x="220" y="36" width="90" height="20" rx="4" fill="#ffe7cf"/><rect x="322" y="62" width="82" height="38" rx="4" fill="#ffd9e2"/>
+    </g>
+    <g transform="translate(560 360)">
+      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Notes</text>
+      <rect width="320" height="120" rx="9" fill="#fffaf0"/>
+      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
+      <rect x="18" y="38" width="150" height="9" rx="3" fill="#d4a017" fill-opacity="0.65"/>
+      <rect x="18" y="58" width="270" height="6" rx="3" fill="#d6cfbf"/><rect x="18" y="72" width="240" height="6" rx="3" fill="#d6cfbf"/><rect x="18" y="86" width="200" height="6" rx="3" fill="#d6cfbf"/>
+    </g>
+  </g>
+
+  <!-- A lone window further out on the canvas -->
+  <g transform="translate(955 300)" filter="url(#shadow)" opacity="0.9">
+    <rect width="120" height="80" rx="7" fill="#fbfbfd"/>
+    <circle cx="11" cy="10" r="3.5" fill="#ff5f57"/><circle cx="22" cy="10" r="3.5" fill="#febc2e"/><circle cx="33" cy="10" r="3.5" fill="#28c840"/>
+    <rect x="12" y="28" width="80" height="6" rx="3" fill="#c9c8d6"/><rect x="12" y="40" width="64" height="6" rx="3" fill="#c9c8d6"/>
+  </g>
+
+  <!-- Minimap -->
+  <g transform="translate(1004 438)">
+    <rect width="168" height="102" rx="12" fill="#14121f" fill-opacity="0.88"/>
+    <rect x="16" y="18" width="40" height="27" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
+    <rect x="60" y="18" width="33" height="27" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
+    <rect x="97" y="18" width="22" height="27" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
+    <rect x="16" y="50" width="56" height="16" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
+    <rect x="76" y="50" width="43" height="16" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
+    <rect x="128" y="42" width="17" height="11" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
+    <rect x="12" y="13" width="140" height="58" rx="2" fill="none" stroke="#fff" stroke-opacity="0.9"/>
+    <text x="14" y="90" fill="#fff" fill-opacity="0.7" font-family="SF Mono, Menlo, monospace" font-size="11">42%</text>
+  </g>
+
+  <text x="120" y="70" fill="#fff" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Helvetica, Arial, sans-serif" font-size="38" font-weight="700">Expanse</text>
+  <text x="280" y="70" fill="#fff" fill-opacity="0.75" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="20">your Mac, on an infinite canvas</text>
+</svg>

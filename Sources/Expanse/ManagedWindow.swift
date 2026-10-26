@@ -21,7 +21,7 @@ final class ManagedWindow {
     var preferredSize: CGSize = .zero
     /// The size we last set, so our own resizes aren't mistaken for the user's.
     var lastSized: CGSize?
-    /// Where macOS had the window before Canvas managed it (global CG). Restored on quit / pause.
+    /// Where macOS had the window before Expanse managed it (global CG). Restored on quit / pause.
     var originalFrame: CGRect = .zero
     /// Where the window sits in the home layout: the arrangement at full chosen sizes (the big
     /// screen). On a smaller screen the canvas layout is derived from this, so it comes back exactly.

@@ -2,7 +2,7 @@ import AppKit
 import ScreenCaptureKit
 import os
 
-let logger = Logger(subsystem: "com.invignation.canvas", category: "canvas")
+let logger = Logger(subsystem: "com.invignation.expanse", category: "canvas")
 
 /// One ScreenCaptureKit stream per window. Desktop-independent window capture keeps
 /// delivering content while the window is covered by the overlay or parked off-screen.
@@ -13,7 +13,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     var onStop: (() -> Void)?
 
     private var stream: SCStream?
-    private let queue = DispatchQueue(label: "com.invignation.canvas.capture", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "com.invignation.expanse.capture", qos: .userInteractive)
     private var recentSamples: [CMSampleBuffer] = []
     private(set) var pixelSize: CGSize = .zero
     private(set) var fps: Int = 0

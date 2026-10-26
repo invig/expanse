@@ -1,7 +1,7 @@
 import AppKit
 
 /// Saves the canvas (camera + where each window lives) to
-/// ~/Library/Application Support/Canvas/layout.json so it survives restarts.
+/// ~/Library/Application Support/Expanse/layout.json so it survives restarts.
 struct SavedLayout: Codable {
     struct Window: Codable {
         var bundleID: String
@@ -19,7 +19,7 @@ struct SavedLayout: Codable {
         /// The size the user last chose; windows shrink to fit small screens and grow back.
         var pw: Double?
         var ph: Double?
-        /// The window's frame in the macOS layout before Canvas (global CG coords).
+        /// The window's frame in the macOS layout before Expanse (global CG coords).
         var ox: Double?
         var oy: Double?
         var ow: Double?
@@ -38,8 +38,8 @@ struct SavedLayout: Codable {
 
 enum LayoutStore {
     private static var url: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Canvas", isDirectory: true)
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = support.appendingPathComponent("Expanse", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("layout.json")
     }

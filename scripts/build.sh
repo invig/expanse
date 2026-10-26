@@ -1,20 +1,31 @@
 #!/bin/bash
-# Builds Canvas.app into ./build and signs it with the local Apple Development
-# identity, so macOS keeps the Accessibility / Screen Recording grants across rebuilds.
+# Builds Expanse.app into ./build.
+#
+# Signing: uses your "Apple Development" certificate if you have one, so macOS keeps the
+# Accessibility / Screen Recording grants across rebuilds. Without one it signs ad hoc, which
+# works too, but macOS will ask you to grant the permissions again after each rebuild.
+# Override with CODESIGN_IDENTITY="Your Identity" (or "-" for ad hoc).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="${CONFIG:-release}"
-IDENTITY="${CODESIGN_IDENTITY:-Apple Development}"
-APP="build/Canvas.app"
+APP="build/Expanse.app"
+
+if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
+  if security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Development"; then
+    CODESIGN_IDENTITY="Apple Development"
+  else
+    CODESIGN_IDENTITY="-"
+  fi
+fi
 
 swift build -c "$CONFIG"
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/Canvas"
+BIN="$(swift build -c "$CONFIG" --show-bin-path)/Expanse"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/Canvas"
+cp "$BIN" "$APP/Contents/MacOS/Expanse"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-codesign --force --timestamp=none --sign "$IDENTITY" "$APP"
+codesign --force --timestamp=none --sign "$CODESIGN_IDENTITY" "$APP"
 
-echo "Built $APP"
+echo "Built $APP (signed with: $CODESIGN_IDENTITY)"

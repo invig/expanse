@@ -16,7 +16,7 @@ final class CanvasController: NSObject {
     private(set) var windows: [ManagedWindow] = [] // back to front
     var camera = Camera()
     private(set) var isActive = false
-    /// Paused: windows are back in their original macOS layout and Canvas leaves them alone.
+    /// Paused: windows are back in their original macOS layout and Expanse leaves them alone.
     private(set) var isPaused = false
 
     let view: CanvasView
@@ -92,7 +92,7 @@ final class CanvasController: NSObject {
     }
     private var lastScreen: NSScreen? = NSScreen.screens.first ?? NSScreen.main
 
-    /// canvas://screen?w=&h= pretends the display is this size, to exercise display changes.
+    /// expanse://screen?w=&h= pretends the display is this size, to exercise display changes.
     private var screenOverride: CGSize?
 
     private var screenSize: CGSize { screenOverride ?? screen.frame.size }
@@ -524,7 +524,7 @@ final class CanvasController: NSObject {
 
     // MARK: Switching in and out
 
-    /// Put every window back exactly where macOS had it before Canvas, and stop managing.
+    /// Put every window back exactly where macOS had it before Expanse, and stop managing.
     func pause() {
         guard !isPaused else { return }
         cancelAnimation()
@@ -603,7 +603,7 @@ final class CanvasController: NSObject {
         }
     }
 
-    /// `tracked`: Canvas already manages this window. The on-screen test is only for discovering
+    /// `tracked`: Expanse already manages this window. The on-screen test is only for discovering
     /// new windows (so other displays' windows aren't adopted); a tracked window stays tracked
     /// wherever it is, e.g. parked beyond the edge of a screen that just got smaller.
     private func isManageable(_ w: SCWindow, tracked: Bool) -> Bool {
@@ -751,7 +751,7 @@ final class CanvasController: NSObject {
             w.canvasFrame.origin = canvasPoint(forGlobal: global)
         }
 
-        // A window opened (or came back) while Canvas is running, not one found at launch.
+        // A window opened (or came back) while Expanse is running, not one found at launch.
         let anchor = windows.last { !$0.parked }
         let arriving = !firstSync && !suspendTracking
 
@@ -883,7 +883,7 @@ final class CanvasController: NSObject {
     // MARK: System prompts
 
     /// On-screen windows of background system processes (permission reminders, password and
-    /// security prompts). Canvas doesn't manage them, but must never bury them.
+    /// security prompts). Expanse doesn't manage them, but must never bury them.
     private var systemPrompts: [(pid: pid_t, id: CGWindowID)] = []
 
     private func noteSystemPrompts(_ scWindows: [SCWindow]) {
@@ -1205,7 +1205,7 @@ final class CanvasController: NSObject {
     // MARK: Capture
 
     /// macOS marks every window being captured with a purple indicator. At 100% a window that's
-    /// on screen is the real thing, so Canvas only captures windows it needs a picture of: all of
+    /// on screen is the real thing, so Expanse only captures windows it needs a picture of: all of
     /// them on the canvas and during glides (the overlay covers the indicators), hidden ones (their
     /// indicator is off-screen) always. The last picture stays on the layer meanwhile.
     private func needsCapture(_ w: ManagedWindow) -> Bool {
@@ -1364,7 +1364,7 @@ final class CanvasController: NSObject {
         }
     }
 
-    private let axQueue = DispatchQueue(label: "com.invignation.canvas.ax", qos: .userInteractive)
+    private let axQueue = DispatchQueue(label: "com.invignation.expanse.ax", qos: .userInteractive)
 
     /// Like commit(), but the Accessibility calls run off the main thread: a slow app (Chromium
     /// apps animate AX moves) can't stall animations or key presses. Apps with Chromium's
@@ -1422,7 +1422,7 @@ final class CanvasController: NSObject {
         windows.forEach { $0.capture.stop() }
     }
 
-    /// canvas://dump — geometry for debugging alignment between proxies and real windows.
+    /// expanse://dump — geometry for debugging alignment between proxies and real windows.
     func dump() {
         logger.info("dump viewport=\(NSStringFromRect(self.viewport), privacy: .public) overlay=\(NSStringFromRect(self.overlay.frame), privacy: .public) view=\(NSStringFromRect(self.view.bounds), privacy: .public) camera=\(NSStringFromPoint(self.camera.origin), privacy: .public)@\(self.camera.scale) active=\(self.isActive)")
         for w in windows {
@@ -1477,7 +1477,7 @@ final class CanvasController: NSObject {
     /// Takes on a size change of the real window. Resizes we didn't make become the
     /// window's preferred size.
     /// Only a resize made with the mouse button down (dragging an edge) counts as you choosing a
-    /// size. macOS, apps (Chromium animates AX resizes in steps) and Canvas itself resize windows
+    /// size. macOS, apps (Chromium animates AX resizes in steps) and Expanse itself resize windows
     /// too, and none of those should change the size you chose.
     private func adoptSize(_ w: ManagedWindow, _ size: CGSize, fromUser: Bool = false) {
         guard size != w.canvasFrame.size, size.width > 0, size.height > 0 else { return }

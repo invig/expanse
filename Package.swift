@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Canvas",
+    name: "Expanse",
     platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
-            name: "Canvas",
-            path: "Sources/Canvas",
+            name: "Expanse",
+            path: "Sources/Expanse",
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .linkedFramework("AppKit"),
