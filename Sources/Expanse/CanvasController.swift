@@ -625,7 +625,8 @@ final class CanvasController: NSObject {
                                    hy: Double(($0.home ?? $0.canvasFrame.origin).y),
                                    pw: Double($0.preferredSize.width), ph: Double($0.preferredSize.height),
                                    ox: Double($0.originalFrame.minX), oy: Double($0.originalFrame.minY),
-                                   ow: Double($0.originalFrame.width), oh: Double($0.originalFrame.height))
+                                   ow: Double($0.originalFrame.width), oh: Double($0.originalFrame.height),
+                                   id: $0.id, pid: $0.pid)
             } + savedPool.prefix(60))   // windows not open right now keep their saved spots
         guard let data = try? JSONEncoder().encode(layout), data != lastSavedLayout else { return }
         lastSavedLayout = data
@@ -937,6 +938,9 @@ final class CanvasController: NSObject {
         return snapshot
     }
 
+    /// Windows open now (see LayoutStore.takeMatch), from the last scan.
+    private var openWindowKeys = Set<String>()
+
     private func apply(_ scWindows: [SCWindow], ax: AXSnapshot) {
         let axFrames = ax.frames
         if firstSync { logger.info("first sync: \(scWindows.count) SC windows, AX known \(ax.known.count), standard \(ax.standard.count), frames \(ax.frames.count)") }
@@ -960,6 +964,9 @@ final class CanvasController: NSObject {
         }
 
         let byID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        openWindowKeys = Set(scWindows.compactMap { sc in
+            sc.owningApplication.map { LayoutStore.windowKey(pid: $0.processID, id: sc.windowID) }
+        })
         var regularApps: [pid_t: Bool] = [:]
         func regular(_ pid: pid_t) -> Bool {
             if let known = regularApps[pid] { return known }
@@ -1007,7 +1014,8 @@ final class CanvasController: NSObject {
 
         if live { orderByWindowServer(ax.order) }
         if firstSync && restoredAny {
-            commit()
+            // Back where the saved layout had them, without holding up launch.
+            commitInBackground()
             view.render()
         }
         firstSync = false
@@ -1041,7 +1049,8 @@ final class CanvasController: NSObject {
             w.originalFrame = back.originalFrame
             w.preferredSize = back.preferredSize
             w.home = back.home
-        } else if let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, from: &savedPool) {
+        } else if let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid,
+                                                    open: openWindowKeys, from: &savedPool) {
             // A saved spot: at launch, or an app opened later that had windows last time.
             w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
             if let pw = match.pw, let ph = match.ph { w.preferredSize = CGSize(width: pw, height: ph) }

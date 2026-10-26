@@ -25,6 +25,10 @@ struct SavedLayout: Codable {
         var oy: Double?
         var ow: Double?
         var oh: Double?
+        /// The window's ID and its app's pid: while the app keeps running (Expanse restarted,
+        /// say), they identify the window exactly, even among windows with the same title.
+        var id: UInt32?
+        var pid: Int32?
     }
     var cameraX: Double
     var cameraY: Double
@@ -57,8 +61,6 @@ enum LayoutStore {
         try? data.write(to: url, options: .atomic)
     }
 
-    /// Picks the saved entry for a window: same app and title first, then same app.
-    /// Matched entries are removed so two windows never claim the same slot.
     /// Window titles can be private (document names, mail subjects), so the layout file stores
     /// a hash: enough to recognise the same window next time, not to read the title.
     static func titleKey(_ title: String) -> String {
@@ -67,13 +69,28 @@ enum LayoutStore {
         return "sha256:" + digest.prefix(12).map { String(format: "%02x", $0) }.joined()
     }
 
-    static func takeMatch(bundleID: String, title: String, from pool: inout [SavedLayout.Window]) -> SavedLayout.Window? {
-        let key = titleKey(title)
-        // Older layout files stored the title itself.
-        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && ($0.title == key || $0.title == title) }) {
+    /// Identifies a window for as long as its app keeps running.
+    static func windowKey(pid: pid_t, id: CGWindowID) -> String { "\(pid):\(id)" }
+
+    /// Picks the saved entry for a window: the same window (same ID in the same app process),
+    /// then same app and title, then same app. Matched entries are removed so two windows never
+    /// claim the same slot, and `open` (keys of windows open now) keeps the fallbacks from taking
+    /// an entry that belongs to another open window.
+    static func takeMatch(bundleID: String, title: String, id: CGWindowID, pid: pid_t, open: Set<String>,
+                          from pool: inout [SavedLayout.Window]) -> SavedLayout.Window? {
+        if let i = pool.firstIndex(where: { $0.id == id && $0.pid == pid && $0.bundleID == bundleID }) {
             return pool.remove(at: i)
         }
-        if let i = pool.firstIndex(where: { $0.bundleID == bundleID }) {
+        func free(_ e: SavedLayout.Window) -> Bool {
+            guard let eid = e.id, let epid = e.pid else { return true }
+            return !open.contains(windowKey(pid: epid, id: eid))
+        }
+        let key = titleKey(title)
+        // Older layout files stored the title itself.
+        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && ($0.title == key || $0.title == title) && free($0) }) {
+            return pool.remove(at: i)
+        }
+        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && free($0) }) {
             return pool.remove(at: i)
         }
         return nil
