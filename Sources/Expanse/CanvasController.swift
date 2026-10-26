@@ -24,6 +24,8 @@ final class CanvasController: NSObject {
 
     private var syncTimer: Timer?
     private var syncing = false
+    /// A scan was asked for while one was running: run another once it's done.
+    private var syncAgain = false
     private var syncRetryScheduled = false
     private var pendingSyncCompletions: [() -> Void] = []
     private var firstSync = true
@@ -586,6 +588,8 @@ final class CanvasController: NSObject {
             } else if inParkingCorner(pos) {
                 w.parked = true
                 w.lastPlaced = pos
+            } else if !userDragging, cameBack(w, to: pos) {
+                if !gliding { commitInBackground() }
             } else {
                 logger.info("follow \(w.appName, privacy: .public)[\(w.id)] moved to \(NSStringFromPoint(pos), privacy: .public) (last placed \(w.lastPlaced.map { NSStringFromPoint($0) } ?? "never", privacy: .public))")
                 w.lastPlaced = nil
@@ -599,9 +603,33 @@ final class CanvasController: NSObject {
         scheduleSave()
     }
 
+    /// The real window moved seconds after Expanse moved it, and not by you: back to where
+    /// Expanse had it before (an app too busy to answer in time, like Finder opening ten windows,
+    /// can carry out an old move after a newer one), or, for a window that's just opened, to
+    /// where its app wanted it (apps often position a new window a moment late, after Expanse put
+    /// it in free space). Neither is followed; the caller puts it back. Only once in a while per
+    /// window, so an app that insists on its own spot gets its way rather than a tug of war.
+    /// Returns true if the caller should put it back.
+    private func cameBack(_ w: ManagedWindow, to p: CGPoint) -> Bool {
+        let now = CACurrentMediaTime()
+        let toBefore = w.placedBefore.map { $0.distance(to: p) < 2 } ?? false
+        guard toBefore || now - w.addedAt < 5, now - w.lastPlacedAt < 10, now - w.cameBackAt > 10 else { return false }
+        logger.info("\(w.appName, privacy: .public)[\(w.id)] moved to \(NSStringFromPoint(p), privacy: .public) by its app right after being placed; putting it back")
+        w.cameBackAt = now
+        // Where it really is, so the next commit moves it.
+        w.lastPlaced = p
+        w.parked = false
+        return true
+    }
+
+    /// A window scan shortly. Asking again while one is due doesn't push it back, so a stream of
+    /// events (a burst of new windows) is scanned as it happens, not only once it stops.
     private func syncSoon() {
-        syncSoonWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.sync() }
+        guard syncSoonWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.syncSoonWork = nil
+            self?.sync()
+        }
         syncSoonWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
@@ -766,8 +794,9 @@ final class CanvasController: NSObject {
             return
         }
         if let completion { pendingSyncCompletions.append(completion) }
-        guard !syncing else { return }
+        guard !syncing else { syncAgain = true; return }
         syncing = true
+        syncAgain = false
         let input = scanInput()
         let s0 = CACurrentMediaTime()
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
@@ -781,6 +810,8 @@ final class CanvasController: NSObject {
                 guard let self else { return }
                 self.syncing = false
                 self.windowKinds = ax.kinds
+                // Asked for while this scan ran, so it may have missed what that was about.
+                var again = self.syncAgain
                 if let content, !self.isPaused {
                     let s3 = CACurrentMediaTime()
                     // Windows moved (a glide, leaving the canvas) or the camera changed while the
@@ -790,7 +821,8 @@ final class CanvasController: NSObject {
                     let stale = input.live != liveNow
                         || (liveNow && (input.moves != ManagedWindow.moves || input.camera != self.camera))
                     self.apply(content.windows, ax: ax, stale: stale)
-                    if stale { self.syncSoon() }
+                    // A window still opening (see axSnapshot) is looked at again shortly too.
+                    again = again || stale || ax.pending
                     let ms = Int((CACurrentMediaTime() - s0) * 1000)
                     if ms > 120 {
                         logger.info("slow: window scan took \(ms)ms (ScreenCaptureKit \(Int((s1 - s0) * 1000))ms, \(ax.calls) Accessibility calls and window order \(Int((s2 - s1) * 1000))ms, main thread \(Int((CACurrentMediaTime() - s3) * 1000))ms)")
@@ -798,6 +830,7 @@ final class CanvasController: NSObject {
                 } else if let error {
                     logger.error("SCShareableContent failed: \(error.localizedDescription)")
                 }
+                if again { self.syncSoon() }
                 let completions = self.pendingSyncCompletions
                 self.pendingSyncCompletions = []
                 completions.forEach { $0() }
@@ -861,9 +894,12 @@ final class CanvasController: NSObject {
     struct WindowKind {
         var standard: Bool
         var at: CFTimeInterval
+        /// Still opening: the app doesn't list it yet, or it has no subrole yet. Asked again at
+        /// every scan (and scans follow quickly) for a few seconds from `at`, when it was first seen.
+        var pending = false
     }
     /// Window kinds don't change, so each window is asked once. "Not standard" is asked again
-    /// after a while: a brand-new window can briefly report no subrole.
+    /// after a while, in case it was wrong.
     private var windowKinds: [CGWindowID: WindowKind] = [:]
 
     private func scanInput() -> ScanInput {
@@ -895,6 +931,8 @@ final class CanvasController: NSObject {
         var known = Set<CGWindowID>()
         var elements: [CGWindowID: AXUIElement] = [:]
         var kinds: [CGWindowID: WindowKind] = [:]
+        /// Some window is still opening (see WindowKind.pending): scan again soon.
+        var pending = false
         var calls = 0
         /// Window server stacking order (live mode only).
         var order: [CGWindowID: Int] = [:]
@@ -926,7 +964,7 @@ final class CanvasController: NSObject {
             guard sc.isOnScreen, sc.frame.width >= 100, sc.frame.height >= 60 else { continue }
             if regularApps[pid] == nil { regularApps[pid] = isRegularApp(pid) }
             guard regularApps[pid] == true else { continue }
-            if let kind = kinds[id], !kind.standard, now - kind.at < 10 {
+            if let kind = kinds[id], !kind.standard, !kind.pending, now - kind.at < 10 {
                 snapshot.known.insert(id)
                 continue
             }
@@ -938,10 +976,12 @@ final class CanvasController: NSObject {
             snapshot.calls += 1
             for element in AX.windows(pid: pid) {
                 guard let id = AX.windowID(element), ids.contains(id) else { continue }
+                let subrole = kinds[id]?.standard == true ? kAXStandardWindowSubrole as String : AX.subrole(element)
+                snapshot.calls += 1
+                guard let subrole, subrole != kAXUnknownSubrole as String else { continue }
                 found.insert(id)
                 snapshot.known.insert(id)
-                let standard = kinds[id]?.standard == true || AX.subrole(element) == kAXStandardWindowSubrole as String
-                snapshot.calls += 1
+                let standard = subrole == kAXStandardWindowSubrole as String
                 kinds[id] = WindowKind(standard: standard, at: now)
                 guard standard else { continue }
                 snapshot.standard.insert(id)
@@ -951,9 +991,15 @@ final class CanvasController: NSObject {
                 }
                 snapshot.calls += 2
             }
-            // Not one of the app's Accessibility windows (yet): not managed; look again later.
+            // Not one of the app's Accessibility windows, or no subrole: not managed for now. A
+            // window that's just opening often looks like this for a moment (open ten at once and
+            // most do), so it's asked about again at the next scan, for its first few seconds.
             for id in ids.subtracting(found) {
-                kinds[id] = WindowKind(standard: false, at: now)
+                // (Only a window seen for the first time starts out pending.)
+                let firstSeen = kinds[id].map { $0.pending ? $0.at : -.infinity } ?? now
+                let pending = now - firstSeen < 5
+                kinds[id] = WindowKind(standard: false, at: pending ? firstSeen : now, pending: pending)
+                snapshot.pending = snapshot.pending || pending
                 snapshot.known.insert(id)
             }
         }
@@ -975,9 +1021,11 @@ final class CanvasController: NSObject {
             if ms > 30 { logger.info("slow: window sync took \(ms)ms") }
         }
         noteSystemPrompts(scWindows)
-        let live = !isActive && !suspendTracking && !stale
+        let liveNow = !isActive && !suspendTracking
+        let live = liveNow && !stale
         var seen = Set<CGWindowID>()
         var restoredAny = false
+        var replaceAny = false
         if firstSync, let saved {
             // Restore the camera first so windows we don't recognise keep their real position.
             if let cx = saved.centerX, let cy = saved.centerY {
@@ -1017,25 +1065,45 @@ final class CanvasController: NSObject {
                     w.lastPlaced = f.origin
                 } else if live {
                     if let last = w.lastPlaced {
-                        if last.distance(to: f.origin) > 2 {
+                        if last.distance(to: f.origin) > 2, NSEvent.pressedMouseButtons & 1 == 0, cameBack(w, to: f.origin) {
+                            replaceAny = true
+                        } else if last.distance(to: f.origin) > 2 {
                             // Moved behind our back (by the user or the app): follow it.
+                            logger.info("follow \(w.appName, privacy: .public)[\(w.id)] found at \(NSStringFromPoint(f.origin), privacy: .public) (last placed \(NSStringFromPoint(last), privacy: .public))")
                             w.parked = false
                             w.lastPlaced = nil
                             w.canvasFrame.origin = canvasPoint(forGlobal: f.origin)
                         }
                     } else {
+                        let before = w.canvasFrame.origin
                         w.canvasFrame.origin = canvasPoint(forGlobal: f.origin)
+                        if before.distance(to: w.canvasFrame.origin) > 2 {
+                            logger.info("follow \(w.appName, privacy: .public)[\(w.id)] found at \(NSStringFromPoint(f.origin), privacy: .public) (never placed)")
+                        }
                     }
                 }
                 if !stale { adoptSize(w, f.size) }
-            } else if !stale {
-                restoredAny = add(sc, live: live, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) || restoredAny
+            } else {
+                // A new window is where its app put it, which nothing here has moved, so its frame
+                // holds even in an out-of-date scan (opening windows in a burst makes most scans
+                // out of date).
+                restoredAny = add(sc, live: liveNow, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) || restoredAny
             }
         }
 
         for w in windows where !seen.contains(w.id) {
             remove(w)
         }
+
+        // Windows that opened since the last scan (see arrive), and any that came back from a
+        // move (see cameBack), move together, off the main thread; and when several opened at
+        // once, there's one glide, to the one in front.
+        if arrivals.place || replaceAny { commitInBackground() }
+        if let w = arrivals.glide.first(where: { focusedWindowByApp[$0.pid] == $0.id })
+            ?? arrivals.glide.max(by: { $0.id < $1.id }) {
+            glideWhenIdle(to: w)
+        }
+        arrivals = ([], false)
 
         if live { orderByWindowServer(ax.order) }
         if firstSync && restoredAny {
@@ -1514,19 +1582,21 @@ final class CanvasController: NSObject {
         }
         guard live else { view.render(); return }
         let r = camera.toView(w.canvasFrame)
-        if CGRect(origin: .zero, size: viewSize).contains(r) {
-            w.place(at: CGPoint(x: (r.minX + viewport.minX).rounded(), y: (r.minY + viewport.minY).rounded()))
-            w.parked = false
-            view.render()
-        } else if returning {
-            // Back from minimize / hide: quietly return to its spot; focus decides whether to glide.
-            commit()
+        if CGRect(origin: .zero, size: viewSize).contains(r) || returning {
+            // On screen, or back from minimize / hide (quietly to its spot; focus decides whether
+            // to glide): moved with the other new windows once the scan is applied. Until then,
+            // its own move's echo isn't you moving it.
+            w.lastPlacedAt = CACurrentMediaTime()
+            arrivals.place = true
             view.render()
         } else {
-            glideWhenIdle(to: w)
+            arrivals.glide.append(w)
         }
         scheduleSave()
     }
+
+    /// Windows that opened during the window scan being applied (see apply).
+    private var arrivals: (glide: [ManagedWindow], place: Bool) = ([], false)
 
     /// Opening a window usually activates its app, which may already be gliding somewhere;
     /// wait for that to finish rather than dropping this glide.

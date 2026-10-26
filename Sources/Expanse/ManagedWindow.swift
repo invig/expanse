@@ -16,9 +16,17 @@ final class ManagedWindow {
     var parked = false
     /// Where the real window actually ended up the last time we placed it (global CG coords).
     /// If the window is later found somewhere else, the user (or the app) moved it.
-    var lastPlaced: CGPoint?
+    var lastPlaced: CGPoint? {
+        didSet { if let oldValue, oldValue != lastPlaced { placedBefore = oldValue } }
+    }
+    /// Where it was before that (see CanvasController.cameBack).
+    private(set) var placedBefore: CGPoint?
     /// When we last placed it (CACurrentMediaTime), to recognise the echo of our own move.
     var lastPlacedAt: CFTimeInterval = 0
+    /// When it last turned up back at `placedBefore` and was put back (see CanvasController.cameBack).
+    var cameBackAt: CFTimeInterval = 0
+    /// When Expanse started tracking it.
+    let addedAt = CACurrentMediaTime()
     /// The size the user chose. On a small screen the real window may be shrunk to fit.
     var preferredSize: CGSize = .zero
     /// The size we last set, so our own resizes aren't mistaken for the user's.
