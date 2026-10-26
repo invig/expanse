@@ -122,6 +122,13 @@ final class CanvasController: NSObject {
     /// Where parked windows go: only their top-left pixel stays on screen.
     private var parkPoint: CGPoint { CGPoint(x: screenRectCG.maxX - 1, y: screenRectCG.maxY - 1) }
 
+    /// Only Expanse puts windows in the parking corner; nobody drags a window there. A window
+    /// found there is hidden, not moved, even if a placement failed to register (apps answer
+    /// slowly around sleep and wake), so it must never take that spot as its canvas position.
+    private func inParkingCorner(_ p: CGPoint) -> Bool {
+        p.x >= screenRectCG.maxX - 12 && p.y >= screenRectCG.maxY - 80
+    }
+
     private var viewSize: CGSize { viewport.size }
 
     private func canvasPoint(forGlobal g: CGPoint) -> CGPoint {
@@ -475,6 +482,9 @@ final class CanvasController: NSObject {
         if !isActive, !suspendTracking || userDragging, animation == nil, let pos = AX.position(element) {
             if let last = w.lastPlaced, last.distance(to: pos) < 2 {
                 // Our own placement.
+            } else if inParkingCorner(pos) {
+                w.parked = true
+                w.lastPlaced = pos
             } else {
                 logger.info("follow \(w.appName, privacy: .public)[\(w.id)] moved to \(NSStringFromPoint(pos), privacy: .public) (last placed \(w.lastPlaced.map { NSStringFromPoint($0) } ?? "never", privacy: .public))")
                 w.lastPlaced = nil
@@ -697,10 +707,6 @@ final class CanvasController: NSObject {
         return sc.frame
     }
 
-    private func isStranded(_ f: CGRect) -> Bool {
-        f.minX >= screenRectCG.maxX - 8 && f.minY >= screenRectCG.maxY - 8
-    }
-
     /// True frames (position and size) of ordinary app windows, by window ID, via Accessibility.
     /// ScreenCaptureKit reports transformed frames during Mission Control and similar animations.
     /// What the Accessibility API says about ordinary app windows: true frames by window ID, and
@@ -763,7 +769,10 @@ final class CanvasController: NSObject {
                 let f = live ? (axFrames[sc.windowID] ?? sc.frame) : sc.frame
                 w.scWindow = sc
                 if let title = sc.title { w.title = title }
-                if live {
+                if live && inParkingCorner(f.origin) {
+                    w.parked = true
+                    w.lastPlaced = f.origin
+                } else if live {
                     if let last = w.lastPlaced {
                         if last.distance(to: f.origin) > 2 {
                             // Moved behind our back (by the user or the app): follow it.
@@ -838,8 +847,9 @@ final class CanvasController: NSObject {
                 w.originalFrame = CGRect(x: ox, y: oy, width: ow, height: oh)
             }
             restored = true
-        } else if firstSync && isStranded(f) {
-            // Left in the corner by a previous run that didn't exit cleanly.
+        } else if inParkingCorner(f.origin) {
+            // In the parking corner with no record of where it belongs (a previous run that
+            // didn't exit cleanly, or a lost record): bring it out where it can be seen.
             global = CGPoint(x: viewport.midX - f.width / 2, y: viewport.minY + 40)
             w.place(at: global)
             w.lastPlaced = nil
@@ -1085,7 +1095,8 @@ final class CanvasController: NSObject {
 
         let origins = Self.derive(home: home, sizes: windows.map(\.canvasFrame.size))
         var frames = zip(origins, windows).map { CGRect(origin: $0, size: $1.canvasFrame.size) }
-        Self.separate(&frames, gap: 0)   // only real overlaps; normally there are none
+        // Only real overlaps (normally there are none), pushed apart to the standard gap.
+        Self.separate(&frames, gap: Self.gap, onlyOverlaps: true)
         var moved = 0
         for (w, f) in zip(windows, frames) {
             let rounded = CGPoint(x: f.minX.rounded(), y: f.minY.rounded())
@@ -1128,13 +1139,14 @@ final class CanvasController: NSObject {
 
     /// Push overlapping frames apart in reading order. Only ever moving right or down means it
     /// always finishes.
-    static func separate(_ frames: inout [CGRect], gap: CGFloat) {
+    static func separate(_ frames: inout [CGRect], gap: CGFloat, onlyOverlaps: Bool = false) {
         let order = frames.indices.sorted { (frames[$0].minY, frames[$0].minX) < (frames[$1].minY, frames[$1].minX) }
         var settled: [CGRect] = []
         for i in order {
             var r = frames[i]
             for _ in 0..<200 {
-                guard let hit = settled.first(where: { $0.insetBy(dx: -gap + 0.5, dy: -gap + 0.5).intersects(r) }) else { break }
+                let reach = onlyOverlaps ? 0.5 : -gap + 0.5
+                guard let hit = settled.first(where: { $0.insetBy(dx: reach, dy: reach).intersects(r) }) else { break }
                 let right = hit.maxX + gap - r.minX
                 let down = hit.maxY + gap - r.minY
                 if right <= down { r.origin.x += right } else { r.origin.y += down }
