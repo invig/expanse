@@ -219,7 +219,7 @@ final class CanvasController: NSObject {
         // Whatever macOS did to the real windows, re-place all of them.
         windows.forEach { $0.lastPlaced = nil }
         if !isActive {
-            if final { restoreSizesAndPlace() } else { commit() }
+            if final { restoreSizesAndPlace() } else { commitInBackground() }
         }
         view.render()
         if final {
@@ -246,14 +246,28 @@ final class CanvasController: NSObject {
         // Same as Tidy Up: sizes back to what you chose (capped at this screen), overlaps pushed
         // apart, clusters pulled back to the standard gap.
         fitLayoutToScreen(margin: 0, tidy: false)
-        commit()
         view.render()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        // Like a glide's last step: input waits while the real windows move in the background.
+        gliding = true
+        commitAsync { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                guard let self else { return }
+                self.overlay.level = OverlayWindow.backdropLevel
+                self.isActive = false
+                self.gliding = false
+                self.view.render()
+                self.updateStreamingSoon()
+            }
+        }
+    }
+
+    /// commit(), with the Accessibility calls off the main thread (see commitAsync): with dozens
+    /// of windows, a display change would otherwise freeze Expanse for seconds.
+    private func commitInBackground() {
+        commitAsync { [weak self] in
             guard let self else { return }
-            self.overlay.level = OverlayWindow.backdropLevel
-            self.isActive = false
+            if !self.isActive { self.updateStreaming() }
             self.view.render()
-            self.updateStreamingSoon()
         }
     }
 
@@ -264,8 +278,7 @@ final class CanvasController: NSObject {
             guard let self, !self.isActive, !self.isPaused, self.suspendTracking else { return }
             logger.info("re-placing windows moved by macOS during a display change")
             self.windows.forEach { $0.lastPlaced = nil }
-            self.commit()
-            self.view.render()
+            self.commitInBackground()
         }
         reassertWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
@@ -1292,8 +1305,10 @@ final class CanvasController: NSObject {
 
         let origins = Self.derive(home: home, sizes: windows.map(\.canvasFrame.size))
         var frames = zip(origins, windows).map { CGRect(origin: $0, size: $1.canvasFrame.size) }
-        // Only real overlaps (normally there are none), pushed apart to the standard gap.
-        Self.separate(&frames, gap: Self.gap, onlyOverlaps: true)
+        // Only overlaps this screen caused, pushed apart to the standard gap. Windows you have
+        // overlapping in the home layout stay that way (pushing them apart would push everything
+        // below and to the right too, and the move would stick when you're back on the big screen).
+        Self.separate(&frames, gap: Self.gap, onlyOverlaps: true, keep: Self.overlappingPairs(home))
         var moved = 0
         for (w, f) in zip(windows, frames) {
             let rounded = CGPoint(x: f.minX.rounded(), y: f.minY.rounded())
@@ -1336,21 +1351,41 @@ final class CanvasController: NSObject {
 
     /// Push overlapping frames apart in reading order. Only ever moving right or down means it
     /// always finishes.
-    static func separate(_ frames: inout [CGRect], gap: CGFloat, onlyOverlaps: Bool = false) {
+    /// `keep`: pairs of windows (by index) left overlapping, see overlappingPairs.
+    static func separate(_ frames: inout [CGRect], gap: CGFloat, onlyOverlaps: Bool = false, keep: Set<IndexPair> = []) {
         let order = frames.indices.sorted { (frames[$0].minY, frames[$0].minX) < (frames[$1].minY, frames[$1].minX) }
-        var settled: [CGRect] = []
+        var settled: [(index: Int, frame: CGRect)] = []
         for i in order {
             var r = frames[i]
             for _ in 0..<200 {
                 let reach = onlyOverlaps ? 0.5 : -gap + 0.5
-                guard let hit = settled.first(where: { $0.insetBy(dx: reach, dy: reach).intersects(r) }) else { break }
+                guard let hit = settled.first(where: {
+                    !keep.contains(IndexPair($0.index, i)) && $0.frame.insetBy(dx: reach, dy: reach).intersects(r)
+                })?.frame else { break }
                 let right = hit.maxX + gap - r.minX
                 let down = hit.maxY + gap - r.minY
                 if right <= down { r.origin.x += right } else { r.origin.y += down }
             }
             frames[i] = r
-            settled.append(r)
+            settled.append((i, r))
         }
+    }
+
+    /// Two indices, unordered.
+    struct IndexPair: Hashable {
+        let a: Int, b: Int
+        init(_ i: Int, _ j: Int) { a = min(i, j); b = max(i, j) }
+    }
+
+    /// Pairs of frames that overlap.
+    static func overlappingPairs(_ frames: [CGRect]) -> Set<IndexPair> {
+        var pairs = Set<IndexPair>()
+        for i in frames.indices {
+            for j in frames.indices where j > i && frames[i].insetBy(dx: 0.5, dy: 0.5).intersects(frames[j]) {
+                pairs.insert(IndexPair(i, j))
+            }
+        }
+        return pairs
     }
 
     /// Cluster number for each frame: frames within `reach` of each other (directly or through
