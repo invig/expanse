@@ -294,10 +294,12 @@ final class CanvasController: NSObject {
         guard !isActive, animation == nil else { return }
         isActive = true
         bringToFront(w)
-        fitToScreen(w)
         view.render()
+        // Cover the screen first, so resizing (which may briefly move the window) isn't seen.
         overlay.level = OverlayWindow.canvasLevel
         overlay.orderFrontRegardless()
+        fitToScreen(w)
+        view.render()
         animate(to: focusCamera(for: w), duration: 0.3) { [weak self] in
             guard let self else { return }
             self.commit()
@@ -389,6 +391,7 @@ final class CanvasController: NSObject {
             windows: windows.map {
                 SavedLayout.Window(bundleID: $0.bundleID, appName: $0.appName, title: $0.title,
                                    x: Double($0.canvasFrame.minX), y: Double($0.canvasFrame.minY),
+                                   w: Double($0.canvasFrame.width), h: Double($0.canvasFrame.height),
                                    pw: Double($0.preferredSize.width), ph: Double($0.preferredSize.height),
                                    ox: Double($0.originalFrame.minX), oy: Double($0.originalFrame.minY),
                                    ow: Double($0.originalFrame.width), oh: Double($0.originalFrame.height))
@@ -582,6 +585,13 @@ final class CanvasController: NSObject {
         if firstSync, let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, from: &savedPool) {
             w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
             if let pw = match.pw, let ph = match.ph { w.preferredSize = CGSize(width: pw, height: ph) }
+            if let sw = match.w, let sh = match.h, let ax = w.ax,
+               abs(sw - f.width) > 1 || abs(sh - f.height) > 1 {
+                // Quitting put the macOS size back; restore the canvas size.
+                let actual = resizeReal(w, ax, to: CGSize(width: sw, height: sh))
+                w.canvasFrame.size = actual
+                logger.info("restore size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(f.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
+            }
             if saved?.cleanExit != true, let ox = match.ox, let oy = match.oy, let ow = match.ow, let oh = match.oh {
                 // Last run didn't put windows back; its record of the macOS layout is the real one.
                 w.originalFrame = CGRect(x: ox, y: oy, width: ow, height: oh)
@@ -876,12 +886,25 @@ final class CanvasController: NSObject {
         guard let ax = w.ax,
               abs(target.width - w.canvasFrame.width) > 1 || abs(target.height - w.canvasFrame.height) > 1 else { return }
         logger.info("resize \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(target), privacy: .public)")
-        AX.setSize(ax, target)
-        let actual = AX.size(ax) ?? target
-        w.lastSized = actual
+        let actual = resizeReal(w, ax, to: target)
         let c = w.canvasFrame.center
         w.canvasFrame = CGRect(x: c.x - actual.width / 2, y: c.y - actual.height / 2, width: actual.width, height: actual.height)
         updateCapture(w)
+    }
+
+    /// Resizes the real window. macOS won't grow a window past the screen edge from where it
+    /// sits, so a window that's growing is first moved to the top-left; the next commit puts it
+    /// where the canvas says.
+    @discardableResult
+    private func resizeReal(_ w: ManagedWindow, _ ax: AXUIElement, to size: CGSize) -> CGSize {
+        if let current = AX.size(ax), size.width > current.width + 1 || size.height > current.height + 1 {
+            AX.setPosition(ax, viewport.origin)
+            w.lastPlaced = nil
+        }
+        AX.setSize(ax, size)
+        let actual = AX.size(ax) ?? size
+        w.lastSized = actual
+        return actual
     }
 
     /// Takes on a size change of the real window. Resizes we didn't make become the

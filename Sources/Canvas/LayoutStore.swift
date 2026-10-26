@@ -9,6 +9,10 @@ struct SavedLayout: Codable {
         var title: String
         var x: Double
         var y: Double
+        /// The window's size on the canvas; reapplied on launch because quitting restores the
+        /// original macOS size.
+        var w: Double?
+        var h: Double?
         /// The size the user last chose; windows shrink to fit small screens and grow back.
         var pw: Double?
         var ph: Double?
