@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let trusted = AX.isTrusted(prompt: false)
         let canRecord = CGPreflightScreenCaptureAccess()
         logger.info("accessibility=\(trusted) screenRecording=\(canRecord)")
+        Onboarding.hotCorner = controller.hotCorner
         if Onboarding.needed { Onboarding.show {} }
         // Launching Expanse again while it's running shows this window (see main.swift).
         DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.invignation.expanse.showWelcome"),

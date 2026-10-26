@@ -66,24 +66,27 @@ cd expanse
 open build/Expanse.app
 ```
 
-On first launch a short walkthrough explains the two permissions Expanse needs and opens the
-right System Settings pages:
+On first launch a short walkthrough takes you through four steps, opens the right System
+Settings page for each and ticks it off as soon as it's done:
 
-| Permission | Why |
+| Step | Why |
 |---|---|
-| **Accessibility** | To move, resize and focus your windows as you move around the canvas. |
-| **Screen Recording** | To show live pictures of your windows while you're zoomed out. |
+| **Accessibility** | macOS only lets an app move, resize and focus other apps' windows with this on. |
+| **Screen Recording** | Zoomed out, every window is a live picture. Nothing is recorded, saved or sent. |
+| **A free screen corner** | Rest the pointer in a corner to zoom out. macOS's own hot corners get there first. |
+| **Free ⌃ + arrow keys** | Hop between windows. macOS uses them for Spaces and Mission Control, and gets them first. |
 
 > **Building it yourself?** `build.sh` signs with your *Apple Development* certificate if you have one, so
 > the permissions survive rebuilds. Without one it signs ad hoc, which works, but macOS will
 > ask for the permissions again after every rebuild.
 
-### Optional: free up two macOS shortcuts
+### Freeing up the hot corners and ⌃ + arrows
 
-macOS uses screen corners and <kbd>⌃</kbd> + arrows too, and it gets them first. If you want
-Expanse to have them:
+macOS uses screen corners and <kbd>⌃</kbd> + arrows too, and it gets them first. The walkthrough
+tells you which ones are in the way; to change them yourself:
 
-- **Hot corners:** System Settings › Desktop & Dock › Hot Corners, set the corners you want to “–”.
+- **Hot corners:** System Settings › Desktop & Dock › Hot Corners, set the corners Expanse uses
+  to “–” (or pick a different corner from the menu bar icon › Hot Corner).
 - **⌃ + arrows:** System Settings › Keyboard › Keyboard Shortcuts › Mission Control, turn off
   *Mission Control*, *Application windows* and *Move left/right a space*.
 
