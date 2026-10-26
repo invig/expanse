@@ -54,12 +54,19 @@ final class CanvasController: NSObject {
         var start: CFTimeInterval
         var duration: CFTimeInterval
         var completion: (() -> Void)?
+        var frames = 0
+        var firstFrame: CFTimeInterval = 0
+        var lastFrame: CFTimeInterval = 0
+        var maxGap: CFTimeInterval = 0
     }
+    private var lastAnimationStats = "-"
+    private var activationRequest: (pid: pid_t, at: CFTimeInterval)?
     private var animation: CameraAnimation?
     private var displayLink: CADisplayLink?
 
     static let liveFPS = 4
-    static let canvasFPS = 60
+    /// Window pictures on the zoomed-out canvas: plenty for thumbnails, half the work of 60.
+    static let canvasFPS = 30
 
     override init() {
         view = CanvasView(frame: .zero)
@@ -278,6 +285,11 @@ final class CanvasController: NSObject {
 
     /// ⌘-Tab / Dock to an app whose window is parked: jump the canvas to that window.
     @objc private func appActivated(_ note: Notification) {
+        if let request = activationRequest,
+           (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier == request.pid {
+            logger.info("activation took \(Int((CACurrentMediaTime() - request.at) * 1000))ms")
+            activationRequest = nil
+        }
         guard !isPaused, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
               app.processIdentifier != getpid(),
               let focused = AX.focusedWindow(pid: app.processIdentifier),
@@ -291,7 +303,7 @@ final class CanvasController: NSObject {
         focusSettleWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.focusSettled() }
         focusSettleWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
     }
 
     /// If the focused window isn't fully on screen, glide to center it.
@@ -306,6 +318,7 @@ final class CanvasController: NSObject {
         let fullyVisible = !w.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r)
         guard !fullyVisible else { return }
         if autoCentre {
+            logger.info("focus-settled glide to \(w.appName, privacy: .public)[\(w.id)]")
             glide(to: w)
         } else if w.parked, lastHiddenHint != w.id {
             // Off means off: macOS often focuses a hidden window by itself (after a close or
@@ -325,33 +338,56 @@ final class CanvasController: NSObject {
     /// so typing keeps going to the window that was just clicked.
     private func glide(to w: ManagedWindow) {
         logger.info("glide to \(w.appName, privacy: .public)[\(w.id)]")
-        guard !isActive, animation == nil else { return }
-        isActive = true
-        gliding = true
+        let t0 = CACurrentMediaTime()
+        if !gliding {
+            guard !isActive, animation == nil else { return }
+            isActive = true
+            gliding = true
+            view.render()
+            // Cover the screen first, so resizing (which may briefly move the window) isn't seen.
+            overlay.level = OverlayWindow.canvasLevel
+            overlay.orderFrontRegardless()
+        }
+        // A hop during a glide (or while the last one's windows are still moving) starts from
+        // wherever the camera is; only the newest hop hands the screen back.
+        glideGeneration += 1
+        let generation = glideGeneration
+        glideTarget = w
         bringToFront(w)
-        view.render()
-        // Cover the screen first, so resizing (which may briefly move the window) isn't seen.
-        overlay.level = OverlayWindow.canvasLevel
-        overlay.orderFrontRegardless()
         fitToScreen(w)
         view.render()
+        let prep = CACurrentMediaTime() - t0
         animate(to: focusCamera(for: w), duration: 0.3) { [weak self] in
-            guard let self else { return }
-            self.commit()
-            if let ax = w.ax { AX.raise(ax) }
-            self.raiseSystemPrompts()
-            NSRunningApplication(processIdentifier: w.pid)?.activate()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            self?.finishGlide(generation, prep: prep)
+        }
+    }
+
+    /// Move the real windows (in the background), then focus and hand back, unless a newer hop
+    /// has started meanwhile, in which case it finishes the job.
+    private func finishGlide(_ generation: Int, prep: CFTimeInterval) {
+        let c0 = CACurrentMediaTime()
+        commitAsync {
+            guard generation == self.glideGeneration else { return }
+            logger.info("glide timing: prep \(Int(prep * 1000))ms, \(self.lastAnimationStats, privacy: .public), commit \(Int((CACurrentMediaTime() - c0) * 1000))ms")
+            if let target = self.glideTarget { self.focusWindow(target) }
+            // One frame or so for the window server to show the moved windows, then hand back.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+                guard generation == self.glideGeneration, self.animation == nil else { return }
                 self.overlay.level = OverlayWindow.backdropLevel
                 self.isActive = false
                 self.gliding = false
+                self.glideTarget = nil
                 self.view.render()
-                if let next = self.pendingNavigation {
-                    self.pendingNavigation = nil
-                    self.navigate(next)
-                }
             }
         }
+    }
+
+    /// Give `w` keyboard focus now, keep system prompts on top, and time the app switch.
+    private func focusWindow(_ w: ManagedWindow) {
+        activationRequest = (w.pid, CACurrentMediaTime())
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid { activationRequest = nil }
+        AX.focus(w.ax, pid: w.pid)
+        raiseSystemPrompts()
     }
 
     // MARK: Live tracking
@@ -373,6 +409,8 @@ final class CanvasController: NSObject {
         case kAXFocusedWindowChangedNotification:
             if let id = AX.windowID(element) { windowFocused(id) }
         case kAXMovedNotification, kAXResizedNotification:
+            // Mid-glide these are our own moves; querying the app here would stall the animation.
+            guard !isActive, animation == nil else { return }
             guard let id = AX.windowID(element), let w = windows.first(where: { $0.id == id }) else { return }
             realWindowChanged(w, element)
         default:
@@ -516,15 +554,23 @@ final class CanvasController: NSObject {
 
     func sync(completion: (() -> Void)? = nil) {
         guard !isPaused else { return }
+        // Window discovery queries every app; don't let it land in the middle of a glide.
+        if gliding || view.isDragging || (animation != nil && completion == nil) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.sync(completion: completion) }
+            return
+        }
         if let completion { pendingSyncCompletions.append(completion) }
         guard !syncing else { return }
         syncing = true
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
+            // Ask each app for its real window frames here, off the main thread: slow apps take
+            // 100ms+ to answer, which would otherwise stall a glide or a key press.
+            let axFrames = Self.axFrames(for: content?.windows ?? [])
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.syncing = false
                 if let content, !self.isPaused {
-                    self.apply(content.windows)
+                    self.apply(content.windows, axFrames: axFrames)
                 } else if let error {
                     logger.error("SCShareableContent failed: \(error.localizedDescription)")
                 }
@@ -558,7 +604,28 @@ final class CanvasController: NSObject {
         f.minX >= screenRectCG.maxX - 8 && f.minY >= screenRectCG.maxY - 8
     }
 
-    private func apply(_ scWindows: [SCWindow]) {
+    /// True frames (position and size) of ordinary app windows, by window ID, via Accessibility.
+    /// ScreenCaptureKit reports transformed frames during Mission Control and similar animations.
+    private static func axFrames(for scWindows: [SCWindow]) -> [CGWindowID: CGRect] {
+        let pids = Set(scWindows.compactMap { $0.windowLayer == 0 ? $0.owningApplication?.processID : nil })
+            .subtracting([getpid()])
+        var frames: [CGWindowID: CGRect] = [:]
+        for pid in pids {
+            for element in AX.windows(pid: pid) {
+                guard let id = AX.windowID(element), let p = AX.position(element), let s = AX.size(element),
+                      s.width > 0, s.height > 0 else { continue }
+                frames[id] = CGRect(origin: p, size: s)
+            }
+        }
+        return frames
+    }
+
+    private func apply(_ scWindows: [SCWindow], axFrames: [CGWindowID: CGRect]) {
+        let started = CACurrentMediaTime()
+        defer {
+            let ms = Int((CACurrentMediaTime() - started) * 1000)
+            if ms > 30 { logger.info("slow: window sync took \(ms)ms") }
+        }
         noteSystemPrompts(scWindows)
         let live = !isActive && !suspendTracking
         var seen = Set<CGWindowID>()
@@ -576,7 +643,9 @@ final class CanvasController: NSObject {
         for sc in scWindows where isManageable(sc) {
             seen.insert(sc.windowID)
             if let w = windows.first(where: { $0.id == sc.windowID }) {
-                let f = realFrame(of: sc, ax: w.ax)
+                // Zoomed out, positions aren't followed, so skip asking each app (slow apps
+                // would stall dragging); ScreenCaptureKit's frame is good enough for sizes.
+                let f = live ? (axFrames[sc.windowID] ?? sc.frame) : sc.frame
                 w.scWindow = sc
                 if let title = sc.title { w.title = title }
                 if live {
@@ -662,6 +731,7 @@ final class CanvasController: NSObject {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             w?.node.content.contents = surface
+            w?.node.content.backgroundColor = nil
             CATransaction.commit()
         }
         w.capture.onStop = { [weak self, weak w] in
@@ -680,14 +750,23 @@ final class CanvasController: NSObject {
     enum Direction { case left, right, up, down }
     /// A live-mode glide is running: the overlay is up, but it isn't canvas mode.
     private(set) var gliding = false
-    private var pendingNavigation: Direction?
+    private var glideGeneration = 0
+    /// Where the glide in flight is heading.
+    private var glideTarget: ManagedWindow?
 
     /// ⌃ + arrow: go to the nearest window that way. At 100% it's focused (gliding to it if it
     /// isn't fully on screen); on the zoomed-out canvas the highlight moves and the view follows.
     func navigate(_ direction: Direction) {
         guard !isPaused else { return }
-        // Mid-glide the overlay is up but this isn't canvas mode: run the hop once it lands.
-        if gliding { pendingNavigation = direction; return }
+        // Mid-glide: re-aim the glide in flight, hopping on from the window it's heading to.
+        if gliding {
+            // Mid-glide: hop on from the window it's heading to, straight away.
+            if let current = glideTarget, let next = nearest(direction, from: current.canvasFrame) {
+                logger.info("navigate (chained) to \(next.appName, privacy: .public)[\(next.id)]")
+                glide(to: next)
+            }
+            return
+        }
         guard animation == nil else { return }
         let from: CGRect
         if isActive {
@@ -711,8 +790,7 @@ final class CanvasController: NSObject {
         let r = camera.toView(target.canvasFrame)
         if !target.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r) {
             bringToFront(target)
-            if let ax = target.ax { AX.raise(ax) }
-            NSRunningApplication(processIdentifier: target.pid)?.activate()
+            focusWindow(target)
             view.render()
         } else {
             glide(to: target)
@@ -1075,9 +1153,7 @@ final class CanvasController: NSObject {
             self.commit()
             let toFocus = focus ?? self.windows.last(where: { !$0.parked })
             if let toFocus {
-                if let ax = toFocus.ax { AX.raise(ax) }
-                self.raiseSystemPrompts()
-                NSRunningApplication(processIdentifier: toFocus.pid)?.activate()
+                self.focusWindow(toFocus)
             }
             // Give the window server a beat to show the moved windows, then sink the overlay
             // beneath them so it becomes the desktop.
@@ -1092,23 +1168,61 @@ final class CanvasController: NSObject {
 
     /// Requires camera.scale == 1.
     private func commit() {
+        for (w, target, parked) in commitPlan() {
+            w.place(at: target)
+            w.parked = parked
+        }
+        scheduleSave()
+    }
+
+    /// Where every real window should go for the current camera (scale 1).
+    private func commitPlan() -> [(ManagedWindow, CGPoint, Bool)] {
         let vp = viewport
-        for w in windows {
+        return windows.map { w in
             let r = camera.toView(w.canvasFrame).offsetBy(dx: vp.minX, dy: vp.minY)
-            let target = CGPoint(x: r.minX.rounded(), y: r.minY.rounded())
             let visible = r.intersection(vp)
             // macOS won't put a title bar above the menu bar; it would shove the window down.
             // Such windows stay parked and the backdrop draws them where they belong.
             let topClipped = r.minY < vp.minY - 1
             if !topClipped, !visible.isNull, visible.width >= 48, visible.height >= 48 {
-                w.place(at: target)
-                w.parked = false
-            } else {
-                w.place(at: parkPoint)
-                w.parked = true
+                return (w, CGPoint(x: r.minX.rounded(), y: r.minY.rounded()), false)
+            }
+            return (w, parkPoint, true)
+        }
+    }
+
+    private let axQueue = DispatchQueue(label: "com.invignation.canvas.ax", qos: .userInteractive)
+
+    /// Like commit(), but the Accessibility calls run off the main thread: a slow app (Chromium
+    /// apps animate AX moves) can't stall animations or key presses. Apps with Chromium's
+    /// enhanced-UI mode get it switched off while their windows move, then back on.
+    private func commitAsync(_ completion: @escaping () -> Void) {
+        let jobs = commitPlan().compactMap { (w, target, parked) -> (ManagedWindow, AXUIElement, CGPoint, Bool)? in
+            if let last = w.lastPlaced, last.distance(to: target) < 0.5 { w.parked = parked; return nil }
+            guard let ax = w.ax else { return nil }
+            return (w, ax, target, parked)
+        }
+        guard !jobs.isEmpty else { scheduleSave(); completion(); return }
+        let work = jobs.map { (pid: $0.0.pid, ax: $0.1, target: $0.2) }
+        axQueue.async {
+            var landed: [CGPoint?] = []
+            let pids = Set(work.map(\.pid))
+            let enhanced = pids.filter { AX.enhancedUserInterface(pid: $0) }
+            enhanced.forEach { AX.setEnhancedUserInterface(false, pid: $0) }
+            for job in work {
+                AX.setPosition(job.ax, job.target)
+                landed.append(AX.position(job.ax))
+            }
+            enhanced.forEach { AX.setEnhancedUserInterface(true, pid: $0) }
+            DispatchQueue.main.async {
+                for ((w, _, target, parked), at) in zip(jobs, landed) {
+                    w.lastPlaced = at ?? target
+                    w.parked = parked
+                }
+                self.scheduleSave()
+                completion()
             }
         }
-        scheduleSave()
     }
 
     /// Bring every parked window back on screen. Called on quit and from the menu.
@@ -1274,13 +1388,19 @@ final class CanvasController: NSObject {
     }
 
     @objc private func tick(_ link: CADisplayLink) {
-        guard let a = animation else { stopDisplayLink(); return }
+        guard var a = animation else { stopDisplayLink(); return }
+        let now = CACurrentMediaTime()
+        if a.frames == 0 { a.firstFrame = now } else { a.maxGap = max(a.maxGap, now - a.lastFrame) }
+        a.frames += 1
+        a.lastFrame = now
+        animation = a
         let t = min(1, (CACurrentMediaTime() - a.start) / a.duration)
         let e = 1 - pow(1 - t, 3) // ease-out cubic
         let s = exp(lerp(log(a.from.scale), log(a.to.scale), e))
         let c0 = a.from.center(in: viewSize), c1 = a.to.center(in: viewSize)
         camera = Camera.centered(on: CGPoint(x: lerp(c0.x, c1.x, e), y: lerp(c0.y, c1.y, e)), scale: s, viewSize: viewSize)
         if t >= 1 {
+            lastAnimationStats = "first frame after \(Int((a.firstFrame - a.start) * 1000))ms, \(a.frames) frames, max gap \(Int(a.maxGap * 1000))ms"
             camera = a.to
             animation = nil
             stopDisplayLink()

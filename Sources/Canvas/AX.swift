@@ -70,6 +70,34 @@ enum AX {
         return AXUIElementSetAttributeValue(element, kAXSizeAttribute as CFString, v) == .success
     }
 
+    /// Bring `window` and its app to the front right away. Asking NSRunningApplication to
+    /// activate from a background app goes through macOS's cooperative activation and can lag by
+    /// seconds; setting AXFrontmost on the app doesn't. The normal request stays as a fallback.
+    static func focus(_ window: AXUIElement?, pid: pid_t) {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        if let window {
+            raise(window)
+            AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        }
+        NSRunningApplication(processIdentifier: pid)?.activate()
+    }
+
+    /// Chromium and Electron apps turn on "enhanced user interface" for assistive tools and then
+    /// animate every AX move, which is slow. Window managers switch it off around their moves.
+    static func enhancedUserInterface(pid: pid_t) -> Bool {
+        var value: CFTypeRef?
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.5)
+        guard AXUIElementCopyAttributeValue(app, "AXEnhancedUserInterface" as CFString, &value) == .success else { return false }
+        return (value as? Bool) ?? false
+    }
+
+    static func setEnhancedUserInterface(_ on: Bool, pid: pid_t) {
+        AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid), "AXEnhancedUserInterface" as CFString,
+                                     on ? kCFBooleanTrue : kCFBooleanFalse)
+    }
+
     static func raise(_ element: AXUIElement) {
         AXUIElementSetAttributeValue(element, kAXMainAttribute as CFString, kCFBooleanTrue)
         AXUIElementPerformAction(element, kAXRaiseAction as CFString)

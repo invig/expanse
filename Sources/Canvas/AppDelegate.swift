@@ -66,6 +66,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "fit": controller.animate(to: controller.fitCamera())
             case "restore": controller.restoreAll()
             case "tidy": controller.tidy()
+            case "nav":
+                let dirs: [String: CanvasController.Direction] = ["left": .left, "right": .right, "up": .up, "down": .down]
+                if let d = dirs[query["dir"] ?? ""] {
+                    // Optional delay, so a test hop runs after the URL hand-off has settled.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Double(number("delay") ?? 0)) { [weak self] in
+                        self?.controller.navigate(d)
+                    }
+                }
             case "pause": controller.pause()
             case "resume": controller.resume()
             case "dump": controller.dump()

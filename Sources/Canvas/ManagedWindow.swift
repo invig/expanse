@@ -68,6 +68,15 @@ final class WindowNode {
     private let closeGlyph = CAShapeLayer()
     static let closeSize: CGFloat = 26
     static let closeInset: CGFloat = 10
+    static let cornerRadius: CGFloat = 16
+    /// Narrower than this on screen, a window shows no close button (it would cover too much).
+    static let closeMinWidth: CGFloat = 220
+
+    /// Clicks only count as "close" while the button is actually showing.
+    var closeVisible: Bool { !closeButton.isHidden && !container.isHidden }
+
+    private var placedFrame = CGRect.null
+    private var styled: (scale: CGFloat, hovered: Bool, selected: Bool)?
 
     init() {
         container.shadowColor = NSColor.black.cgColor
@@ -75,8 +84,11 @@ final class WindowNode {
         container.shadowRadius = 14
         container.shadowOffset = CGSize(width: 0, height: -6)
 
+        // No masksToBounds: captured windows already have transparent rounded corners, and
+        // clipping costs an offscreen pass per window per frame. The corner radius only rounds
+        // the placeholder background shown before the first frame arrives.
         content.contentsGravity = .resize
-        content.masksToBounds = true
+        content.cornerRadius = WindowNode.cornerRadius
         content.backgroundColor = NSColor(white: 0.97, alpha: 1).cgColor
         content.minificationFilter = .linear
         content.magnificationFilter = .linear
@@ -84,6 +96,7 @@ final class WindowNode {
 
         highlight.borderColor = NSColor.controlAccentColor.cgColor
         highlight.borderWidth = 0
+        highlight.cornerRadius = WindowNode.cornerRadius
         container.addSublayer(highlight)
 
         closeButton.backgroundColor = NSColor(white: 0.1, alpha: 0.75).cgColor
@@ -120,23 +133,33 @@ final class WindowNode {
         CGRect(x: r.maxX - closeInset - closeSize, y: r.minY + closeInset, width: closeSize, height: closeSize)
     }
 
-    /// `rect` is in layer coordinates (bottom-left origin).
-    func layout(rect: CGRect, scale: CGFloat, hovered: Bool, selected: Bool = false, visible: Bool) {
-        container.isHidden = !visible
-        label.isHidden = !visible || rect.width < 70
-        guard visible else { return }
-        container.frame = rect
+    /// Puts the node at its canvas frame. Nodes live in canvas space with y pointing up (the
+    /// canvas view's camera transform maps that to the screen), so this only runs when the window
+    /// moves or resizes, never per animation frame.
+    func place(canvasFrame f: CGRect) {
+        guard f != placedFrame else { return }
+        placedFrame = f
+        container.frame = CGRect(x: f.minX, y: -f.maxY, width: f.width, height: f.height)
         content.frame = container.bounds
         highlight.frame = container.bounds
-        let radius = max(2, 16 * scale)
-        content.cornerRadius = radius
-        highlight.cornerRadius = radius
-        highlight.borderWidth = selected ? 3 : hovered ? 2 : 0
-        closeButton.isHidden = !hovered || rect.width < 140
-        closeButton.position = CGPoint(x: rect.width - WindowNode.closeInset - WindowNode.closeSize / 2,
-                                       y: rect.height - WindowNode.closeInset - WindowNode.closeSize / 2)
-        container.shadowPath = CGPath(roundedRect: container.bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
-        container.shadowRadius = max(3, 14 * min(scale, 1))
-        label.frame = CGRect(x: rect.minX + 2, y: rect.maxY + 5, width: max(rect.width - 4, 60), height: 15)
+        let r = WindowNode.cornerRadius
+        container.shadowPath = CGPath(roundedRect: container.bounds, cornerWidth: r, cornerHeight: r, transform: nil)
+        styled = nil
+    }
+
+    /// Details that stay the same size on screen at any zoom: border, close button, label.
+    /// `screenRect` is the window on screen in layer coordinates (bottom-left origin).
+    func style(scale s: CGFloat, hovered: Bool, selected: Bool, visible: Bool, screenRect: CGRect) {
+        container.isHidden = !visible
+        label.isHidden = !visible || screenRect.width < 70
+        guard visible else { return }
+        label.frame = CGRect(x: screenRect.minX + 2, y: screenRect.maxY + 5, width: max(screenRect.width - 4, 60), height: 15)
+        if let styled, styled.scale == s, styled.hovered == hovered, styled.selected == selected { return }
+        styled = (s, hovered, selected)
+        highlight.borderWidth = (selected ? 3 : hovered ? 2 : 0) / s
+        closeButton.isHidden = !hovered || screenRect.width < WindowNode.closeMinWidth
+        closeButton.transform = CATransform3DMakeScale(1 / s, 1 / s, 1)
+        let inset = (WindowNode.closeInset + WindowNode.closeSize / 2) / s
+        closeButton.position = CGPoint(x: placedFrame.width - inset, y: placedFrame.height - inset)
     }
 }

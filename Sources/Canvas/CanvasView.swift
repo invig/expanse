@@ -29,7 +29,9 @@ final class CanvasView: NSView {
         case minimap
     }
     private var drag: Drag = .none
+    var isDragging: Bool { if case .none = drag { return false } else { return true } }
     private var dragged = false
+    private var lastDragEvent: CFTimeInterval = 0
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -71,6 +73,7 @@ final class CanvasView: NSView {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        world.anchorPoint = .zero
         for l in [world, labels, guides, marquee, selectionBox] { l.frame = bounds }
         // Pinned exactly where the real desktop picture is: the top strip sits under the menu bar.
         wallpaper.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + menuBarHeight)
@@ -167,12 +170,18 @@ final class CanvasView: NSView {
         let viewRect = CGRect(origin: .zero, size: bounds.size)
         selected.formIntersection(c.windows.map(\.id))
         if !c.isActive { selected.removeAll() }
+        // The camera is one transform on the world layer: window nodes sit in canvas space
+        // (y up), so panning and zooming never touch them individually.
+        let s = c.camera.scale
+        world.sublayerTransform = CATransform3DMakeAffineTransform(
+            CGAffineTransform(a: s, b: 0, c: 0, d: s, tx: -s * c.camera.origin.x, ty: bounds.height + s * c.camera.origin.y))
         for w in c.windows {
+            w.node.place(canvasFrame: w.canvasFrame)
             let r = c.camera.toView(w.canvasFrame)
             // In live mode the real window covers its proxy; only parked windows are drawn.
             let visible = r.insetBy(dx: -30, dy: -30).intersects(viewRect) && (c.isActive || w.parked)
-            w.node.layout(rect: flip(r), scale: c.camera.scale, hovered: w === hovered,
-                          selected: selected.contains(w.id), visible: visible)
+            w.node.style(scale: s, hovered: w === hovered, selected: selected.contains(w.id),
+                         visible: visible, screenRect: flip(r))
         }
         let picked = c.windows.filter { selected.contains($0.id) }.map { c.camera.toView($0.canvasFrame) }
         if picked.count > 1, let first = picked.first {
@@ -265,7 +274,8 @@ final class CanvasView: NSView {
             drag = .pan(last: p)
             NSCursor.closedHand.set()
         } else if let w = controller.window(atView: p) {
-            if w === hovered, WindowNode.closeRect(in: controller.camera.toView(w.canvasFrame)).contains(p) {
+            if w === hovered, w.node.closeVisible,
+               WindowNode.closeRect(in: controller.camera.toView(w.canvasFrame)).contains(p) {
                 drag = .none
                 controller.close(w)
                 return
@@ -292,6 +302,15 @@ final class CanvasView: NSView {
 
     override func mouseDragged(with e: NSEvent) {
         guard !controller.gliding else { return }
+        let started = CACurrentMediaTime()
+        defer {
+            let ms = Int((CACurrentMediaTime() - started) * 1000)
+            if ms > 16 { logger.info("slow: drag step took \(ms)ms") }
+            if lastDragEvent > 0, started - lastDragEvent > 0.1 {
+                logger.info("slow: \(Int((started - self.lastDragEvent) * 1000))ms between drag events")
+            }
+            lastDragEvent = started
+        }
         guard controller.isActive else { controller.enter(zoomOut: false); return }
         let p = point(e)
         let s = controller.camera.scale
@@ -336,6 +355,7 @@ final class CanvasView: NSView {
     }
 
     override func mouseUp(with e: NSEvent) {
+        lastDragEvent = 0
         showGuides([])
         marquee.path = nil
         switch drag {
