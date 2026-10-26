@@ -299,8 +299,10 @@ final class CanvasView: NSView {
     override func mouseDown(with e: NSEvent) {
         guard !controller.gliding else { return }
         guard controller.isActive else {
-            // Live mode: a click on a parked window's picture on the backdrop goes to that window.
+            // Live mode: a click on a parked window's picture on the backdrop goes to that window,
+            // and the Spaces bar works here too.
             drag = .none
+            if let i = spacesBarHit(e).tile { controller.switchToSpace(spacesBar.spaces[i]); return }
             if let w = controller.window(atView: point(e), parkedOnly: true) { controller.focus(w) }
             return
         }

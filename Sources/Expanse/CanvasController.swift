@@ -2025,38 +2025,63 @@ final class CanvasController: NSObject {
         view.updateSpaces(spaces, active: active)
     }
 
-    /// A tile in the Spaces bar: go to that Space. Focusing a window is what makes macOS switch
-    /// Spaces, so a full-screen app's gets its window focused; for a desktop, a window on it.
+    /// A tile in the Spaces bar (or expanse://space): go to that Space, from the canvas or at 100%.
+    /// A window becoming key is what makes macOS switch Spaces; Accessibility and ordinary
+    /// activation bring an app forward without leaving the Space you're on (see activate).
     func switchToSpace(_ space: Spaces.Space) {
-        guard isActive, !gliding else { return }
+        guard !gliding else { return }
+        let target: (pid: pid_t, window: CGWindowID?, element: AXUIElement?)
         if let pid = space.pid {
-            logger.info("switching to \(space.name, privacy: .public)'s full-screen Space")
-            let id = space.window
-            exit(then: { [weak self] in
-                self?.axQueue.async {
-                    let window = id.flatMap { id in AX.windows(pid: pid).first { AX.windowID($0) == id } }
-                    AX.focus(window, pid: pid)
-                }
-            })
-            return
-        }
-        // The canvas's own desktop: straight back to where you were.
-        let canvasDesktop = windows.last.flatMap { Spaces.spaces(of: $0.id).first }
-        if canvasDesktop == nil || canvasDesktop == space.id {
-            exit()
-            return
-        }
-        // Another desktop: any window on it.
-        guard let (pid, id) = Spaces.someWindow(on: space.id) else {
-            Toast.show("Nothing open on \(space.name) to switch to")
-            return
-        }
-        logger.info("switching to \(space.name, privacy: .public)")
-        exit(then: { [weak self] in
-            self?.axQueue.async {
-                AX.focus(AX.windows(pid: pid).first { AX.windowID($0) == id }, pid: pid)
+            target = (pid, space.window, nil)
+        } else {
+            let canvasDesktop = windows.last.flatMap { Spaces.spaces(of: $0.id).first }
+            if canvasDesktop == nil || canvasDesktop == space.id {
+                // The canvas's own desktop: back to the window you were last in (whose
+                // Accessibility element Expanse already has, and which works from any Space).
+                guard let w = windows.last(where: { !$0.parked }) ?? windows.last else { return }
+                target = (w.pid, w.id, w.ax)
+            } else if let other = Spaces.someWindow(on: space.id) {
+                target = (other.pid, other.id, nil)
+            } else {
+                Toast.show("Nothing open on \(space.name) to switch to")
+                return
             }
-        })
+        }
+        let from = Spaces.list().active
+        logger.info("switching from Space \(from ?? 0) to \(space.name, privacy: .public) (\(space.id))")
+        let go: () -> Void = { [weak self] in
+            self?.activate(target.pid, raising: target.window, element: target.element, toward: space.id)
+        }
+        if isActive {
+            // Back to 100% first, so the canvas isn't left covering the screen.
+            exit(then: go)
+        } else {
+            go()
+        }
+    }
+
+    /// What AltTab does to reach a window on another Space, which is what makes macOS go there:
+    /// bring it forward and make it key through the window server (see Spaces.focus), activate its
+    /// app, and raise it through Accessibility (see AX.window for finding it off this Space, when
+    /// `known` isn't given).
+    private func activate(_ pid: pid_t, raising window: CGWindowID?, element known: AXUIElement?, toward space: UInt64) {
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return }
+        axQueue.async {
+            let element = known ?? window.flatMap { AX.window(pid: pid, id: $0) }
+            DispatchQueue.main.async {
+                let focused = window.map { Spaces.focus(pid: pid, window: $0) }
+                NSApp.yieldActivation(to: app)
+                app.activate(from: .current, options: [])
+                self.axQueue.async {
+                    if let element { AX.raise(element) }
+                }
+                logger.info("Space switch: window server focus \(focused.map { "\($0)" } ?? "-", privacy: .public), window \(element == nil ? "not found" : "found", privacy: .public)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    let now = Spaces.list().active
+                    logger.info("Space switch \(now == space ? "done" : "didn't happen", privacy: .public): on \(now ?? 0)")
+                }
+            }
+        }
     }
 
     /// Animate to 100% (onto `focus` if given), put real windows where the camera says, drop the overlay.

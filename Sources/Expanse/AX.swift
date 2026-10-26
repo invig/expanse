@@ -2,6 +2,9 @@ import AppKit
 import ApplicationServices
 
 /// Private but stable for a decade; every window manager on macOS uses it.
+@_silgen_name("_AXUIElementCreateWithRemoteToken")
+func _AXUIElementCreateWithRemoteToken(_ token: CFData) -> Unmanaged<AXUIElement>?
+
 @_silgen_name("_AXUIElementGetWindow") @discardableResult
 func _AXUIElementGetWindow(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
 
@@ -18,6 +21,26 @@ enum AX {
         guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value) == .success,
               let list = value as? [AXUIElement] else { return [] }
         return list
+    }
+
+    /// `pid`'s window `id`, even on another Space, where the app's window list leaves it out. An
+    /// element can be made from a token (pid, 0, "coco", element number), and an app's windows
+    /// have small numbers, so it tries those in turn (AltTab's trick), for a second at most.
+    static func window(pid: pid_t, id: CGWindowID) -> AXUIElement? {
+        if let w = windows(pid: pid).first(where: { windowID($0) == id }) { return w }
+        var token = Data(count: 20)
+        token.replaceSubrange(0..<4, with: withUnsafeBytes(of: pid) { Data($0) })
+        token.replaceSubrange(4..<8, with: withUnsafeBytes(of: Int32(0)) { Data($0) })
+        token.replaceSubrange(8..<12, with: withUnsafeBytes(of: Int32(0x636f636f)) { Data($0) })
+        let deadline = CACurrentMediaTime() + 1
+        for number in UInt64(0)..<1000 where CACurrentMediaTime() < deadline {
+            token.replaceSubrange(12..<20, with: withUnsafeBytes(of: number) { Data($0) })
+            if let element = _AXUIElementCreateWithRemoteToken(token as CFData)?.takeRetainedValue(),
+               windowID(element) == id {
+                return element
+            }
+        }
+        return nil
     }
 
     static func windowID(_ element: AXUIElement) -> CGWindowID? {

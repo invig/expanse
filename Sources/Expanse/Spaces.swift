@@ -4,6 +4,7 @@ import AppKit
 /// one Mission Control shows.
 @_silgen_name("CGSMainConnectionID") private func CGSMainConnectionID() -> Int32
 @_silgen_name("CGSCopyManagedDisplaySpaces") private func CGSCopyManagedDisplaySpaces(_ cid: Int32) -> CFArray?
+@_silgen_name("GetProcessForPID") private func GetProcessForPID(_ pid: pid_t, _ psn: UnsafeMutablePointer<ProcessSerialNumber>) -> OSStatus
 @_silgen_name("CGSCopySpacesForWindows") private func CGSCopySpacesForWindows(_ cid: Int32, _ mask: Int32, _ windows: CFArray) -> CFArray?
 
 /// The main display's Spaces: desktops, and the Spaces macOS gives each full-screen app.
@@ -87,6 +88,38 @@ enum Spaces {
             return (pid, id)
         }
         return nil
+    }
+
+    /// Bring `window` (of `pid`) to the front and make it key, through the window server: this is
+    /// what makes macOS follow a window to another Space, full-screen ones included. Accessibility
+    /// and ordinary activation can't (they don't see, or don't move to, other Spaces). The same
+    /// private calls AltTab and yabai use; looked up at run time, so a macOS without them just
+    /// returns false. Main thread.
+    @discardableResult
+    static func focus(pid: pid_t, window: CGWindowID) -> Bool {
+        guard let setFront = WindowServer.setFront, let post = WindowServer.postEventRecord else { return false }
+        var psn = ProcessSerialNumber()
+        guard GetProcessForPID(pid, &psn) == noErr else { return false }
+        guard setFront(&psn, window, 0x200) == 0 else { return false }   // 0x200: user generated
+        // Two event records saying "this window is key" (as AltTab and yabai send them).
+        for kind: UInt8 in [1, 2] {
+            var bytes = [UInt8](repeating: 0, count: 0xf8)
+            bytes[0x04] = 0xf8
+            bytes[0x08] = kind
+            bytes[0x3a] = 0x10
+            withUnsafeBytes(of: window) { for (i, b) in $0.enumerated() { bytes[0x3c + i] = b } }
+            for i in 0x20..<0x30 { bytes[i] = 0xff }
+            _ = bytes.withUnsafeMutableBufferPointer { post(&psn, $0.baseAddress!) }
+        }
+        return true
+    }
+
+    private enum WindowServer {
+        typealias SetFront = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, UInt32, UInt32) -> Int32
+        typealias PostEventRecord = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, UnsafeMutablePointer<UInt8>) -> Int32
+        static let skyLight = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY)
+        static let setFront = dlsym(skyLight, "_SLPSSetFrontProcessWithOptions").map { unsafeBitCast($0, to: SetFront.self) }
+        static let postEventRecord = dlsym(skyLight, "SLPSPostEventRecordTo").map { unsafeBitCast($0, to: PostEventRecord.self) }
     }
 
     /// Whether the Space showing on the main display is a full-screen app's.

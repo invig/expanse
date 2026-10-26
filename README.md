@@ -117,6 +117,7 @@ open "expanse://toggle"            # zoom out / back
 open "expanse://tidy"
 open "expanse://nav?dir=left"      # left | right | up | down
 open "expanse://focus?app=Safari"
+open "expanse://space?name=Safari"  # a full-screen app's Space, or "Desktop"
 open "expanse://pause"             # windows back to the macOS layout
 open "expanse://resume"
 ```
@@ -156,8 +157,9 @@ Expanse runs on a stock, SIP-enabled Mac. That shapes everything:
   way.
 - **Full-screen apps** get a Space of their own from macOS, so they aren't on the canvas: Expanse
   leaves their windows alone, and lists the Spaces (read from the window server, the list
-  Mission Control shows) beside the minimap. Clicking one focuses its window, which is what
-  makes macOS switch there.
+  Mission Control shows) beside the minimap. Clicking one makes its window key through the
+  window server and raises it, the way AltTab reaches windows on other Spaces: that's what
+  makes macOS switch there (ordinary activation brings the app forward but stays put).
 - **Display changes.** While macOS reshuffles windows after a display change, Expanse ignores
   their moves, then restores sizes and derives the layout for the new screen from the home
   layout.
