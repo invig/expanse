@@ -143,10 +143,11 @@ Expanse runs on a stock, SIP-enabled Mac. That shapes everything:
   every captured window with a purple indicator. Expanse streams the windows in view while zoomed
   out or gliding (when the backdrop covers them anyway), and at 100% only parked windows whose
   picture shows on the backdrop. Pictures are captured at the size they're drawn.
-- **Twenty streams at most.** The system service behind every screen capture on the Mac runs out
-  of file descriptors at around 50 streams, after which new streams silently get no frames. So
-  the twenty most visible windows stream; every other window in view is refreshed with one-off
-  snapshots in turn, and new windows get their first picture the same way.
+- **Sixteen streams at most.** The system service behind every screen capture on the Mac runs
+  out of file descriptors at a few dozen streams (other apps' included), after which new streams
+  silently get no frames. So the sixteen most visible windows stream; every other window in view
+  is refreshed with one-off snapshots in turn, and new windows get their first picture the same
+  way.
 - **Display changes.** While macOS reshuffles windows after a display change, Expanse ignores
   their moves, then restores sizes and derives the layout for the new screen from the home
   layout.

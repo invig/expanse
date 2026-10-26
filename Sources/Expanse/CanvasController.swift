@@ -1625,10 +1625,11 @@ final class CanvasController: NSObject {
     }
 
     /// replayd, which runs every ScreenCaptureKit stream on the Mac, runs out of file descriptors
-    /// at around 50 streams (other apps' included), and a stream started after that never
-    /// delivers a frame, without any error. So Expanse streams at most this many windows, the
-    /// ones that matter most; the other windows in view get one-off pictures in turn.
-    private static let streamBudget = 20
+    /// (256, about six a stream) at around 35-50 streams, other apps' included, and a stream
+    /// started after that never delivers a frame, without any error. So Expanse streams at most
+    /// this many windows, the ones that matter most, leaving room for screen sharing and the
+    /// like; the other windows in view get one-off pictures in turn.
+    private static let streamBudget = 16
 
     /// `reconfigure`: also bring running streams to the size they should have now (which restarts
     /// them; see WindowCapture.update). While the camera moves this is left to
