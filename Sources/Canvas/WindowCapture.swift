@@ -18,10 +18,13 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private(set) var pixelSize: CGSize = .zero
     private(set) var fps: Int = 0
     private var starting = false
+    /// Whether the stream should be running; a pause during start-up stops it once it's up.
+    private var wanted = false
 
     var isRunning: Bool { stream != nil || starting }
 
     func start(window: SCWindow, pixelSize: CGSize, fps: Int) {
+        wanted = true
         guard !isRunning else { return }
         starting = true
         let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -45,6 +48,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                     self.onStop?()
                 } else {
                     self.stream = stream
+                    if !self.wanted { self.pause() }
                 }
             }
         }
@@ -59,7 +63,17 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         }
     }
 
+    /// Stop capturing but keep the callbacks, so start() can pick up again later. The layer
+    /// keeps showing the last frame meanwhile.
+    func pause() {
+        wanted = false
+        guard let stream else { return }
+        stream.stopCapture(completionHandler: nil)
+        self.stream = nil
+    }
+
     func stop() {
+        wanted = false
         stream?.stopCapture(completionHandler: nil)
         stream = nil
         onFrame = nil

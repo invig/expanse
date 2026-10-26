@@ -223,7 +223,7 @@ final class CanvasController: NSObject {
         overlay.orderFrontRegardless()
         // Same as Tidy Up: sizes back to what you chose (capped at this screen), overlaps pushed
         // apart, clusters pulled back to the standard gap.
-        fitLayoutToScreen(margin: 0)
+        fitLayoutToScreen(margin: 0, tidy: false)
         commit()
         view.render()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
@@ -231,6 +231,7 @@ final class CanvasController: NSObject {
             self.overlay.level = OverlayWindow.backdropLevel
             self.isActive = false
             self.view.render()
+            self.updateStreamingSoon()
         }
     }
 
@@ -356,6 +357,7 @@ final class CanvasController: NSObject {
             guard !isActive, animation == nil else { return }
             isActive = true
             gliding = true
+            updateStreaming()
             view.render()
             // Cover the screen first, so resizing (which may briefly move the window) isn't seen.
             overlay.level = OverlayWindow.canvasLevel
@@ -389,6 +391,7 @@ final class CanvasController: NSObject {
                 self.overlay.level = OverlayWindow.backdropLevel
                 self.isActive = false
                 self.gliding = false
+                self.updateStreamingSoon()
                 self.glideTarget = nil
                 self.view.render()
             }
@@ -450,7 +453,9 @@ final class CanvasController: NSObject {
                 logger.info("follow \(w.appName, privacy: .public)[\(w.id)] moved to \(NSStringFromPoint(pos), privacy: .public) (last placed \(w.lastPlaced.map { NSStringFromPoint($0) } ?? "never", privacy: .public))")
                 w.lastPlaced = nil
                 w.parked = false
+                let before = w.canvasFrame.origin
                 w.canvasFrame.origin = canvasPoint(forGlobal: pos)
+                noteUserMove(w, from: before)
             }
         }
         view.render()
@@ -477,6 +482,8 @@ final class CanvasController: NSObject {
     /// macOS layout (quit / pause). Otherwise the saved originals are what a crash recovery needs.
     func save(cleanExit: Bool = false) {
         guard !isPaused else { return }
+        // While no window is shrunk for a smaller screen, the canvas layout is the home layout.
+        if !isDerived { windows.forEach { $0.home = $0.canvasFrame.origin } }
         // Saved positions are canvas coordinates relative to a scale-1 camera.
         let center = camera.center(in: viewSize)
         let layout = SavedLayout(
@@ -487,6 +494,8 @@ final class CanvasController: NSObject {
                 SavedLayout.Window(bundleID: $0.bundleID, appName: $0.appName, title: $0.title,
                                    x: Double($0.canvasFrame.minX), y: Double($0.canvasFrame.minY),
                                    w: Double($0.canvasFrame.width), h: Double($0.canvasFrame.height),
+                                   hx: Double(($0.home ?? $0.canvasFrame.origin).x),
+                                   hy: Double(($0.home ?? $0.canvasFrame.origin).y),
                                    pw: Double($0.preferredSize.width), ph: Double($0.preferredSize.height),
                                    ox: Double($0.originalFrame.minX), oy: Double($0.originalFrame.minY),
                                    ow: Double($0.originalFrame.width), oh: Double($0.originalFrame.height))
@@ -721,6 +730,7 @@ final class CanvasController: NSObject {
         } else if firstSync, let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, from: &savedPool) {
             w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
             if let pw = match.pw, let ph = match.ph { w.preferredSize = CGSize(width: pw, height: ph) }
+            if let hx = match.hx, let hy = match.hy { w.home = CGPoint(x: hx, y: hy) }
             if let sw = match.w, let sh = match.h, let ax = w.ax,
                abs(sw - f.width) > 1 || abs(sh - f.height) > 1 {
                 // Quitting put the macOS size back; restore the canvas size.
@@ -748,12 +758,17 @@ final class CanvasController: NSObject {
         windows.append(w)
         w.node.setContentsScale(screen.backingScaleFactor)
         view.addNode(w.node)
-        w.capture.onFrame = { [weak w] surface in
+        w.capture.onFrame = { [weak self, weak w] surface in
+            guard let self, let w else { return }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            w?.node.content.contents = surface
-            w?.node.content.backgroundColor = nil
+            w.node.content.contents = surface
+            w.node.content.backgroundColor = nil
             CATransaction.commit()
+            if w.needsFirstFrame {
+                w.needsFirstFrame = false
+                if !self.needsCapture(w) { w.capture.pause() }
+            }
         }
         w.capture.onStop = { [weak self, weak w] in
             guard let self, let w else { return }
@@ -921,21 +936,43 @@ final class CanvasController: NSObject {
             return
         }
         guard !windows.isEmpty else { return }
-        fitLayoutToScreen(margin: 16)
+        fitLayoutToScreen(margin: 16, tidy: true)
         view.render()
         animate(to: fitCamera())
         scheduleSave()
     }
 
-    /// The layout part of Tidy Up, also run after display changes. Real windows are resized here;
-    /// positions are only changed on the canvas (commit or the next glide moves them).
-    private func fitLayoutToScreen(margin: CGFloat) {
+    /// True while the canvas is a tightened version of the home layout: some window is smaller
+    /// than its chosen size because this screen is smaller.
+    var isDerived: Bool {
+        windows.contains { $0.preferredSize.width > 0 &&
+            ($0.canvasFrame.width < $0.preferredSize.width - 1 || $0.canvasFrame.height < $0.preferredSize.height - 1) }
+    }
+
+    /// You moved a window (dragging on the canvas or for real). On a smaller screen the home
+    /// layout moves by the same amount, so the move survives going back to the big screen.
+    func noteUserMove(_ w: ManagedWindow, from before: CGPoint) {
+        guard isDerived else { return }
+        let home = w.home ?? before
+        w.home = CGPoint(x: home.x + w.canvasFrame.minX - before.x, y: home.y + w.canvasFrame.minY - before.y)
+    }
+
+    /// Fit the layout to this screen. Sizes: what you chose, capped at the screen. Positions: the
+    /// home layout, tightened by however much windows shrank, so every gap (inside groups and
+    /// between them) keeps its size; on the big screen that's the home layout exactly. With
+    /// `tidy`, the home layout itself is cleaned up first (overlaps apart, clusters to 20pt).
+    private func fitLayoutToScreen(margin: CGFloat, tidy: Bool) {
         let maxSize = CGSize(width: viewSize.width - margin * 2, height: viewSize.height - margin * 2)
-        // Clusters come from each window's full chosen size, before anything shrinks, so a row
-        // that was snapped together stays one cluster however much it shrinks.
-        let clusters = Self.clusters(windows.map {
-            CGRect(origin: $0.canvasFrame.origin, size: $0.preferredSize.width > 0 ? $0.preferredSize : $0.canvasFrame.size)
-        }, reach: Self.clusterReach)
+        var home = windows.map {
+            CGRect(origin: $0.home ?? $0.canvasFrame.origin,
+                   size: $0.preferredSize.width > 0 ? $0.preferredSize : $0.canvasFrame.size)
+        }
+        if tidy {
+            Self.separate(&home, gap: Self.gap)
+            Self.gravity(&home, clusters: Self.clusters(home, reach: Self.clusterReach), gap: Self.gap)
+            Self.separate(&home, gap: Self.gap)
+            for (w, h) in zip(windows, home) { w.home = CGPoint(x: h.minX.rounded(), y: h.minY.rounded()) }
+        }
         for w in windows {
             guard let ax = w.ax else { continue }
             let chosen = w.preferredSize.width > 0 ? w.preferredSize : w.canvasFrame.size
@@ -948,17 +985,47 @@ final class CanvasController: NSObject {
             updateCapture(w)
         }
 
-        var frames = windows.map(\.canvasFrame)
-        Self.separate(&frames, gap: Self.gap)
-        Self.gravity(&frames, clusters: clusters, gap: Self.gap)
-        Self.separate(&frames, gap: Self.gap)
+        let origins = Self.derive(home: home, sizes: windows.map(\.canvasFrame.size))
+        var frames = zip(origins, windows).map { CGRect(origin: $0, size: $1.canvasFrame.size) }
+        Self.separate(&frames, gap: 0)   // only real overlaps; normally there are none
         var moved = 0
         for (w, f) in zip(windows, frames) {
             let rounded = CGPoint(x: f.minX.rounded(), y: f.minY.rounded())
             if rounded.distance(to: w.canvasFrame.origin) >= 1 { moved += 1 }
             w.canvasFrame.origin = rounded
         }
-        logger.info("layout fitted: \(moved) of \(self.windows.count) windows moved")
+        logger.info("layout fitted: \(moved) of \(self.windows.count) windows moved, derived=\(self.isDerived)")
+    }
+
+    /// Positions for windows of `sizes` that keep the `home` layout's gaps where you see them: each
+    /// window keeps its distance to its nearest window on the left (and above), whether that's a
+    /// snapped neighbour or the next group over, so shrinking windows pull the layout in. With
+    /// home sizes this returns the home positions exactly. Callers push apart any overlap left.
+    static func derive(home: [CGRect], sizes: [CGSize]) -> [CGPoint] {
+        func span(_ a0: CGFloat, _ a1: CGFloat, _ b0: CGFloat, _ b1: CGFloat) -> CGFloat {
+            max(0, max(a0, b0) - min(a1, b1))   // distance between ranges; 0 when they overlap
+        }
+        var x = home.map(\.minX), y = home.map(\.minY)
+        for i in home.indices.sorted(by: { home[$0].minX < home[$1].minX }) {
+            let left = home.indices.filter { $0 != i && home[$0].maxX <= home[i].minX + 0.5 }
+            // Nearest: the horizontal gap, with rows that don't line up counting extra.
+            if let j = left.min(by: {
+                (home[i].minX - home[$0].maxX) + 2 * span(home[$0].minY, home[$0].maxY, home[i].minY, home[i].maxY) <
+                (home[i].minX - home[$1].maxX) + 2 * span(home[$1].minY, home[$1].maxY, home[i].minY, home[i].maxY)
+            }) {
+                x[i] = x[j] + sizes[j].width + (home[i].minX - home[j].maxX)
+            }
+        }
+        for i in home.indices.sorted(by: { home[$0].minY < home[$1].minY }) {
+            let above = home.indices.filter { $0 != i && home[$0].maxY <= home[i].minY + 0.5 }
+            if let j = above.min(by: {
+                (home[i].minY - home[$0].maxY) + 2 * span(home[$0].minX, home[$0].maxX, home[i].minX, home[i].maxX) <
+                (home[i].minY - home[$1].maxY) + 2 * span(home[$1].minX, home[$1].maxX, home[i].minX, home[i].maxX)
+            }) {
+                y[i] = y[j] + sizes[j].height + (home[i].minY - home[j].maxY)
+            }
+        }
+        return zip(x, y).map { CGPoint(x: $0, y: $1) }
     }
 
     /// Push overlapping frames apart in reading order. Only ever moving right or down means it
@@ -1135,6 +1202,42 @@ final class CanvasController: NSObject {
         for w in windows { view.bringToFront(w.node) }
     }
 
+    // MARK: Capture
+
+    /// macOS marks every window being captured with a purple indicator. At 100% a window that's
+    /// on screen is the real thing, so Canvas only captures windows it needs a picture of: all of
+    /// them on the canvas and during glides (the overlay covers the indicators), hidden ones (their
+    /// indicator is off-screen) always. The last picture stays on the layer meanwhile.
+    private func needsCapture(_ w: ManagedWindow) -> Bool {
+        isActive || w.parked || w.needsFirstFrame
+    }
+
+    func updateStreaming() {
+        for w in windows {
+            if needsCapture(w) {
+                if !w.capture.isRunning {
+                    w.capture.start(window: w.scWindow, pixelSize: pixelSize(for: w), fps: isActive ? Self.canvasFPS : Self.liveFPS)
+                }
+            } else if w.capture.isRunning {
+                w.capture.pause()
+            }
+        }
+    }
+
+    private var streamingWork: DispatchWorkItem?
+
+    /// After handing back to the real windows: keep capturing a moment longer (quick successive
+    /// hops reuse the streams), then stop for windows that are on screen.
+    private func updateStreamingSoon() {
+        streamingWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isActive else { return }
+            self.updateStreaming()
+        }
+        streamingWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
+    }
+
     // MARK: Capture resolution
 
     /// Streams are captured at roughly the on-screen pixel size, in power-of-two steps.
@@ -1187,6 +1290,7 @@ final class CanvasController: NSObject {
             self.camera.scale = 1
             self.updateOverlayFrame()
             self.view.render()
+            self.updateStreaming()
             self.windows.forEach(self.updateCapture)
             if CACurrentMediaTime() - self.lastWallpaperRefresh > 30 { self.refreshWallpaper() }
             NSApp.activate(ignoringOtherApps: true)
@@ -1228,6 +1332,7 @@ final class CanvasController: NSObject {
                 self.isActive = false
                 self.view.render()
                 self.windows.forEach(self.updateCapture)
+                self.updateStreamingSoon()
             }
         }
     }
@@ -1238,6 +1343,8 @@ final class CanvasController: NSObject {
             w.place(at: target)
             w.parked = parked
         }
+        // Newly hidden windows need a live picture for the backdrop; newly visible ones don't.
+        if !isActive { updateStreaming() }
         scheduleSave()
     }
 
@@ -1534,6 +1641,11 @@ final class CanvasController: NSObject {
             consider(f.minY, r.maxY + gap, line: nil, into: &bestY)
             consider(f.maxY, r.minY - gap, line: nil, into: &bestY)
         }
+
+        // The middle of the screen: a window dragged near it snaps to dead centre.
+        let mid = camera.center(in: viewSize)
+        consider(f.midX, mid.x, line: mid.x, span: CGRect(x: mid.x, y: f.minY, width: 0, height: f.height), into: &bestX)
+        consider(f.midY, mid.y, line: mid.y, span: CGRect(x: f.minX, y: mid.y, width: f.width, height: 0), into: &bestY)
 
         // Centre on a whole neighbouring row (above / below) or column (left / right).
         let reach = Self.clusterReach

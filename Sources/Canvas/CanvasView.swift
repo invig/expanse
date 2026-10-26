@@ -359,8 +359,22 @@ final class CanvasView: NSView {
         showGuides([])
         marquee.path = nil
         switch drag {
-        case .window(let w, _, _), .group(let w, _, _):
-            if dragged { controller.scheduleSave() } else { selected.removeAll(); controller.exit(focus: w) }
+        case .window(let w, let startFrame, _):
+            if dragged {
+                controller.noteUserMove(w, from: startFrame.origin)
+                controller.scheduleSave()
+            } else {
+                selected.removeAll()
+                controller.exit(focus: w)
+            }
+        case .group(let w, let starts, _):
+            if dragged {
+                for (moved, start) in starts { controller.noteUserMove(moved, from: start.origin) }
+                controller.scheduleSave()
+            } else {
+                selected.removeAll()
+                controller.exit(focus: w)
+            }
         case .pan:
             if spaceHeld { NSCursor.openHand.set() }
         default:

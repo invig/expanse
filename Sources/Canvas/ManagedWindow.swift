@@ -23,6 +23,11 @@ final class ManagedWindow {
     var lastSized: CGSize?
     /// Where macOS had the window before Canvas managed it (global CG). Restored on quit / pause.
     var originalFrame: CGRect = .zero
+    /// Where the window sits in the home layout: the arrangement at full chosen sizes (the big
+    /// screen). On a smaller screen the canvas layout is derived from this, so it comes back exactly.
+    var home: CGPoint?
+    /// Captured once when first seen, even if it's then on screen and not captured any more.
+    var needsFirstFrame = true
 
     let node = WindowNode()
     let capture = WindowCapture()

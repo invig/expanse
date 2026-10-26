@@ -13,6 +13,9 @@ struct SavedLayout: Codable {
         /// original macOS size.
         var w: Double?
         var h: Double?
+        /// Position in the home layout (full chosen sizes).
+        var hx: Double?
+        var hy: Double?
         /// The size the user last chose; windows shrink to fit small screens and grow back.
         var pw: Double?
         var ph: Double?

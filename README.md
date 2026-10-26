@@ -23,7 +23,7 @@ signed with the local Apple Development identity so the grants survive rebuilds.
 | Drag a selected window | Move the whole selection; it snaps as one block |
 | Pinch, ⌘-scroll | Zoom at the cursor |
 | Two-finger double-tap, `0`, `1`, `-`, `=` | Overview / fit all / 100% / zoom out / in |
-| Drag a window | Move it: snaps firmly to edges and a 20pt gap, softly to centres (including the middle of a whole row); hold ⌘ to disable |
+| Drag a window | Move it: snaps firmly to edges, a 20pt gap and the middle of the screen, softly to centres (including the middle of a whole row); hold ⌘ to disable |
 | Click a window | Fly to it, centered at 100%, and use it |
 | Hover × or ⌘W | Close the hovered window |
 | `T` on the canvas, or menu → Tidy Up Windows | Keep the layout: fit sizes to the screen (shrink or grow back), push overlaps apart, pull each cluster together to 20pt gaps |
@@ -55,8 +55,10 @@ Scripting: `open "canvas://toggle"` (also `enter`, `exit`, `fit`, `tidy`, `pause
   canvas. The originals are saved too, so after a crash the next quit still returns windows to
   the right macOS spots.
 - **Display changes.** Window tracking pauses while macOS reshuffles windows, then the canvas
-  re-centers and re-places everything. Windows too big for the screen shrink to fit when focused
-  and grow back on a bigger screen.
+  re-centers and re-places everything. Canvas keeps a *home* layout: every window at its full
+  chosen size. On a smaller screen, windows shrink to fit and the layout is derived from home,
+  with each window keeping its gap to its nearest neighbour, so it's a tighter version of the big
+  screen. Back on the big screen it's the home layout again, exactly.
 - AX observers follow windows you move by hand.
 
 ## Not yet
