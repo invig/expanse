@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let canRecord = CGPreflightScreenCaptureAccess()
         logger.info("accessibility=\(trusted) screenRecording=\(canRecord)")
         if Onboarding.needed { Onboarding.show {} }
+        // Launching Expanse again while it's running shows this window (see main.swift).
+        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.invignation.expanse.showWelcome"),
+                                                            object: nil, queue: .main) { _ in Onboarding.show {} }
 
         // ⌥` toggles the canvas.
         hotKey = HotKey(keyCode: kVK_ANSI_Grave, modifiers: optionKey, id: 1) { [weak self] in
@@ -86,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "fit": controller.animate(to: controller.fitCamera())
             case "restore": controller.restoreAll()
             case "tidy": controller.tidy()
+            case "welcome": Onboarding.show {}
             case "place":
                 if let id = number("id"), let x = number("x"), let y = number("y") {
                     controller.setCanvasOrigin(CGWindowID(id), CGPoint(x: x, y: y), commit: query["commit"] == "1")

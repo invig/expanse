@@ -91,7 +91,9 @@ final class PermissionsModel: ObservableObject {
         let path = Bundle.main.bundlePath
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", path]
+        // Wait until this copy has fully quit (and put windows back): a second copy quits on launch.
+        task.arguments = ["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"",
+                          path, String(getpid())]
         try? task.run()
         NSApp.terminate(nil)
     }
