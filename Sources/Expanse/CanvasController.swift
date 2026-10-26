@@ -935,8 +935,10 @@ final class CanvasController: NSObject {
             animate(to: Camera.centered(on: target.canvasFrame.center, scale: camera.scale, viewSize: viewSize), duration: 0.25)
             return
         }
+        // With auto-centre on, every hop centres its window: a hop that only moved focus to a
+        // window already on screen looked like nothing happened, and the next press skipped on.
         let r = camera.toView(target.canvasFrame)
-        if !target.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r) {
+        if !autoCentre, !target.parked, CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r) {
             bringToFront(target)
             focusWindow(target)
             view.render()
@@ -978,7 +980,9 @@ final class CanvasController: NSObject {
             }
             guard ahead else { continue }
             if sameLine {
-                if gap < (inLine?.1 ?? .infinity) { inLine = (i, gap) }
+                // Equal gaps (two windows snapped below one): the better-aligned one wins.
+                let score = gap + r.center.distance(to: from.center) / 1000
+                if score < (inLine?.1 ?? .infinity) { inLine = (i, score) }
             } else if withinCone {
                 let d = r.center.distance(to: from.center)
                 if d < (inCone?.1 ?? .infinity) { inCone = (i, d) }
