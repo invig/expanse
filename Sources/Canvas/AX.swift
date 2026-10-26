@@ -42,6 +42,13 @@ enum AX {
         return AXValueGetValue(v as! AXValue, .cgSize, &s) ? s : nil
     }
 
+    static func subrole(_ element: AXUIElement?) -> String? {
+        guard let element else { return nil }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &value) == .success else { return nil }
+        return value as? String
+    }
+
     static func focusedWindow(pid: pid_t) -> AXUIElement? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute as CFString,

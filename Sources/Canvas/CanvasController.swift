@@ -36,6 +36,9 @@ final class CanvasController: NSObject {
     private var savedPool: [SavedLayout.Window] = []
     private var lastSavedLayout: Data?
     let hotCorner = HotCorner()
+    /// Canvas spots of windows that disappeared (minimized, app hidden, closed). Window IDs
+    /// are never reused, so a returning ID means the same window coming back.
+    private var recentlyRemoved: [CGWindowID: CGRect] = [:]
     private var wallpaperTimer: Timer?
     private var lastWallpaperRefresh: CFTimeInterval = 0
 
@@ -111,6 +114,7 @@ final class CanvasController: NSObject {
     /// remembered spot for that display). Until then, moves are reverted instead of adopted.
     private var settleUntil = Date.distantPast
     private var reassertWork: DispatchWorkItem?
+    private var focusSettleWork: DispatchWorkItem?
     static let settleDuration: TimeInterval = 6
 
     private func registerDisplayCallback() {
@@ -242,8 +246,19 @@ final class CanvasController: NSObject {
         windowFocused(id)
     }
 
-    /// A window got focus (click, ⌘-Tab, Dock). If it isn't fully on screen, glide to center it.
+    /// A window got focus (click, ⌘-Tab, Dock). Focus often bounces between windows for a moment
+    /// (opening a document focuses the old window, then the new one), so act on where it settles.
     private func windowFocused(_ id: CGWindowID) {
+        focusSettleWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.focusSettled() }
+        focusSettleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
+    /// If the focused window isn't fully on screen, glide to center it.
+    private func focusSettled() {
+        guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid(),
+              let focused = AX.focusedWindow(pid: app.processIdentifier), let id = AX.windowID(focused) else { return }
         guard !isActive, !isPaused, !suspendTracking, animation == nil,
               let w = windows.first(where: { $0.id == id }) else { return }
         let r = camera.toView(w.canvasFrame)
@@ -563,6 +578,10 @@ final class CanvasController: NSObject {
             w.canvasFrame.origin = canvasPoint(forGlobal: global)
         }
 
+        // A window opened (or came back) while Canvas is running, not one found at launch.
+        let anchor = windows.last { !$0.parked }
+        let arriving = !firstSync && !suspendTracking
+
         windows.append(w)
         w.node.setContentsScale(screen.backingScaleFactor)
         view.addNode(w.node)
@@ -579,7 +598,76 @@ final class CanvasController: NSObject {
         w.capture.start(window: sc, pixelSize: pixelSize(for: w), fps: isActive ? Self.canvasFPS : Self.liveFPS)
         observe(w)
         logger.info("tracking \(w.appName, privacy: .public) [\(w.id)] \(w.title, privacy: .public)")
+        if arriving { arrive(w, anchor: anchor, live: live) }
         return restored
+    }
+
+    // MARK: New windows
+
+    /// New windows go to an empty spot next to what you were working on; windows coming back
+    /// from minimize / hide go back where they were.
+    private func arrive(_ w: ManagedWindow, anchor: ManagedWindow?, live: Bool) {
+        if let back = recentlyRemoved.removeValue(forKey: w.id) {
+            w.canvasFrame.origin = back.origin
+        } else if AX.subrole(w.ax) == kAXStandardWindowSubrole as String, let spot = freeSpot(for: w, near: anchor) {
+            w.canvasFrame.origin = spot
+            logger.info("placed new window \(w.appName, privacy: .public) at \(NSStringFromPoint(spot), privacy: .public)")
+        } else {
+            return
+        }
+        guard live else { view.render(); return }
+        let r = camera.toView(w.canvasFrame)
+        if CGRect(origin: .zero, size: viewSize).contains(r) {
+            w.place(at: CGPoint(x: (r.minX + viewport.minX).rounded(), y: (r.minY + viewport.minY).rounded()))
+            w.parked = false
+            view.render()
+        } else {
+            glideWhenIdle(to: w)
+        }
+        scheduleSave()
+    }
+
+    /// Opening a window usually activates its app, which may already be gliding somewhere;
+    /// wait for that to finish rather than dropping this glide.
+    private func glideWhenIdle(to w: ManagedWindow, attempts: Int = 20) {
+        guard !isPaused, windows.contains(where: { $0 === w }) else { return }
+        if !isActive && animation == nil {
+            glide(to: w)
+        } else if attempts > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.glideWhenIdle(to: w, attempts: attempts - 1)
+            }
+        }
+    }
+
+    /// The nearest canvas position for `w` that overlaps nothing: beside, below, left of or above
+    /// existing windows, closest to the anchor. Spots already on screen win.
+    private func freeSpot(for w: ManagedWindow, near anchor: ManagedWindow?) -> CGPoint? {
+        let others = windows.filter { $0 !== w }.map(\.canvasFrame)
+        guard !others.isEmpty else { return nil }
+        let gap: CGFloat = 24
+        let size = w.canvasFrame.size
+        let target = anchor?.canvasFrame.center ?? camera.center(in: viewSize)
+        let visible = camera.toCanvas(CGRect(origin: .zero, size: viewSize))
+
+        // Neighbours of the windows nearest the anchor; nudged by direction so ties go right, then down.
+        let nearest = others.sorted { $0.center.distance(to: target) < $1.center.distance(to: target) }.prefix(12)
+        var candidates: [(CGPoint, CGFloat)] = []
+        for o in nearest {
+            candidates.append((CGPoint(x: o.maxX + gap, y: o.minY), 0))
+            candidates.append((CGPoint(x: o.minX, y: o.maxY + gap), 40))
+            candidates.append((CGPoint(x: o.minX - gap - size.width, y: o.minY), 80))
+            candidates.append((CGPoint(x: o.minX, y: o.minY - gap - size.height), 120))
+        }
+
+        var best: (CGPoint, CGFloat)?
+        for (origin, bias) in candidates {
+            let r = CGRect(origin: origin, size: size)
+            if others.contains(where: { $0.insetBy(dx: -gap / 2, dy: -gap / 2).intersects(r) }) { continue }
+            let score = r.center.distance(to: target) + bias + (visible.contains(r) ? 0 : 1500)
+            if score < (best?.1 ?? .infinity) { best = (origin, score) }
+        }
+        return best.map { CGPoint(x: $0.0.x.rounded(), y: $0.0.y.rounded()) }
     }
 
     private func remove(_ w: ManagedWindow) {
@@ -588,6 +676,7 @@ final class CanvasController: NSObject {
         observers[w.pid]?.forget(w.id)
         view.removeNode(w.node)
         windows.removeAll { $0 === w }
+        if !isPaused { recentlyRemoved[w.id] = w.canvasFrame }
         if view.hovered === w { view.hovered = nil }
         if isActive { view.render() }
     }
