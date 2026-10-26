@@ -365,6 +365,7 @@ final class CanvasController: NSObject {
                                                           object: nil, queue: .main) { [weak self] _ in
             self?.refreshWallpaper()
             self?.refreshSpaces()
+            self?.canvasFollowsSpace()
             self?.syncSoon()
         }
     }
@@ -2022,7 +2023,10 @@ final class CanvasController: NSObject {
 
     func refreshSpaces() {
         let (spaces, active) = Spaces.list()
-        view.updateSpaces(spaces, active: active)
+        // The desktop the canvas lives on is the canvas, as far as you're concerned.
+        let canvas = canvasDesktop
+        view.updateSpaces(spaces.map { $0.id == canvas ? Spaces.Space(id: $0.id, pid: nil, window: nil, name: "Canvas") : $0 },
+                          active: active)
     }
 
     /// A tile in the Spaces bar (or expanse://space): go to that Space, from the canvas or at 100%.
@@ -2035,6 +2039,13 @@ final class CanvasController: NSObject {
             target = (pid, space.window, nil)
         } else {
             if canvasDesktop == nil || canvasDesktop == space.id {
+                // Back to the canvas's own Space from the canvas (opened over a full-screen app):
+                // stay on the canvas, swiping there under it, so you can pick a window.
+                if isActive, SpaceSwipe.go(to: space.id) {
+                    logger.info("back to the canvas's Space, staying on the canvas")
+                    // The canvas comes along when macOS says the Space changed (canvasFollowsSpace).
+                    return
+                }
                 // The canvas's own desktop: back to the window you were last in (whose
                 // Accessibility element Expanse already has, and which works from any Space).
                 guard let w = windows.last(where: { !$0.parked }) ?? windows.last else { return }
@@ -2063,8 +2074,24 @@ final class CanvasController: NSObject {
         }
     }
 
+    /// The canvas is open and you've moved to a desktop Space (from a full-screen app's, say): it
+    /// comes too. Its window is on every Space, but macOS stops drawing it after a switch away
+    /// from a full-screen app's Space until it's shown again, and gives the keyboard to an app on
+    /// the new Space. (Moving to a full-screen app's Space, the canvas is on its way out.)
+    private func canvasFollowsSpace() {
+        guard isActive, Spaces.current?.isDesktop == true else { return }
+        overlay.orderOut(nil)
+        overlay.orderFrontRegardless()
+        // Once another app is active, ordinary activation is refused; the window server's own
+        // "bring this window forward" isn't.
+        Spaces.focus(pid: getpid(), window: CGWindowID(overlay.windowNumber))
+        NSApp.activate(ignoringOtherApps: true)
+        overlay.makeKeyAndOrderFront(nil)
+        overlay.makeFirstResponder(view)
+    }
+
     /// The desktop Space the canvas's windows are on.
-    private var canvasDesktop: UInt64? {
+    var canvasDesktop: UInt64? {
         windows.last.flatMap { Spaces.spaces(of: $0.id).first }
     }
 

@@ -120,12 +120,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "zoom": if let s = number("scale") { controller.zoomAnimated(to: s) }
             case "pan": controller.pan(by: CGVector(dx: number("dx") ?? 0, dy: number("dy") ?? 0))
             case "space":
-                // A Space by name ("Desktop", or a full-screen app's), or by its place in Mission
-                // Control's order, from 1.
+                // A Space by name ("Canvas", "Desktop", or a full-screen app's), or by its place in
+                // Mission Control's order, from 1.
                 let spaces = Spaces.list().spaces
                 let name = (query["name"] ?? "").lowercased()
                 let index = Int(number("index") ?? 0) - 1
-                if let space = spaces.first(where: { $0.name.lowercased() == name })
+                if let space = (name == "canvas" ? spaces.first { $0.id == controller.canvasDesktop } : nil)
+                    ?? spaces.first(where: { $0.name.lowercased() == name })
                     ?? (spaces.indices.contains(index) ? spaces[index] : nil) {
                     controller.switchToSpace(space)
                 }
