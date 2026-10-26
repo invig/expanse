@@ -12,6 +12,11 @@ final class CanvasView: NSView {
     /// Height of the menu bar strip the wallpaper extends under, so it lines up with the real desktop.
     var menuBarHeight: CGFloat = 0 { didSet { needsLayout = true } }
     private let guides = CAShapeLayer()
+    private let marquee = CAShapeLayer()
+    private let selectionBox = CAShapeLayer()
+    /// Windows picked with a selection box or ⇧-click; dragging one moves them all.
+    private(set) var selected = Set<CGWindowID>()
+    private var spaceHeld = false
     private let minimap = Minimap()
     var hovered: ManagedWindow?
 
@@ -19,6 +24,8 @@ final class CanvasView: NSView {
         case none
         case pan(last: CGPoint)
         case window(ManagedWindow, startFrame: CGRect, startPoint: CGPoint)
+        case group(clicked: ManagedWindow, starts: [(ManagedWindow, CGRect)], startPoint: CGPoint)
+        case marquee(start: CGPoint, base: Set<CGWindowID>)
         case minimap
     }
     private var drag: Drag = .none
@@ -40,6 +47,17 @@ final class CanvasView: NSView {
         guides.fillColor = nil
         guides.strokeColor = NSColor.systemPink.cgColor
         guides.lineWidth = 1
+        marquee.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+        marquee.strokeColor = NSColor.controlAccentColor.cgColor
+        marquee.lineWidth = 1
+        selectionBox.fillColor = nil
+        selectionBox.strokeColor = NSColor.controlAccentColor.cgColor
+        selectionBox.lineWidth = 1
+        selectionBox.lineDashPattern = [5, 4]
+        for l in [marquee, selectionBox] {
+            l.actions = ["path": NSNull()]
+            root.addSublayer(l)
+        }
         root.addSublayer(minimap)
         applyAppearance()
     }
@@ -53,7 +71,7 @@ final class CanvasView: NSView {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for l in [world, labels, guides] { l.frame = bounds }
+        for l in [world, labels, guides, marquee, selectionBox] { l.frame = bounds }
         // Pinned exactly where the real desktop picture is: the top strip sits under the menu bar.
         wallpaper.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + menuBarHeight)
         minimap.frame.origin = CGPoint(x: bounds.maxX - Minimap.size.width - 16, y: 16)
@@ -139,11 +157,21 @@ final class CanvasView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         let viewRect = CGRect(origin: .zero, size: bounds.size)
+        selected.formIntersection(c.windows.map(\.id))
+        if !c.isActive { selected.removeAll() }
         for w in c.windows {
             let r = c.camera.toView(w.canvasFrame)
             // In live mode the real window covers its proxy; only parked windows are drawn.
             let visible = r.insetBy(dx: -30, dy: -30).intersects(viewRect) && (c.isActive || w.parked)
-            w.node.layout(rect: flip(r), scale: c.camera.scale, hovered: w === hovered, visible: visible)
+            w.node.layout(rect: flip(r), scale: c.camera.scale, hovered: w === hovered,
+                          selected: selected.contains(w.id), visible: visible)
+        }
+        let picked = c.windows.filter { selected.contains($0.id) }.map { c.camera.toView($0.canvasFrame) }
+        if picked.count > 1, let first = picked.first {
+            let box = picked.reduce(first) { $0.union($1) }.insetBy(dx: -8, dy: -8)
+            selectionBox.path = CGPath(roundedRect: flip(box), cornerWidth: 6, cornerHeight: 6, transform: nil)
+        } else {
+            selectionBox.path = nil
         }
         minimap.update(windows: c.windows.map(\.canvasFrame), viewport: c.camera.toCanvas(viewRect), scale: c.camera.scale)
         CATransaction.commit()
@@ -220,16 +248,32 @@ final class CanvasView: NSView {
             return
         }
         let p = point(e)
-        if let w = controller.window(atView: p) {
+        let shift = e.modifierFlags.contains(.shift)
+        if spaceHeld {
+            drag = .pan(last: p)
+            NSCursor.closedHand.set()
+        } else if let w = controller.window(atView: p) {
             if w === hovered, WindowNode.closeRect(in: controller.camera.toView(w.canvasFrame)).contains(p) {
                 drag = .none
                 controller.close(w)
                 return
             }
-            controller.bringToFront(w)
-            drag = .window(w, startFrame: w.canvasFrame, startPoint: p)
+            if shift {
+                // ⇧-click toggles the window in the selection.
+                if selected.remove(w.id) == nil { selected.insert(w.id) }
+                drag = .none
+            } else if selected.contains(w.id) && selected.count > 1 {
+                let group = controller.windows.filter { selected.contains($0.id) }
+                group.forEach(controller.bringToFront)
+                drag = .group(clicked: w, starts: group.map { ($0, $0.canvasFrame) }, startPoint: p)
+            } else {
+                selected.removeAll()
+                controller.bringToFront(w)
+                drag = .window(w, startFrame: w.canvasFrame, startPoint: p)
+            }
         } else {
-            drag = .pan(last: p)
+            drag = .marquee(start: p, base: shift ? selected : [])
+            if !shift { selected.removeAll() }
         }
         render()
     }
@@ -237,6 +281,8 @@ final class CanvasView: NSView {
     override func mouseDragged(with e: NSEvent) {
         guard controller.isActive else { controller.enter(zoomOut: false); return }
         let p = point(e)
+        let s = controller.camera.scale
+        let snapEnabled = !e.modifierFlags.contains(.command)
         switch drag {
         case .none:
             break
@@ -249,22 +295,46 @@ final class CanvasView: NSView {
         case .window(let w, let startFrame, let startPoint):
             if !dragged && p.distance(to: startPoint) < 3 { return }
             dragged = true
-            let s = controller.camera.scale
             let proposed = startFrame.offsetBy(dx: (p.x - startPoint.x) / s, dy: (p.y - startPoint.y) / s)
-            let snapEnabled = !e.modifierFlags.contains(.command)
-            let (frame, lines) = snapEnabled ? controller.snap(proposed, for: w) : (proposed, [])
+            let (frame, lines) = snapEnabled ? controller.snap(proposed, excluding: [w.id]) : (proposed, [])
             w.canvasFrame = frame
             showGuides(lines)
+            render()
+        case .group(_, let starts, let startPoint):
+            if !dragged && p.distance(to: startPoint) < 3 { return }
+            dragged = true
+            let d = CGVector(dx: (p.x - startPoint.x) / s, dy: (p.y - startPoint.y) / s)
+            // Snap the group's bounding box as one block against everything else.
+            let bounds = starts.map(\.1).reduce(starts[0].1) { $0.union($1) }
+            let proposed = bounds.offsetBy(dx: d.dx, dy: d.dy)
+            let (snapped, lines) = snapEnabled ? controller.snap(proposed, excluding: selected) : (proposed, [])
+            let dx = d.dx + snapped.minX - proposed.minX, dy = d.dy + snapped.minY - proposed.minY
+            for (w, start) in starts { w.canvasFrame = start.offsetBy(dx: dx, dy: dy) }
+            showGuides(lines)
+            render()
+        case .marquee(let start, let base):
+            dragged = true
+            let box = CGRect(x: min(start.x, p.x), y: min(start.y, p.y), width: abs(p.x - start.x), height: abs(p.y - start.y))
+            marquee.path = CGPath(rect: flip(box), transform: nil)
+            let hits = controller.windows.filter { controller.camera.toView($0.canvasFrame).intersects(box) }.map(\.id)
+            selected = base.union(hits)
             render()
         }
     }
 
     override func mouseUp(with e: NSEvent) {
         showGuides([])
-        if case .window(let w, _, _) = drag {
-            if dragged { controller.scheduleSave() } else { controller.exit(focus: w) }
+        marquee.path = nil
+        switch drag {
+        case .window(let w, _, _), .group(let w, _, _):
+            if dragged { controller.scheduleSave() } else { selected.removeAll(); controller.exit(focus: w) }
+        case .pan:
+            if spaceHeld { NSCursor.openHand.set() }
+        default:
+            break
         }
         drag = .none
+        render()
     }
 
     override func mouseMoved(with e: NSEvent) {
@@ -285,7 +355,12 @@ final class CanvasView: NSView {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         switch Int(e.keyCode) {
         case kVK_Escape:
-            controller.exit()
+            if selected.isEmpty { controller.exit() } else { selected.removeAll(); render() }
+        case kVK_Space:
+            if !e.isARepeat { spaceHeld = true; NSCursor.openHand.set() }
+        case kVK_ANSI_A where e.modifierFlags.contains(.command):
+            selected = Set(controller.windows.map(\.id))
+            render()
         case kVK_Return:
             controller.exit(focus: hovered ?? controller.windows.last)
         case kVK_ANSI_0:
@@ -304,6 +379,15 @@ final class CanvasView: NSView {
             if let w = hovered { controller.close(w) }
         default:
             super.keyDown(with: e)
+        }
+    }
+
+    override func keyUp(with e: NSEvent) {
+        if Int(e.keyCode) == kVK_Space {
+            spaceHeld = false
+            NSCursor.arrow.set()
+        } else {
+            super.keyUp(with: e)
         }
     }
 }

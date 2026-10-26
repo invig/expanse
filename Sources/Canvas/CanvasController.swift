@@ -36,6 +36,12 @@ final class CanvasController: NSObject {
     private var savedPool: [SavedLayout.Window] = []
     private var lastSavedLayout: Data?
     let hotCorner = HotCorner()
+
+    /// Glide to center a focused window that isn't fully on screen. Toggled with ⌥⇧`.
+    var autoCentre: Bool {
+        get { UserDefaults.standard.object(forKey: "autoCentre") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "autoCentre") }
+    }
     /// Canvas spots of windows that disappeared (minimized, app hidden, closed). Window IDs
     /// are never reused, so a returning ID means the same window coming back.
     private var recentlyRemoved: [CGWindowID: CGRect] = [:]
@@ -263,7 +269,9 @@ final class CanvasController: NSObject {
               let w = windows.first(where: { $0.id == id }) else { return }
         let r = camera.toView(w.canvasFrame)
         let fullyVisible = !w.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r)
-        if !fullyVisible { glide(to: w) }
+        // With auto-centre off, windows already (partly) on screen stay put so several apps can
+        // be used side by side; a window that's fully hidden is still brought into view.
+        if !fullyVisible && (autoCentre || w.parked) { glide(to: w) }
     }
 
     /// Center `w` at 100% and make it the active window, from either mode.
@@ -981,13 +989,14 @@ final class CanvasController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.sync() }
     }
 
-    /// Snap a dragged window's edges and centers to other windows. Returns guide lines in canvas space.
-    func snap(_ f: CGRect, for w: ManagedWindow) -> (CGRect, [(CGPoint, CGPoint)]) {
+    /// Snap a dragged frame (one window, or a group's bounding box) to the edges and centers of
+    /// the other windows. Returns guide lines in canvas space.
+    func snap(_ f: CGRect, excluding: Set<CGWindowID>) -> (CGRect, [(CGPoint, CGPoint)]) {
         let threshold = 8 / camera.scale
         let gap: CGFloat = 24
         var bestX: (dist: CGFloat, delta: CGFloat, line: CGFloat?)?
         var bestY: (dist: CGFloat, delta: CGFloat, line: CGFloat?)?
-        let others = windows.filter { $0 !== w }.map(\.canvasFrame)
+        let others = windows.filter { !excluding.contains($0.id) }.map(\.canvasFrame)
 
         func consider(_ a: CGFloat, _ b: CGFloat, line: CGFloat?, into best: inout (dist: CGFloat, delta: CGFloat, line: CGFloat?)?) {
             let d = b - a

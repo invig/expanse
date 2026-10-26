@@ -117,7 +117,7 @@ final class WindowNode {
     }
 
     /// `rect` is in layer coordinates (bottom-left origin).
-    func layout(rect: CGRect, scale: CGFloat, hovered: Bool, visible: Bool) {
+    func layout(rect: CGRect, scale: CGFloat, hovered: Bool, selected: Bool = false, visible: Bool) {
         container.isHidden = !visible
         label.isHidden = !visible || rect.width < 70
         guard visible else { return }
@@ -127,7 +127,7 @@ final class WindowNode {
         let radius = max(2, 16 * scale)
         content.cornerRadius = radius
         highlight.cornerRadius = radius
-        highlight.borderWidth = hovered ? 2 : 0
+        highlight.borderWidth = selected ? 3 : hovered ? 2 : 0
         closeButton.isHidden = !hovered || rect.width < 140
         closeButton.position = CGPoint(x: rect.width - WindowNode.closeInset - WindowNode.closeSize / 2,
                                        y: rect.height - WindowNode.closeInset - WindowNode.closeSize / 2)

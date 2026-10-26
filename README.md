@@ -18,14 +18,17 @@ signed with the local Apple Development identity so the grants survive rebuilds.
 | Input | Does |
 |---|---|
 | Scroll or pinch on empty canvas, ⌥`, ⌥ + pinch anywhere | Open the canvas |
-| Two-finger scroll / drag background | Pan |
+| Two-finger scroll, or Space + drag | Pan |
+| Drag on empty canvas, ⇧-click, ⌘A | Select windows (⇧-drag adds to the selection) |
+| Drag a selected window | Move the whole selection; it snaps as one block |
 | Pinch, ⌘-scroll | Zoom at the cursor |
 | Two-finger double-tap, `0`, `1`, `-`, `=` | Overview / fit all / 100% / zoom out / in |
 | Drag a window | Move it (snaps to edges and centers; hold ⌘ to disable) |
 | Click a window | Fly to it, centered at 100%, and use it |
 | Hover × or ⌘W | Close the hovered window |
-| Esc | Back to 100% where you are |
+| Esc | Clear the selection; with nothing selected, back to 100% where you are |
 | ⌘-Tab / Dock to an off-screen window | The canvas jumps to it |
+| ⌥⇧` or menu → Auto-Centre Focused Window | Toggle gliding to centre a clicked window; off keeps on-screen windows put |
 | Menu → Pause Canvas, or quit | Every window goes back to its original macOS spot and size |
 | ⌥` while paused, or launch | The canvas comes back exactly as you left it |
 

@@ -5,6 +5,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let controller = CanvasController()
     private var statusItem: NSStatusItem!
     private var hotKey: HotKey?
+    private var centreHotKey: HotKey?
+    private let centreItem = NSMenuItem(title: "Auto-Centre Focused Window", action: #selector(toggleAutoCentre), keyEquivalent: "`")
     private var signalSources: [DispatchSourceSignal] = []
     private let accessibilityItem = NSMenuItem(title: "", action: #selector(openAccessibilitySettings), keyEquivalent: "")
     private let cornerMenu = NSMenu()
@@ -22,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // ⌥` toggles the canvas.
         hotKey = HotKey(keyCode: kVK_ANSI_Grave, modifiers: optionKey, id: 1) { [weak self] in
             self?.controller.toggle()
+        }
+        // ⌥⇧` toggles auto-centring.
+        centreHotKey = HotKey(keyCode: kVK_ANSI_Grave, modifiers: optionKey | shiftKey, id: 2) { [weak self] in
+            self?.toggleAutoCentre()
         }
 
         // Never leave windows stranded in the corner: restore them on SIGTERM / SIGINT too.
@@ -93,6 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             cornerMenu.addItem(item)
         }
         menu.addItem(cornerItem)
+        centreItem.keyEquivalentModifierMask = [.option, .shift]
+        centreItem.target = self
+        menu.addItem(centreItem)
         menu.addItem(wallpaperItem)
         menu.addItem(NSMenuItem(title: "Restore All Windows", action: #selector(restoreAll), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -111,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.state = (item.representedObject as? String) == controller.hotCorner.corner.rawValue ? .on : .off
         }
         wallpaperItem.state = Wallpaper.enabled ? .on : .off
+        centreItem.state = controller.autoCentre ? .on : .off
         pauseItem.title = controller.isPaused ? "Resume Canvas" : "Pause Canvas (back to macOS layout)"
         accessibilityItem.title = ax ? "Accessibility: granted" : "Grant Accessibility…"
         screenRecordingItem.title = sr ? "Screen Recording: granted" : "Grant Screen Recording…"
@@ -121,6 +131,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func pickCorner(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let corner = HotCorner.Corner(rawValue: raw) else { return }
         controller.hotCorner.corner = corner
+    }
+
+    @objc private func toggleAutoCentre() {
+        controller.autoCentre.toggle()
+        Toast.show(controller.autoCentre ? "Auto-centre on" : "Auto-centre off: windows stay put")
     }
 
     @objc private func toggleWallpaper() {
