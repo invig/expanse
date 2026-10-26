@@ -53,6 +53,22 @@ enum Spaces {
         return (spaces, active)
     }
 
+    /// Every Space on the main display in Mission Control's order (whatever its kind: what a swipe
+    /// steps through), and the one showing.
+    static func order() -> (ids: [UInt64], active: UInt64?) {
+        guard let display = mainDisplay() else { return ([], nil) }
+        let ids = (display["Spaces"] as? [[String: Any]] ?? []).compactMap {
+            ($0["id64"] as? NSNumber)?.uint64Value ?? ($0["ManagedSpaceID"] as? NSNumber)?.uint64Value
+        }
+        return (ids, list().active)
+    }
+
+    /// The Space showing on the main display.
+    static var current: Space? {
+        let (spaces, active) = list()
+        return spaces.first { $0.id == active }
+    }
+
     /// Windows that are full screen, on any display: each has a Space of its own, and Expanse
     /// leaves them be. Thread-safe.
     static func fullScreenWindows() -> Set<CGWindowID> {

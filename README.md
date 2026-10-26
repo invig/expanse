@@ -157,9 +157,13 @@ Expanse runs on a stock, SIP-enabled Mac. That shapes everything:
   way.
 - **Full-screen apps** get a Space of their own from macOS, so they aren't on the canvas: Expanse
   leaves their windows alone, and lists the Spaces (read from the window server, the list
-  Mission Control shows) beside the minimap. Clicking one makes its window key through the
-  window server and raises it, the way AltTab reaches windows on other Spaces: that's what
-  makes macOS switch there (ordinary activation brings the app forward but stays put).
+  Mission Control shows) beside the minimap. Switching is instant: Expanse posts a synthetic
+  trackpad swipe faster than the Dock animates (InstantSpaceSwitcher's trick), under the canvas,
+  which is on every Space and stays put. Then it makes the window key through the window
+  server and raises it, the way AltTab reaches windows on other Spaces (and the way there if
+  the swipe can't be made, say with the pointer on another display). Opened over a full-screen
+  app, the canvas switches back to its desktop as you pick a window; leaving without picking
+  one goes back to the app.
 - **Display changes.** While macOS reshuffles windows after a display change, Expanse ignores
   their moves, then restores sizes and derives the layout for the new screen from the home
   layout.
@@ -206,6 +210,10 @@ With `debugURLCommands` on, `open "expanse://dump"` writes the full layout to it
 - [Sunlight](https://x.com/deezel/status/2114386503312839087) by Darin Dimitroff, which
   inspired this. Sunlight's full mode goes further with SIP disabled; Expanse explores how far a
   stock Mac can go.
+- [InstantSpaceSwitcher](https://github.com/jurplel/InstantSpaceSwitcher) (and
+  [Space Rabbit](https://github.com/Tahul/space-rabbit)) for working out instant Space switching
+  on stock macOS, macOS 27 included, and [AltTab](https://github.com/lwouis/alt-tab-macos) for
+  reaching windows on other Spaces.
 - [AeroSpace](https://github.com/nikitabobko/AeroSpace) for the corner-parking idea, and
   [Rectangle](https://github.com/rxhanson/Rectangle) and [yabai](https://github.com/koekeishiya/yabai)
   for years of public knowledge about macOS window management.

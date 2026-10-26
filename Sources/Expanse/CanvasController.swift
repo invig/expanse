@@ -2034,7 +2034,6 @@ final class CanvasController: NSObject {
         if let pid = space.pid {
             target = (pid, space.window, nil)
         } else {
-            let canvasDesktop = windows.last.flatMap { Spaces.spaces(of: $0.id).first }
             if canvasDesktop == nil || canvasDesktop == space.id {
                 // The canvas's own desktop: back to the window you were last in (whose
                 // Accessibility element Expanse already has, and which works from any Space).
@@ -2048,7 +2047,11 @@ final class CanvasController: NSObject {
             }
         }
         let from = Spaces.list().active
-        logger.info("switching from Space \(from ?? 0) to \(space.name, privacy: .public) (\(space.id))")
+        // A swipe too fast to animate gets there instantly; zoomed out, it happens under the
+        // canvas, which is on every Space and stays put. Focusing the window afterwards gives it
+        // the keyboard (or, if the swipe couldn't be made, takes macOS there the slow way).
+        let instant = SpaceSwipe.go(to: space.id)
+        logger.info("switching from Space \(from ?? 0) to \(space.name, privacy: .public) (\(space.id))\(instant ? ", instantly" : "", privacy: .public)")
         let go: () -> Void = { [weak self] in
             self?.activate(target.pid, raising: target.window, element: target.element, toward: space.id)
         }
@@ -2056,8 +2059,13 @@ final class CanvasController: NSObject {
             // Back to 100% first, so the canvas isn't left covering the screen.
             exit(then: go)
         } else {
-            go()
+            DispatchQueue.main.asyncAfter(deadline: .now() + (instant ? 0.05 : 0), execute: go)
         }
+    }
+
+    /// The desktop Space the canvas's windows are on.
+    private var canvasDesktop: UInt64? {
+        windows.last.flatMap { Spaces.spaces(of: $0.id).first }
     }
 
     /// What AltTab does to reach a window on another Space, which is what makes macOS go there:
@@ -2088,6 +2096,21 @@ final class CanvasController: NSObject {
     /// `then`, if given, runs instead of focusing a window (going to another Space, say).
     func exit(focus: ManagedWindow? = nil, then: (() -> Void)? = nil) {
         guard isActive else { return }
+        var then = then
+        // Opened over a full-screen app: the canvas's windows are on the desktop's Space.
+        if then == nil, let here = Spaces.current, let pid = here.pid {
+            if focus != nil {
+                // Going to one of them: switch to the desktop now, under the canvas, so it's
+                // instant and out of sight, instead of a slide out of the app afterwards.
+                if let desktop = canvasDesktop, SpaceSwipe.go(to: desktop) {
+                    logger.info("switched to the canvas's desktop under the canvas")
+                }
+            } else {
+                // Leaving without picking one: back to the full-screen app you came from.
+                let window = here.window
+                then = { [weak self] in self?.activate(pid, raising: window, element: nil, toward: here.id) }
+            }
+        }
         let target: Camera
         if let focus {
             bringToFront(focus)
