@@ -23,16 +23,18 @@ signed with the local Apple Development identity so the grants survive rebuilds.
 | Drag a selected window | Move the whole selection; it snaps as one block |
 | Pinch, ⌘-scroll | Zoom at the cursor |
 | Two-finger double-tap, `0`, `1`, `-`, `=` | Overview / fit all / 100% / zoom out / in |
-| Drag a window | Move it (snaps to edges and centers; hold ⌘ to disable) |
+| Drag a window | Move it: snaps firmly to edges and a 20pt gap, softly to centres (including the middle of a whole row); hold ⌘ to disable |
 | Click a window | Fly to it, centered at 100%, and use it |
 | Hover × or ⌘W | Close the hovered window |
+| `T` on the canvas, or menu → Tidy Up Windows | Keep the layout: fit sizes to the screen (shrink or grow back), push overlaps apart, pull each cluster together to 20pt gaps |
 | Esc | Clear the selection; with nothing selected, back to 100% where you are |
 | ⌘-Tab / Dock to an off-screen window | The canvas jumps to it |
+| ⌃ + arrow (arrows alone on the canvas) | Go to the nearest window in that direction; Return dives in on the canvas |
 | ⌥⇧` or menu → Auto-Centre Focused Window | Toggle gliding to centre a clicked window; off keeps on-screen windows put |
 | Menu → Pause Canvas, or quit | Every window goes back to its original macOS spot and size |
 | ⌥` while paused, or launch | The canvas comes back exactly as you left it |
 
-Scripting: `open "canvas://toggle"` (also `enter`, `exit`, `fit`, `pause`, `resume`, `restore`, `dump`,
+Scripting: `open "canvas://toggle"` (also `enter`, `exit`, `fit`, `tidy`, `pause`, `resume`, `restore`, `dump`,
 `screen?w=1512&h=982` to simulate a smaller display,
 `zoom?scale=0.5`, `pan?dx=100&dy=0`, `focus?app=Safari`).
 

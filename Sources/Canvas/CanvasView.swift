@@ -150,6 +150,14 @@ final class CanvasView: NSView {
         CATransaction.commit()
     }
 
+    /// Keyboard navigation on the canvas: the highlighted window is the one Return dives into.
+    func highlight(_ w: ManagedWindow) {
+        hovered?.node.label.string = hovered?.appName
+        hovered = w
+        w.node.label.string = w.title.isEmpty ? w.appName : "\(w.appName) — \(w.title)"
+        render()
+    }
+
     // MARK: Rendering
 
     func render() {
@@ -356,6 +364,10 @@ final class CanvasView: NSView {
         switch Int(e.keyCode) {
         case kVK_Escape:
             if selected.isEmpty { controller.exit() } else { selected.removeAll(); render() }
+        case kVK_LeftArrow: controller.navigate(.left)
+        case kVK_RightArrow: controller.navigate(.right)
+        case kVK_UpArrow: controller.navigate(.up)
+        case kVK_DownArrow: controller.navigate(.down)
         case kVK_Space:
             if !e.isARepeat { spaceHeld = true; NSCursor.openHand.set() }
         case kVK_ANSI_A where e.modifierFlags.contains(.command):
@@ -365,6 +377,8 @@ final class CanvasView: NSView {
             controller.exit(focus: hovered ?? controller.windows.last)
         case kVK_ANSI_0:
             controller.animate(to: controller.fitCamera())
+        case kVK_ANSI_T:
+            controller.tidy()
         case kVK_ANSI_1:
             controller.zoomAnimated(to: 1)
         case kVK_ANSI_Minus:

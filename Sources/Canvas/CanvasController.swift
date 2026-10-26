@@ -122,7 +122,7 @@ final class CanvasController: NSObject {
     private var reassertWork: DispatchWorkItem?
     private var focusSettleWork: DispatchWorkItem?
     private var lastHiddenHint: CGWindowID?
-    static let settleDuration: TimeInterval = 6
+    static let settleDuration: TimeInterval = 20
 
     private func registerDisplayCallback() {
         CGDisplayRegisterReconfigurationCallback({ _, flags, info in
@@ -177,7 +177,9 @@ final class CanvasController: NSObject {
         if final { refreshWallpaper() }
         // Whatever macOS did to the real windows, re-place all of them.
         windows.forEach { $0.lastPlaced = nil }
-        if !isActive { commit() }
+        if !isActive {
+            if final { restoreSizesAndPlace() } else { commit() }
+        }
         view.render()
         if final {
             settleUntil = Date().addingTimeInterval(Self.settleDuration)
@@ -188,6 +190,36 @@ final class CanvasController: NSObject {
             }
             relayoutWork.append(end)
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleDuration, execute: end)
+        }
+    }
+
+    /// After a display change macOS shrinks windows to fit the new screen, and squeezes parked
+    /// ones hard since they sit almost off-screen. Give every window back the size it should have
+    /// (the size you chose, capped at the screen), then place everything. The overlay covers the
+    /// screen meanwhile, so the shuffling isn't seen.
+    private func restoreSizesAndPlace() {
+        isActive = true
+        view.render()
+        overlay.level = OverlayWindow.canvasLevel
+        overlay.orderFrontRegardless()
+        for w in windows {
+            guard let ax = w.ax, let real = AX.size(ax), w.preferredSize.width > 0 else { continue }
+            let target = CGSize(width: min(w.preferredSize.width, viewSize.width).rounded(),
+                                height: min(w.preferredSize.height, viewSize.height).rounded())
+            guard abs(real.width - target.width) > 1 || abs(real.height - target.height) > 1 else { continue }
+            let actual = resizeReal(w, ax, to: target)
+            logger.info("restore size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(real), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
+            // macOS shrinks from the top-left, so the top-left is where the window was.
+            w.canvasFrame.size = actual
+            updateCapture(w)
+        }
+        commit()
+        view.render()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self else { return }
+            self.overlay.level = OverlayWindow.backdropLevel
+            self.isActive = false
+            self.view.render()
         }
     }
 
@@ -264,6 +296,8 @@ final class CanvasController: NSObject {
 
     /// If the focused window isn't fully on screen, glide to center it.
     private func focusSettled() {
+        // Clicking a big window would otherwise bury an open system prompt.
+        raiseSystemPrompts()
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid(),
               let focused = AX.focusedWindow(pid: app.processIdentifier), let id = AX.windowID(focused) else { return }
         guard !isActive, !isPaused, !suspendTracking, animation == nil,
@@ -304,6 +338,7 @@ final class CanvasController: NSObject {
             guard let self else { return }
             self.commit()
             if let ax = w.ax { AX.raise(ax) }
+            self.raiseSystemPrompts()
             NSRunningApplication(processIdentifier: w.pid)?.activate()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
                 self.overlay.level = OverlayWindow.backdropLevel
@@ -344,11 +379,14 @@ final class CanvasController: NSObject {
     private func realWindowChanged(_ w: ManagedWindow, _ element: AXUIElement) {
         guard !isPaused else { return }
         if let size = AX.size(element) { adoptSize(w, size) }
-        if suspendTracking, !isActive, settleUntil != .distantFuture, Date() < settleUntil,
+        // Around a display change macOS keeps shoving windows for a while; only a drag with the
+        // mouse button down counts as you moving a window then.
+        let userDragging = NSEvent.pressedMouseButtons & 1 != 0
+        if suspendTracking, !userDragging, !isActive, settleUntil != .distantFuture, Date() < settleUntil,
            let last = w.lastPlaced, let pos = AX.position(element), last.distance(to: pos) > 2 {
             reassertSoon()
         }
-        if !isActive, !suspendTracking, animation == nil, let pos = AX.position(element) {
+        if !isActive, !suspendTracking || userDragging, animation == nil, let pos = AX.position(element) {
             if let last = w.lastPlaced, last.distance(to: pos) < 2 {
                 // Our own placement.
             } else {
@@ -514,6 +552,7 @@ final class CanvasController: NSObject {
     }
 
     private func apply(_ scWindows: [SCWindow]) {
+        noteSystemPrompts(scWindows)
         let live = !isActive && !suspendTracking
         var seen = Set<CGWindowID>()
         var restoredAny = false
@@ -629,6 +668,221 @@ final class CanvasController: NSObject {
         return restored
     }
 
+    // MARK: Spatial navigation
+
+    enum Direction { case left, right, up, down }
+
+    /// ⌃ + arrow: go to the nearest window that way. At 100% it's focused (gliding to it if it
+    /// isn't fully on screen); on the zoomed-out canvas the highlight moves and the view follows.
+    func navigate(_ direction: Direction) {
+        guard !isPaused, animation == nil else { return }
+        let from: CGRect
+        if isActive {
+            from = (view.hovered ?? windows.last)?.canvasFrame
+                ?? CGRect(origin: camera.center(in: viewSize), size: .zero)
+        } else if let app = NSWorkspace.shared.frontmostApplication,
+                  let focused = AX.focusedWindow(pid: app.processIdentifier), let id = AX.windowID(focused),
+                  let w = windows.first(where: { $0.id == id }) {
+            from = w.canvasFrame
+        } else {
+            from = CGRect(origin: camera.center(in: viewSize), size: .zero)
+        }
+        guard let target = nearest(direction, from: from) else { return }
+        logger.info("navigate to \(target.appName, privacy: .public)[\(target.id)]")
+
+        if isActive {
+            view.highlight(target)
+            animate(to: Camera.centered(on: target.canvasFrame.center, scale: camera.scale, viewSize: viewSize), duration: 0.25)
+            return
+        }
+        let r = camera.toView(target.canvasFrame)
+        if !target.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r) {
+            bringToFront(target)
+            if let ax = target.ax { AX.raise(ax) }
+            NSRunningApplication(processIdentifier: target.pid)?.activate()
+            view.render()
+        } else {
+            glide(to: target)
+        }
+    }
+
+    /// The window whose centre lies in `direction` from `from`, preferring ones that share a row
+    /// (for left / right) or column (for up / down), then the shortest hop.
+    private func nearest(_ direction: Direction, from: CGRect) -> ManagedWindow? {
+        func gap(_ a0: CGFloat, _ a1: CGFloat, _ b0: CGFloat, _ b1: CGFloat) -> CGFloat {
+            max(0, max(a0, b0) - min(a1, b1))   // 0 when the ranges overlap
+        }
+        var best: (ManagedWindow, CGFloat)?
+        for w in windows where w.canvasFrame != from {
+            let r = w.canvasFrame
+            let along: CGFloat, across: CGFloat
+            switch direction {
+            case .right:
+                guard r.midX > from.midX + 1 else { continue }
+                along = max(0, r.minX - from.maxX); across = gap(r.minY, r.maxY, from.minY, from.maxY)
+            case .left:
+                guard r.midX < from.midX - 1 else { continue }
+                along = max(0, from.minX - r.maxX); across = gap(r.minY, r.maxY, from.minY, from.maxY)
+            case .down:
+                guard r.midY > from.midY + 1 else { continue }
+                along = max(0, r.minY - from.maxY); across = gap(r.minX, r.maxX, from.minX, from.maxX)
+            case .up:
+                guard r.midY < from.midY - 1 else { continue }
+                along = max(0, from.minY - r.maxY); across = gap(r.minX, r.maxX, from.minX, from.maxX)
+            }
+            let score = along + across * 3 + r.center.distance(to: from.center) * 0.1
+            if score < (best?.1 ?? .infinity) { best = (w, score) }
+        }
+        return best?.0
+    }
+
+    // MARK: System prompts
+
+    /// On-screen windows of background system processes (permission reminders, password and
+    /// security prompts). Canvas doesn't manage them, but must never bury them.
+    private var systemPrompts: [(pid: pid_t, id: CGWindowID)] = []
+
+    private func noteSystemPrompts(_ scWindows: [SCWindow]) {
+        let prompts = scWindows.compactMap { w -> (pid_t, CGWindowID)? in
+            guard w.windowLayer == 0, w.isOnScreen, w.frame.width >= 150, w.frame.height >= 80,
+                  screenRectCG.intersects(w.frame),
+                  let pid = w.owningApplication?.processID, pid != getpid(),
+                  // Apple's background prompt processes only (universalAccessAuthWarn,
+                  // SecurityAgent, UserNotificationCenter, CoreServicesUIAgent, …).
+                  w.owningApplication?.bundleIdentifier.hasPrefix("com.apple.") == true,
+                  let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy != .regular
+            else { return nil }
+            return (pid, w.windowID)
+        }
+        let known = Set(systemPrompts.map(\.id))
+        systemPrompts = prompts.map { (pid: $0.0, id: $0.1) }
+        // A prompt that just appeared may have opened behind other windows.
+        if prompts.contains(where: { !known.contains($0.1) }) { raiseSystemPrompts() }
+    }
+
+    /// Raise every known system prompt above app windows (without taking focus).
+    func raiseSystemPrompts() {
+        for prompt in systemPrompts {
+            guard let ax = AX.windows(pid: prompt.pid).first(where: { AX.windowID($0) == prompt.id }) else { continue }
+            AXUIElementPerformAction(ax, kAXRaiseAction as CFString)
+            logger.info("raised system prompt [\(prompt.id)]")
+        }
+    }
+
+    // MARK: Tidy up
+
+    /// The gap between neighbouring windows: edge snapping, new-window placement and Tidy Up.
+    static let gap: CGFloat = 20
+    /// Windows closer than this to a neighbour count as one cluster and get pulled together.
+    static let clusterReach: CGFloat = 240
+
+    /// Fit the layout to this screen without rebuilding it:
+    /// 1. every window takes the size you chose, capped at the screen (shrinks on a laptop,
+    ///    grows back on a big display);
+    /// 2. overlaps are pushed apart, right or down, whichever is the smaller move;
+    /// 3. gravity: within a cluster, gaps wider than the standard gap close up to it.
+    /// Shown zoomed out.
+    func tidy() {
+        guard !isPaused else { return }
+        guard isActive else {
+            enter(zoomOut: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                if self?.isActive == true { self?.tidy() }
+            }
+            return
+        }
+        guard !windows.isEmpty else { return }
+        let margin: CGFloat = 16
+        let maxSize = CGSize(width: viewSize.width - margin * 2, height: viewSize.height - margin * 2)
+        // Clusters come from each window's full chosen size, before anything shrinks, so a row
+        // that was snapped together stays one cluster however much it shrinks.
+        let clusters = Self.clusters(windows.map {
+            CGRect(origin: $0.canvasFrame.origin, size: $0.preferredSize.width > 0 ? $0.preferredSize : $0.canvasFrame.size)
+        }, reach: Self.clusterReach)
+        for w in windows {
+            guard let ax = w.ax else { continue }
+            let chosen = w.preferredSize.width > 0 ? w.preferredSize : w.canvasFrame.size
+            let target = CGSize(width: min(chosen.width, maxSize.width).rounded(),
+                                height: min(chosen.height, maxSize.height).rounded())
+            guard abs(target.width - w.canvasFrame.width) > 1 || abs(target.height - w.canvasFrame.height) > 1 else { continue }
+            let actual = resizeReal(w, ax, to: target)
+            logger.info("tidy size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
+            w.canvasFrame.size = actual
+            updateCapture(w)
+        }
+
+        var frames = windows.map(\.canvasFrame)
+        Self.separate(&frames, gap: Self.gap)
+        Self.gravity(&frames, clusters: clusters, gap: Self.gap)
+        Self.separate(&frames, gap: Self.gap)
+        var moved = 0
+        for (w, f) in zip(windows, frames) {
+            let rounded = CGPoint(x: f.minX.rounded(), y: f.minY.rounded())
+            if rounded.distance(to: w.canvasFrame.origin) >= 1 { moved += 1 }
+            w.canvasFrame.origin = rounded
+        }
+        view.render()
+        animate(to: fitCamera())
+        scheduleSave()
+        logger.info("tidied: \(moved) of \(self.windows.count) windows moved")
+    }
+
+    /// Push overlapping frames apart in reading order. Only ever moving right or down means it
+    /// always finishes.
+    static func separate(_ frames: inout [CGRect], gap: CGFloat) {
+        let order = frames.indices.sorted { (frames[$0].minY, frames[$0].minX) < (frames[$1].minY, frames[$1].minX) }
+        var settled: [CGRect] = []
+        for i in order {
+            var r = frames[i]
+            for _ in 0..<200 {
+                guard let hit = settled.first(where: { $0.insetBy(dx: -gap + 0.5, dy: -gap + 0.5).intersects(r) }) else { break }
+                let right = hit.maxX + gap - r.minX
+                let down = hit.maxY + gap - r.minY
+                if right <= down { r.origin.x += right } else { r.origin.y += down }
+            }
+            frames[i] = r
+            settled.append(r)
+        }
+    }
+
+    /// Cluster number for each frame: frames within `reach` of each other (directly or through
+    /// a chain of neighbours) share one.
+    static func clusters(_ frames: [CGRect], reach: CGFloat) -> [Int] {
+        var parent = Array(frames.indices)
+        func root(_ i: Int) -> Int { parent[i] == i ? i : root(parent[i]) }
+        for i in frames.indices {
+            for j in frames.indices where j > i && frames[i].insetBy(dx: -reach / 2, dy: -reach / 2)
+                .intersects(frames[j].insetBy(dx: -reach / 2, dy: -reach / 2)) {
+                parent[root(j)] = root(i)
+            }
+        }
+        return frames.indices.map(root)
+    }
+
+    /// Within each cluster, close gaps: each frame slides left (then up) until it sits `gap` from
+    /// its nearest neighbour on that side in the same cluster. It only slides towards a neighbour
+    /// it shares rows (or columns) with, so it never creates overlaps.
+    static func gravity(_ frames: inout [CGRect], clusters: [Int], gap: CGFloat) {
+        func overlapY(_ a: CGRect, _ b: CGRect) -> Bool { min(a.maxY, b.maxY) - max(a.minY, b.minY) > 0 }
+        func overlapX(_ a: CGRect, _ b: CGRect) -> Bool { min(a.maxX, b.maxX) - max(a.minX, b.minX) > 0 }
+        for _ in 0..<3 {
+            for i in frames.indices.sorted(by: { frames[$0].minX < frames[$1].minX }) {
+                let r = frames[i]
+                let edges = frames.indices.filter {
+                    $0 != i && clusters[$0] == clusters[i] && frames[$0].maxX <= r.minX + 0.5 && overlapY(frames[$0], r)
+                }.map { frames[$0].maxX }
+                if let nearest = edges.max(), r.minX - nearest > gap { frames[i].origin.x = nearest + gap }
+            }
+            for i in frames.indices.sorted(by: { frames[$0].minY < frames[$1].minY }) {
+                let r = frames[i]
+                let edges = frames.indices.filter {
+                    $0 != i && clusters[$0] == clusters[i] && frames[$0].maxY <= r.minY + 0.5 && overlapX(frames[$0], r)
+                }.map { frames[$0].maxY }
+                if let nearest = edges.max(), r.minY - nearest > gap { frames[i].origin.y = nearest + gap }
+            }
+        }
+    }
+
     // MARK: New windows
 
     /// New windows go to an empty spot next to what you were working on; windows coming back
@@ -679,7 +933,7 @@ final class CanvasController: NSObject {
     private func freeSpot(for w: ManagedWindow, near anchor: ManagedWindow?, onScreenOnly: Bool) -> CGPoint? {
         let others = windows.filter { $0 !== w }.map(\.canvasFrame)
         guard !others.isEmpty else { return nil }
-        let gap: CGFloat = 24
+        let gap = Self.gap
         let size = w.canvasFrame.size
         let target = anchor?.canvasFrame.center ?? camera.center(in: viewSize)
         let visible = camera.toCanvas(CGRect(origin: .zero, size: viewSize))
@@ -797,6 +1051,7 @@ final class CanvasController: NSObject {
             let toFocus = focus ?? self.windows.last(where: { !$0.parked })
             if let toFocus {
                 if let ax = toFocus.ax { AX.raise(ax) }
+                self.raiseSystemPrompts()
                 NSRunningApplication(processIdentifier: toFocus.pid)?.activate()
             }
             // Give the window server a beat to show the moved windows, then sink the overlay
@@ -1030,30 +1285,51 @@ final class CanvasController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.sync() }
     }
 
-    /// Snap a dragged frame (one window, or a group's bounding box) to the edges and centers of
-    /// the other windows. Returns guide lines in canvas space.
+    /// Snap a dragged frame (one window, or a group's bounding box) to the other windows.
+    /// Edges and the standard gap snap firmly; centres snap softly (half the reach, and they lose
+    /// ties) so they guide without fighting. A frame above or below a row of windows can also
+    /// centre on the whole row. Returns guide lines in canvas space.
     func snap(_ f: CGRect, excluding: Set<CGWindowID>) -> (CGRect, [(CGPoint, CGPoint)]) {
-        let threshold = 8 / camera.scale
-        let gap: CGFloat = 24
-        var bestX: (dist: CGFloat, delta: CGFloat, line: CGFloat?)?
-        var bestY: (dist: CGFloat, delta: CGFloat, line: CGFloat?)?
+        let firm = 10 / camera.scale
+        let soft = firm / 2
+        let gap = Self.gap
+        typealias Candidate = (score: CGFloat, delta: CGFloat, line: CGFloat?, span: CGRect?)
+        var bestX: Candidate?
+        var bestY: Candidate?
         let others = windows.filter { !excluding.contains($0.id) }.map(\.canvasFrame)
 
-        func consider(_ a: CGFloat, _ b: CGFloat, line: CGFloat?, into best: inout (dist: CGFloat, delta: CGFloat, line: CGFloat?)?) {
+        func consider(_ a: CGFloat, _ b: CGFloat, centre: Bool = false, line: CGFloat?, span: CGRect? = nil,
+                      into best: inout Candidate?) {
             let d = b - a
-            if abs(d) < threshold, abs(d) < (best?.dist ?? .infinity) { best = (abs(d), d, line) }
+            guard abs(d) < (centre ? soft : firm) else { return }
+            let score = abs(d) + (centre ? soft / 2 : 0)
+            if score < (best?.score ?? .infinity) { best = (score, d, line, span) }
         }
         for r in others {
-            for a in [f.minX, f.midX, f.maxX] {
-                for b in [r.minX, r.midX, r.maxX] { consider(a, b, line: b, into: &bestX) }
-            }
+            for a in [f.minX, f.maxX] { for b in [r.minX, r.maxX] { consider(a, b, line: b, into: &bestX) } }
+            consider(f.midX, r.midX, centre: true, line: r.midX, into: &bestX)
             consider(f.minX, r.maxX + gap, line: nil, into: &bestX)
             consider(f.maxX, r.minX - gap, line: nil, into: &bestX)
-            for a in [f.minY, f.midY, f.maxY] {
-                for b in [r.minY, r.midY, r.maxY] { consider(a, b, line: b, into: &bestY) }
-            }
+            for a in [f.minY, f.maxY] { for b in [r.minY, r.maxY] { consider(a, b, line: b, into: &bestY) } }
+            consider(f.midY, r.midY, centre: true, line: r.midY, into: &bestY)
             consider(f.minY, r.maxY + gap, line: nil, into: &bestY)
             consider(f.maxY, r.minY - gap, line: nil, into: &bestY)
+        }
+
+        // Centre on a whole neighbouring row (above / below) or column (left / right).
+        let reach = Self.clusterReach
+        let wide = f.insetBy(dx: -reach, dy: 0), tall = f.insetBy(dx: 0, dy: -reach)
+        let below = others.filter { $0.minY >= f.maxY - 1 && $0.minY - f.maxY <= reach && $0.intersects(wide.insetBy(dx: 0, dy: -reach)) }
+        let above = others.filter { $0.maxY <= f.minY + 1 && f.minY - $0.maxY <= reach && $0.intersects(wide.insetBy(dx: 0, dy: -reach)) }
+        let left = others.filter { $0.maxX <= f.minX + 1 && f.minX - $0.maxX <= reach && $0.intersects(tall.insetBy(dx: -reach, dy: 0)) }
+        let right = others.filter { $0.minX >= f.maxX - 1 && $0.minX - f.maxX <= reach && $0.intersects(tall.insetBy(dx: -reach, dy: 0)) }
+        for row in [below, above] where row.count > 1 {
+            let u = row.dropFirst().reduce(row[0]) { $0.union($1) }
+            consider(f.midX, u.midX, centre: true, line: u.midX, span: u, into: &bestX)
+        }
+        for column in [left, right] where column.count > 1 {
+            let u = column.dropFirst().reduce(column[0]) { $0.union($1) }
+            consider(f.midY, u.midY, centre: true, line: u.midY, span: u, into: &bestY)
         }
 
         var out = f
@@ -1062,12 +1338,16 @@ final class CanvasController: NSObject {
 
         var lines: [(CGPoint, CGPoint)] = []
         if let x = bestX?.line {
-            let aligned = others.filter { [$0.minX, $0.midX, $0.maxX].contains { abs($0 - x) < 0.5 } } + [out]
-            lines.append((CGPoint(x: x, y: aligned.map(\.minY).min()!), CGPoint(x: x, y: aligned.map(\.maxY).max()!)))
+            let span = bestX?.span.map { $0.union(out) } ?? (others.filter {
+                [$0.minX, $0.midX, $0.maxX].contains { abs($0 - x) < 0.5 }
+            } + [out]).reduce(out) { $0.union($1) }
+            lines.append((CGPoint(x: x, y: span.minY), CGPoint(x: x, y: span.maxY)))
         }
         if let y = bestY?.line {
-            let aligned = others.filter { [$0.minY, $0.midY, $0.maxY].contains { abs($0 - y) < 0.5 } } + [out]
-            lines.append((CGPoint(x: aligned.map(\.minX).min()!, y: y), CGPoint(x: aligned.map(\.maxX).max()!, y: y)))
+            let span = bestY?.span.map { $0.union(out) } ?? (others.filter {
+                [$0.minY, $0.midY, $0.maxY].contains { abs($0 - y) < 0.5 }
+            } + [out]).reduce(out) { $0.union($1) }
+            lines.append((CGPoint(x: span.minX, y: y), CGPoint(x: span.maxX, y: y)))
         }
         return (out, lines)
     }

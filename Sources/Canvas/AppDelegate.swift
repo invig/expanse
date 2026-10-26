@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var hotKey: HotKey?
     private var centreHotKey: HotKey?
+    private var arrowHotKeys: [HotKey] = []
     private let centreItem = NSMenuItem(title: "Auto-Centre Focused Window", action: #selector(toggleAutoCentre), keyEquivalent: "`")
     private var signalSources: [DispatchSourceSignal] = []
     private let accessibilityItem = NSMenuItem(title: "", action: #selector(openAccessibilitySettings), keyEquivalent: "")
@@ -24,6 +25,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // ⌥` toggles the canvas.
         hotKey = HotKey(keyCode: kVK_ANSI_Grave, modifiers: optionKey, id: 1) { [weak self] in
             self?.controller.toggle()
+        }
+        // ⌃ + arrows move to the nearest window in that direction.
+        let arrows: [(Int, CanvasController.Direction)] = [(kVK_LeftArrow, .left), (kVK_RightArrow, .right),
+                                                           (kVK_UpArrow, .up), (kVK_DownArrow, .down)]
+        for (i, (key, direction)) in arrows.enumerated() {
+            arrowHotKeys.append(HotKey(keyCode: key, modifiers: controlKey, id: UInt32(10 + i)) { [weak self] in
+                self?.controller.navigate(direction)
+            })
         }
         // ⌥⇧` toggles auto-centring.
         centreHotKey = HotKey(keyCode: kVK_ANSI_Grave, modifiers: optionKey | shiftKey, id: 2) { [weak self] in
@@ -56,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "exit": controller.exit()
             case "fit": controller.animate(to: controller.fitCamera())
             case "restore": controller.restoreAll()
+            case "tidy": controller.tidy()
             case "pause": controller.pause()
             case "resume": controller.resume()
             case "dump": controller.dump()
@@ -103,6 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         centreItem.target = self
         menu.addItem(centreItem)
         menu.addItem(wallpaperItem)
+        menu.addItem(NSMenuItem(title: "Tidy Up Windows", action: #selector(tidy), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Restore All Windows", action: #selector(restoreAll), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(accessibilityItem)
@@ -128,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleCanvas() { controller.toggle() }
     @objc private func restoreAll() { controller.restoreAll() }
+    @objc private func tidy() { controller.tidy() }
     @objc private func pickCorner(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let corner = HotCorner.Corner(rawValue: raw) else { return }
         controller.hotCorner.corner = corner
