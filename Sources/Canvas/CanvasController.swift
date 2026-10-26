@@ -84,7 +84,13 @@ final class CanvasController: NSObject {
     // MARK: Geometry
 
     /// The primary display (the one with the menu bar). Multi-display comes later.
-    var screen: NSScreen { NSScreen.screens.first ?? NSScreen.main! }
+    var screen: NSScreen {
+        // With the lid shut and no external display there can briefly be no screen at all;
+        // keep using the last one until a screen appears.
+        if let s = NSScreen.screens.first ?? NSScreen.main { lastScreen = s; return s }
+        return lastScreen!
+    }
+    private var lastScreen: NSScreen? = NSScreen.screens.first ?? NSScreen.main
 
     /// canvas://screen?w=&h= pretends the display is this size, to exercise display changes.
     private var screenOverride: CGSize?
@@ -171,6 +177,12 @@ final class CanvasController: NSObject {
     }
 
     private func relayout(final: Bool) {
+        // No display at all (lid shut, nothing plugged in yet): wait for one.
+        guard !NSScreen.screens.isEmpty else {
+            logger.info("no display yet; waiting")
+            scheduleRelayout()
+            return
+        }
         let newSize = viewSize
         if newSize != lastViewportSize, lastViewportSize != .zero {
             // Whatever was in the middle of the old screen stays in the middle of the new one.
@@ -209,17 +221,9 @@ final class CanvasController: NSObject {
         view.render()
         overlay.level = OverlayWindow.canvasLevel
         overlay.orderFrontRegardless()
-        for w in windows {
-            guard let ax = w.ax, let real = AX.size(ax), w.preferredSize.width > 0 else { continue }
-            let target = CGSize(width: min(w.preferredSize.width, viewSize.width).rounded(),
-                                height: min(w.preferredSize.height, viewSize.height).rounded())
-            guard abs(real.width - target.width) > 1 || abs(real.height - target.height) > 1 else { continue }
-            let actual = resizeReal(w, ax, to: target)
-            logger.info("restore size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(real), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
-            // macOS shrinks from the top-left, so the top-left is where the window was.
-            w.canvasFrame.size = actual
-            updateCapture(w)
-        }
+        // Same as Tidy Up: sizes back to what you chose (capped at this screen), overlaps pushed
+        // apart, clusters pulled back to the standard gap.
+        fitLayoutToScreen(margin: 0)
         commit()
         view.render()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
@@ -248,6 +252,15 @@ final class CanvasController: NSObject {
 
     func start() {
         lastViewportSize = viewSize
+        // macOS can still shuffle windows while the Mac sits at the lock screen; put everything
+        // back once you're in.
+        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"),
+                                                            object: nil, queue: .main) { [weak self] _ in
+            guard let self, !self.isPaused else { return }
+            logger.info("unlocked: re-placing windows")
+            self.displaysWillChange()
+            self.scheduleRelayout()
+        }
         registerDisplayCallback()
         sync()
         syncTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.sync() }
@@ -422,7 +435,7 @@ final class CanvasController: NSObject {
     /// dragged it: the canvas follows.
     private func realWindowChanged(_ w: ManagedWindow, _ element: AXUIElement) {
         guard !isPaused else { return }
-        if let size = AX.size(element) { adoptSize(w, size) }
+        if let size = AX.size(element) { adoptSize(w, size, fromUser: NSEvent.pressedMouseButtons & 1 != 0) }
         // Around a display change macOS keeps shoving windows for a while; only a drag with the
         // mouse button down counts as you moving a window then.
         let userDragging = NSEvent.pressedMouseButtons & 1 != 0
@@ -900,7 +913,15 @@ final class CanvasController: NSObject {
             return
         }
         guard !windows.isEmpty else { return }
-        let margin: CGFloat = 16
+        fitLayoutToScreen(margin: 16)
+        view.render()
+        animate(to: fitCamera())
+        scheduleSave()
+    }
+
+    /// The layout part of Tidy Up, also run after display changes. Real windows are resized here;
+    /// positions are only changed on the canvas (commit or the next glide moves them).
+    private func fitLayoutToScreen(margin: CGFloat) {
         let maxSize = CGSize(width: viewSize.width - margin * 2, height: viewSize.height - margin * 2)
         // Clusters come from each window's full chosen size, before anything shrinks, so a row
         // that was snapped together stays one cluster however much it shrinks.
@@ -914,7 +935,7 @@ final class CanvasController: NSObject {
                                 height: min(chosen.height, maxSize.height).rounded())
             guard abs(target.width - w.canvasFrame.width) > 1 || abs(target.height - w.canvasFrame.height) > 1 else { continue }
             let actual = resizeReal(w, ax, to: target)
-            logger.info("tidy size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
+            logger.info("fit size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
             w.canvasFrame.size = actual
             updateCapture(w)
         }
@@ -929,10 +950,7 @@ final class CanvasController: NSObject {
             if rounded.distance(to: w.canvasFrame.origin) >= 1 { moved += 1 }
             w.canvasFrame.origin = rounded
         }
-        view.render()
-        animate(to: fitCamera())
-        scheduleSave()
-        logger.info("tidied: \(moved) of \(self.windows.count) windows moved")
+        logger.info("layout fitted: \(moved) of \(self.windows.count) windows moved")
     }
 
     /// Push overlapping frames apart in reading order. Only ever moving right or down means it
@@ -989,6 +1007,13 @@ final class CanvasController: NSObject {
                 if let nearest = edges.max(), r.minY - nearest > gap { frames[i].origin.y = nearest + gap }
             }
         }
+    }
+
+    func setPreferredSize(_ id: CGWindowID, _ size: CGSize) {
+        guard let w = windows.first(where: { $0.id == id }) else { return }
+        w.preferredSize = size
+        scheduleSave()
+        logger.info("preferred size \(w.appName, privacy: .public)[\(id)] = \(NSStringFromSize(size), privacy: .public)")
     }
 
     // MARK: New windows
@@ -1326,11 +1351,14 @@ final class CanvasController: NSObject {
 
     /// Takes on a size change of the real window. Resizes we didn't make become the
     /// window's preferred size.
-    private func adoptSize(_ w: ManagedWindow, _ size: CGSize) {
+    /// Only a resize made with the mouse button down (dragging an edge) counts as you choosing a
+    /// size. macOS, apps (Chromium animates AX resizes in steps) and Canvas itself resize windows
+    /// too, and none of those should change the size you chose.
+    private func adoptSize(_ w: ManagedWindow, _ size: CGSize, fromUser: Bool = false) {
         guard size != w.canvasFrame.size, size.width > 0, size.height > 0 else { return }
         w.canvasFrame.size = size
         let ours = w.lastSized.map { abs($0.width - size.width) < 2 && abs($0.height - size.height) < 2 } ?? false
-        if !ours && !suspendTracking {
+        if fromUser && !ours && !suspendTracking {
             w.preferredSize = size
             w.lastSized = nil
         }

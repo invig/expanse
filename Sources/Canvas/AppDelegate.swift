@@ -66,6 +66,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "fit": controller.animate(to: controller.fitCamera())
             case "restore": controller.restoreAll()
             case "tidy": controller.tidy()
+            case "prefer":
+                // Repair: set the size a window should have (by window ID), e.g. after it was lost.
+                if let id = number("id"), let w = number("w"), let h = number("h") {
+                    controller.setPreferredSize(CGWindowID(id), CGSize(width: w, height: h))
+                }
             case "nav":
                 let dirs: [String: CanvasController.Direction] = ["left": .left, "right": .right, "up": .up, "down": .down]
                 if let d = dirs[query["dir"] ?? ""] {
