@@ -52,8 +52,11 @@ the canvas glides to it, centred, at 100%, ready to type into.
 
 ## Install
 
-Expanse is built from source for now. You need macOS 15 or later and the Swift 6 toolchain
-(Xcode 16+ or the Command Line Tools).
+**[Download the latest release](https://github.com/invig/expanse/releases/latest)**, unzip it and
+move **Expanse.app** to Applications. It's signed and notarised by Apple and runs on macOS 15 or
+later, on Apple Silicon and Intel Macs.
+
+Or build it from source with the Swift 6 toolchain (Xcode 16+ or the Command Line Tools):
 
 ```bash
 git clone https://github.com/invig/expanse.git
@@ -70,7 +73,7 @@ right System Settings pages:
 | **Accessibility** | To move, resize and focus your windows as you move around the canvas. |
 | **Screen Recording** | To show live pictures of your windows while you're zoomed out. |
 
-> **Signing.** `build.sh` signs with your *Apple Development* certificate if you have one, so
+> **Building it yourself?** `build.sh` signs with your *Apple Development* certificate if you have one, so
 > the permissions survive rebuilds. Without one it signs ad hoc, which works, but macOS will
 > ask for the permissions again after every rebuild.
 
@@ -170,6 +173,9 @@ read the title). Window titles are redacted in the system log.
 ./scripts/build.sh && open build/Expanse.app
 log stream --level info --predicate 'subsystem == "com.invignation.expanse"'
 ```
+
+To publish a release (signed, notarised, universal): `scripts/release.sh`. See the script's
+header for the one-time setup.
 
 The log shows every window Expanse moves, resizes or follows, glide timings, and anything slow.
 With `debugURLCommands` on, `open "expanse://dump"` writes the full layout to it.
