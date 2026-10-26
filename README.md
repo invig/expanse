@@ -2,6 +2,10 @@
   <img src="docs/hero.svg" alt="Expanse: windows arranged on an infinite canvas" width="900">
 </p>
 
+<p align="center">
+  <img src="docs/icon.png" alt="Expanse app icon" width="128">
+</p>
+
 <h1 align="center">Expanse</h1>
 
 <p align="center">

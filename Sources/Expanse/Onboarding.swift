@@ -415,8 +415,12 @@ private struct CanvasIllustration: View {
                 }
                 .scaleEffect(scale)
                 .offset(x: -8 * phase, y: -6 * phase)
-                VStack {
+                VStack(spacing: 6) {
                     Spacer()
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 64, height: 64)
+                        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
                     Text("Expanse")
                         .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)

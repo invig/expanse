@@ -10,6 +10,8 @@
     <string>Expanse</string>
     <key>CFBundleExecutable</key>
     <string>Expanse</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
