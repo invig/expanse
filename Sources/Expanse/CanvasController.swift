@@ -1047,17 +1047,19 @@ final class CanvasController: NSObject {
             guard let self, let w else { return }
             // Runs inside the frame pump's transaction (actions disabled).
             w.node.content.contents = surface
+            w.pictureWidth = IOSurfaceGetWidth(surface)
             if w.node.content.backgroundColor != nil { w.node.content.backgroundColor = nil }
             if w.needsFirstFrame {
                 w.needsFirstFrame = false
-                if !self.wantsCapture(w, in: self.captureRegion).keep { w.capture.pause() }
+                if self.wantsCapture(w, in: self.captureRegion).start { self.scheduleCaptureUpdate() }
             }
         }
         w.capture.onStop = { [weak self, weak w] in
             guard let self, let w else { return }
             self.remove(w)
         }
-        w.capture.start(window: sc, pixelSize: pixelSize(for: w), fps: isActive ? Self.canvasFPS : Self.liveFPS)
+        // Its first picture comes from a one-off snapshot (see pumpSnapshots), not a stream.
+        pumpSnapshotsSoon()
         observe(w)
         logger.info("tracking \(w.appName, privacy: .public) [\(w.id)] \(w.title, privacy: .private)")
         if arriving { arrive(w, anchor: anchor, live: live, returning: returning) }
@@ -1415,7 +1417,7 @@ final class CanvasController: NSObject {
     private func arrive(_ w: ManagedWindow, anchor: ManagedWindow?, live: Bool, returning: Bool) {
         if returning {
             // add() already put it back at its old spot.
-        } else if AX.subrole(w.ax) == kAXStandardWindowSubrole as String,
+        } else if windowKinds[w.id]?.standard ?? (AX.subrole(w.ax) == kAXStandardWindowSubrole as String),
                   let spot = freeSpot(for: w, near: anchor, onScreenOnly: !autoCentre) {
             w.canvasFrame.origin = spot
             logger.info("placed new window \(w.appName, privacy: .public) at \(NSStringFromPoint(spot), privacy: .public)")
@@ -1568,31 +1570,64 @@ final class CanvasController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.05, execute: work)
     }
 
-    func updateStreaming() {
+    /// replayd, which runs every ScreenCaptureKit stream on the Mac, runs out of file descriptors
+    /// at around 50 streams (other apps' included), and a stream started after that never
+    /// delivers a frame, without any error. So Expanse streams at most this many windows, the
+    /// ones that matter most; the other windows in view get one-off pictures in turn.
+    private static let streamBudget = 20
+
+    /// `reconfigure`: also bring running streams to the size they should have now (which restarts
+    /// them; see WindowCapture.update). While the camera moves this is left to
+    /// scheduleCaptureUpdate's settle pass, so streams aren't restarted over and over as windows
+    /// cross size steps.
+    func updateStreaming(reconfigure: Bool = true) {
         let t0 = CACurrentMediaTime()
         let region = captureRegion
         let wants = windows.map { wantsCapture($0, in: region) }
-        captureLoad = wants.filter(\.start).count
+        // Most important first: the glide's target, then the most on screen (now or where the
+        // camera is heading), then the nearest. Windows still waiting for a first picture get it
+        // from a snapshot, not a stream.
+        let screen = CGRect(origin: .zero, size: viewSize)
+        let target = animation?.to
+        let focus = (target ?? camera).center(in: viewSize)
+        func shown(_ w: ManagedWindow) -> CGFloat {
+            func area(_ r: CGRect) -> CGFloat { r.isNull ? 0 : r.width * r.height }
+            var a = area(camera.toView(w.canvasFrame).intersection(screen))
+            if let target { a = max(a, area(target.toView(w.canvasFrame).intersection(screen))) }
+            return w === glideTarget ? .infinity : a
+        }
+        // A glide at 100% only streams what's on screen where it starts and where it lands:
+        // windows it passes on the way are seen for a few frames, and their pictures are sharp
+        // already (see needsSharpening).
+        typealias Candidate = (w: ManagedWindow, shown: CGFloat, distance: CGFloat)
+        var candidates: [Candidate] = []
+        for (w, want) in zip(windows, wants) where want.start && !w.needsFirstFrame {
+            let c: Candidate = (w, shown(w), w.canvasFrame.center.distance(to: focus))
+            if !gliding || c.shown > 0 { candidates.append(c) }
+        }
+        candidates.sort { $0.shown != $1.shown ? $0.shown > $1.shown : $0.distance < $1.distance }
+        let ranked: [ManagedWindow] = candidates.map { $0.w }
+        var streamed = Set(ranked.prefix(Self.streamBudget).map(\.id))
+        // Spare places keep streams that are still nearby running (no churn at the margins).
+        for (w, want) in zip(windows, wants) where streamed.count < Self.streamBudget
+            && want.keep && w.capture.isRunning && !w.needsFirstFrame {
+            streamed.insert(w.id)
+        }
+        snapshotQueue = ranked.dropFirst(Self.streamBudget).map(\.id)
+        captureLoad = min(ranked.count, Self.streamBudget)
         var toStart: [ManagedWindow] = []
-        for (w, want) in zip(windows, wants) {
-            if want.start {
-                if w.capture.isRunning {
-                    updateCapture(w)
-                } else {
-                    toStart.append(w)
-                }
-            } else if want.keep, w.capture.isRunning {
-                // Kept warm, not in view: same size, fewer frames.
-                w.capture.update(pixelSize: w.capture.pixelSize, fps: captureFPS(for: w))
-            } else if !want.keep, w.capture.isRunning {
-                w.capture.pause()
+        for w in ranked where streamed.contains(w.id) {
+            if !w.capture.isRunning {
+                toStart.append(w)
+            } else if reconfigure {
+                updateCapture(w)
             }
         }
-        // Starting a stream costs the main thread a millisecond or more, so a few start per pass
-        // (nearest the camera first, or the place it's heading) and the rest on the next ones;
-        // a zoom-out that needs 50 pictures doesn't hold up its first frame.
-        let focus = (animation?.to ?? camera).center(in: viewSize)
-        toStart.sort { $0.canvasFrame.center.distance(to: focus) < $1.canvasFrame.center.distance(to: focus) }
+        for w in windows where w.capture.isRunning && !streamed.contains(w.id) {
+            w.capture.pause()
+        }
+        // A few start per pass (the most important first), the rest on the next ones, so a
+        // zoom-out doesn't send replayd a burst of requests at once.
         for w in toStart.prefix(Self.streamStartsPerPass) {
             w.capture.start(window: w.scWindow, pixelSize: pixelSize(for: w), fps: captureFPS(for: w))
         }
@@ -1600,16 +1635,80 @@ final class CanvasController: NSObject {
             moreStartsQueued = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
                 self?.moreStartsQueued = false
-                self?.updateStreaming()
+                self?.updateStreaming(reconfigure: false)
             }
         }
+        pumpSnapshotsSoon()
         let running = windows.filter { $0.capture.isRunning }.count
         if running != lastCaptureCount {
             lastCaptureCount = running
-            logger.info("capturing \(running) of \(self.windows.count) windows")
+            logger.info("capturing \(running) of \(self.windows.count) windows, \(self.snapshotQueue.count) more by snapshot")
         }
         let ms = (CACurrentMediaTime() - t0) * 1000
         if ms > 8 { logger.info("slow: updating captures took \(Int(ms))ms (\(min(toStart.count, Self.streamStartsPerPass)) started)") }
+    }
+
+    // MARK: Snapshots
+
+    /// Windows in view that don't get a stream, most important first (set by updateStreaming).
+    private var snapshotQueue: [CGWindowID] = []
+    private var snapshotsInFlight = 0
+    private var snapshotTimer: Timer?
+
+    private func pumpSnapshotsSoon() {
+        guard snapshotTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in self?.pumpSnapshots() }
+        RunLoop.main.add(timer, forMode: .common)
+        snapshotTimer = timer
+        pumpSnapshots()
+    }
+
+    /// One-off pictures, three at a time: first pictures of new windows as fast as they come;
+    /// on the canvas, fresh pictures of windows in view without a stream, about ten a second in
+    /// all and each at most every 1.5s; at 100%, full-size pictures of parked windows whose last
+    /// one is a thumbnail from the canvas, nearest first, four a second (a glide shows them before
+    /// their streams catch up). A window whose snapshot fails is tried again later and later.
+    private func pumpSnapshots() {
+        let now = CACurrentMediaTime()
+        func due(_ w: ManagedWindow, every interval: CFTimeInterval) -> Bool {
+            now - w.lastSnapshotAt > interval * pow(2, Double(min(w.snapshotFailures, 5)))
+        }
+        let firsts = windows.filter { $0.needsFirstFrame && !$0.capture.isRunning && due($0, every: 2) }
+        let byID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var refresh = snapshotQueue.compactMap { byID[$0] }.filter { due($0, every: 1.5) }
+            .sorted { $0.lastSnapshotAt < $1.lastSnapshotAt }
+        let blurry = isActive ? [] : windows.filter(needsSharpening)
+        if refresh.isEmpty, now - lastSharpening > 0.25 {
+            let centre = camera.center(in: viewSize)
+            refresh = blurry.filter { due($0, every: 3) }
+                .sorted { $0.canvasFrame.center.distance(to: centre) < $1.canvasFrame.center.distance(to: centre) }
+            if !refresh.isEmpty { lastSharpening = now }
+        }
+        guard !firsts.isEmpty || !refresh.isEmpty else {
+            if snapshotsInFlight == 0, snapshotQueue.isEmpty, blurry.isEmpty, !windows.contains(where: \.needsFirstFrame) {
+                snapshotTimer?.invalidate()
+                snapshotTimer = nil
+            }
+            return
+        }
+        var next = firsts
+        if next.isEmpty, let w = refresh.first { next = [w] }
+        for w in next where snapshotsInFlight < 3 {
+            snapshotsInFlight += 1
+            w.lastSnapshotAt = now
+            w.capture.snapshot(window: w.scWindow, pixelSize: pixelSize(for: w)) { [weak self, weak w] ok in
+                self?.snapshotsInFlight -= 1
+                if let w { w.snapshotFailures = ok ? 0 : w.snapshotFailures + 1 }
+            }
+        }
+    }
+
+    private var lastSharpening: CFTimeInterval = 0
+
+    /// At 100%: a parked window not being streamed whose picture is smaller than full size.
+    private func needsSharpening(_ w: ManagedWindow) -> Bool {
+        w.parked && !w.capture.isRunning && !w.needsFirstFrame
+            && CGFloat(w.pictureWidth) < w.canvasFrame.width * screen.backingScaleFactor * 0.9
     }
 
     private static let streamStartsPerPass = 10
@@ -1617,17 +1716,23 @@ final class CanvasController: NSObject {
     private var lastCaptureCount = -1
 
     private var captureUpdatePending = false
+    private var captureSettleWork: DispatchWorkItem?
 
     /// While the camera moves: start streams for windows coming into view and stop the ones that
-    /// left, at most every 0.15s.
+    /// left, at most every 0.15s; once it has been still for 0.3s, sizes and frame rates follow.
     private func scheduleCaptureUpdate() {
-        guard !captureUpdatePending else { return }
-        captureUpdatePending = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            guard let self else { return }
-            self.captureUpdatePending = false
-            self.updateStreaming()
+        if !captureUpdatePending {
+            captureUpdatePending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                guard let self else { return }
+                self.captureUpdatePending = false
+                self.updateStreaming(reconfigure: false)
+            }
         }
+        captureSettleWork?.cancel()
+        let settle = DispatchWorkItem { [weak self] in self?.updateStreaming() }
+        captureSettleWork = settle
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: settle)
     }
 
     private var streamingWork: DispatchWorkItem?
@@ -1673,12 +1778,9 @@ final class CanvasController: NSObject {
     /// share a budget of about 240 frames a second (every frame costs the window server a render
     /// and Expanse a hand-off), but never drop below 5.
     private func captureFPS(for w: ManagedWindow) -> Int {
-        // At 100%: parked windows showing on the backdrop at the live rate; ones only kept warm
-        // (lingering after the canvas) at 1, since even unchanged windows send every frame.
-        guard isActive else {
-            let onScreen = camera.toView(w.canvasFrame).intersects(CGRect(origin: .zero, size: viewSize))
-            return onScreen ? Self.liveFPS : 1
-        }
+        // (Not lower than the live rate: at 1 fps ScreenCaptureKit may never send a picture of a
+        // window that isn't changing.)
+        guard isActive else { return Self.liveFPS }
         let width = w.canvasFrame.width * viewScale(for: w)
         let bySize = width >= 500 ? Self.canvasFPS : width >= 200 ? 15 : 8
         let share = 240 / max(captureLoad, 1)
@@ -1714,7 +1816,9 @@ final class CanvasController: NSObject {
         camera.scale = 1
         updateOverlayFrame()
         view.render()
-        updateStreaming()
+        // Zooming out, the animation's capture pass covers its whole path; one for the 100% view
+        // first would stop streams still warm from the last time.
+        if !zoomOut { updateStreaming() }
         if CACurrentMediaTime() - lastWallpaperRefresh > 30 { refreshWallpaper() }
         NSApp.activate(ignoringOtherApps: true)
         overlay.level = OverlayWindow.canvasLevel
@@ -1890,7 +1994,7 @@ final class CanvasController: NSObject {
         logger.info("dump viewport=\(NSStringFromRect(self.viewport), privacy: .public) overlay=\(NSStringFromRect(self.overlay.frame), privacy: .public) view=\(NSStringFromRect(self.view.bounds), privacy: .public) camera=\(NSStringFromPoint(self.camera.origin), privacy: .public)@\(self.camera.scale) active=\(self.isActive) gliding=\(self.gliding) animating=\(self.animation != nil) paused=\(self.isPaused) frontmost=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-", privacy: .public) focusedByApp=\(self.focusedWindowByApp.description, privacy: .public)")
         for w in windows {
             let axPos = w.ax.flatMap(AX.position).map { NSStringFromPoint($0) } ?? "nil"
-            logger.info("dump \(w.appName, privacy: .public)[\(w.id)] sc=\(NSStringFromRect(w.scWindow.frame), privacy: .public) ax=\(axPos, privacy: .public) canvas=\(NSStringFromRect(w.canvasFrame), privacy: .public) layer=\(NSStringFromRect(w.node.container.frame), privacy: .public) parked=\(w.parked) capturing=\(w.capture.isRunning) first=\(w.needsFirstFrame) lastPlaced=\(w.lastPlaced.map { NSStringFromPoint($0) } ?? "nil", privacy: .public)")
+            logger.info("dump \(w.appName, privacy: .public)[\(w.id)] sc=\(NSStringFromRect(w.scWindow.frame), privacy: .public) ax=\(axPos, privacy: .public) canvas=\(NSStringFromRect(w.canvasFrame), privacy: .public) layer=\(NSStringFromRect(w.node.container.frame), privacy: .public) parked=\(w.parked) capturing=\(w.capture.isRunning) first=\(w.needsFirstFrame) pic=\(w.pictureWidth) lastPlaced=\(w.lastPlaced.map { NSStringFromPoint($0) } ?? "nil", privacy: .public)")
         }
     }
 

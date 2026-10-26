@@ -15,10 +15,11 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private let queue = DispatchQueue(label: "com.invignation.expanse.capture", qos: .userInteractive)
     private var recentSamples: [CMSampleBuffer] = []
-    /// What the stream should be configured as; `configured` is what it was last told.
+    /// What the stream should capture at; `configured` is what it was started with.
     private(set) var pixelSize: CGSize = .zero
     private(set) var fps: Int = 0
     private var configured: (size: CGSize, fps: Int) = (.zero, 0)
+    private var window: SCWindow?
     private var starting = false
     /// Whether the stream should be running; a pause during start-up stops it once it's up.
     private var wanted = false
@@ -29,6 +30,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         wanted = true
         guard !isRunning else { return }
         starting = true
+        self.window = window
         self.pixelSize = pixelSize
         self.fps = fps
         configured = (pixelSize, fps)
@@ -55,29 +57,44 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                         self.onStop?()
                     } else {
                         self.stream = stream
-                        if !self.wanted { self.pause() } else { self.applyConfiguration() }
+                        if !self.wanted { self.pause() } else { self.restartIfResized() }
                     }
                 }
             }
         }
     }
 
-    /// Takes effect once the stream is up if it's still starting.
-    func update(pixelSize: CGSize, fps: Int) {
-        self.pixelSize = pixelSize
-        self.fps = fps
-        applyConfiguration()
-    }
-
-    private func applyConfiguration() {
-        guard let stream, pixelSize != configured.size || fps != configured.fps else { return }
-        configured = (pixelSize, fps)
-        let config = Self.configuration(pixelSize: pixelSize, fps: fps)
-        queue.async {
-            stream.updateConfiguration(config) { error in
-                if let error { logger.error("updateConfiguration failed: \(error.localizedDescription)") }
+    /// One picture, without a stream (ScreenCaptureKit's screenshot call), delivered like a stream
+    /// frame. `completion` runs on the main thread either way.
+    func snapshot(window: SCWindow, pixelSize: CGSize, completion: @escaping (_ ok: Bool) -> Void) {
+        let config = Self.configuration(pixelSize: pixelSize, fps: 1)
+        queue.async { [weak self] in
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: config) { sample, error in
+                let ok = sample?.imageBuffer != nil
+                if let self, let sample, ok { FramePump.shared.post(sample, for: self) }
+                if let error { logger.info("snapshot of \(window.windowID) failed: \(error.localizedDescription, privacy: .public)") }
+                DispatchQueue.main.async { completion(ok) }
             }
         }
+    }
+
+    /// Capture at a new size. ScreenCaptureKit can reconfigure a running stream, but a stream
+    /// asked to change size sends nothing until the change is through, which takes seconds when
+    /// several change at once; starting a new stream is quicker, and the layer keeps the last
+    /// picture meanwhile. Frame rates are set when a stream starts: a change takes seconds to
+    /// apply, by which time it rarely matters.
+    func update(pixelSize: CGSize, fps: Int) {
+        guard pixelSize != self.pixelSize else { return }
+        self.pixelSize = pixelSize
+        self.fps = fps
+        restartIfResized()
+    }
+
+    private func restartIfResized() {
+        guard stream != nil, wanted, pixelSize != configured.size, let window else { return }
+        pause()
+        start(window: window, pixelSize: pixelSize, fps: fps)
     }
 
     /// Stop capturing but keep the callbacks, so start() can pick up again later. The layer

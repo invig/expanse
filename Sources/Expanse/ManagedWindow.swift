@@ -30,6 +30,11 @@ final class ManagedWindow {
     var home: CGPoint?
     /// Captured once when first seen, even if it's then on screen and not captured any more.
     var needsFirstFrame = true
+    /// The last one-off picture asked for (CACurrentMediaTime), and failures in a row since.
+    var lastSnapshotAt: CFTimeInterval = 0
+    var snapshotFailures = 0
+    /// Width in pixels of the picture showing now (captured smaller when zoomed out).
+    var pictureWidth = 0
 
     let node = WindowNode()
     let capture = WindowCapture()

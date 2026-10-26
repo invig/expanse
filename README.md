@@ -139,15 +139,23 @@ Expanse runs on a stock, SIP-enabled Mac. That shapes everything:
 - **Gliding** between windows at 100% uses the same trick for a moment: the backdrop rises with
   pictures exactly over the real windows, the camera animates, and the real windows move once,
   hidden, on a background thread.
-- **Capture only when it's needed.** macOS marks every captured window with a purple indicator.
-  At 100% the windows on screen are the real thing, so Expanse only captures them while zoomed
-  out or gliding (when the backdrop covers them anyway), plus parked windows whose indicator is
-  off-screen.
+- **Capture only what can be seen.** Every stream costs the window server work, and macOS marks
+  every captured window with a purple indicator. Expanse streams the windows in view while zoomed
+  out or gliding (when the backdrop covers them anyway), and at 100% only parked windows whose
+  picture shows on the backdrop. Pictures are captured at the size they're drawn.
+- **Twenty streams at most.** The system service behind every screen capture on the Mac runs out
+  of file descriptors at around 50 streams, after which new streams silently get no frames. So
+  the twenty most visible windows stream; every other window in view is refreshed with one-off
+  snapshots in turn, and new windows get their first picture the same way.
 - **Display changes.** While macOS reshuffles windows after a display change, Expanse ignores
   their moves, then restores sizes and derives the layout for the new screen from the home
   layout.
 - **Focus** switches through the Accessibility API, which lands in milliseconds instead of
   waiting on macOS's cooperative app activation.
+- **Nothing waits on other apps.** Every Accessibility call that has to wait for an app's reply
+  (moving, focusing, asking where a window is) runs off the main thread, each app's windows on a
+  thread of their own, so one busy app can't stall the canvas. Window scans only ask apps about
+  windows that aren't where Expanse expects them. It stays smooth with 50+ windows open.
 
 ## Privacy
 
