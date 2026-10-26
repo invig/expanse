@@ -423,10 +423,31 @@ final class CanvasController: NSObject {
     }
 
     private var focusQuery = 0
+    /// The window Expanse last focused, when, and whether that was already putting it back.
+    private var lastFocusRequest: (id: CGWindowID, pid: pid_t, at: CFTimeInterval, reasserted: Bool)?
+
+    /// Whether you clicked or typed since `time` (CACurrentMediaTime).
+    private func inputSince(_ time: CFTimeInterval) -> Bool {
+        let elapsed = CACurrentMediaTime() - time
+        return [.leftMouseDown, .rightMouseDown, .keyDown].contains { type in
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: type) < elapsed
+        }
+    }
 
     private func focusSettled(on id: CGWindowID) {
         guard !isActive, !isPaused, !suspendTracking, animation == nil,
               let w = windows.first(where: { $0.id == id }) else { return }
+        // Moments after Expanse focused a window, focus moved to another of the same app's, and
+        // not by you: arriving on a Space (from a full-screen app's, say), macOS activates the app
+        // in front there, and the app puts its previous window back in focus. That's not a choice
+        // to follow; the window you picked gets focus back (once, so an app that insists wins).
+        if let request = lastFocusRequest, !request.reasserted, request.pid == w.pid, request.id != id,
+           CACurrentMediaTime() - request.at < 1, !inputSince(request.at),
+           let picked = windows.first(where: { $0.id == request.id }) {
+            logger.info("\(w.appName, privacy: .public)[\(id)] took focus just after [\(request.id)] was picked; giving it back")
+            focusWindow(picked, reasserting: true)
+            return
+        }
         let r = camera.toView(w.canvasFrame)
         let fullyVisible = !w.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r)
         guard !fullyVisible else { return }
@@ -499,7 +520,8 @@ final class CanvasController: NSObject {
     }
 
     /// Give `w` keyboard focus now, keep system prompts on top, and time the app switch.
-    private func focusWindow(_ w: ManagedWindow) {
+    private func focusWindow(_ w: ManagedWindow, reasserting: Bool = false) {
+        lastFocusRequest = (w.id, w.pid, CACurrentMediaTime(), reasserting)
         activationRequest = (w.pid, CACurrentMediaTime())
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid { activationRequest = nil }
         // The app has to answer each of these; a busy one takes 30ms+, so they go on the

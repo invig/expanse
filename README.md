@@ -116,7 +116,7 @@ tells you which ones are in the way; to change them yourself:
 open "expanse://toggle"            # zoom out / back
 open "expanse://tidy"
 open "expanse://nav?dir=left"      # left | right | up | down
-open "expanse://focus?app=Safari"
+open "expanse://focus?app=Safari"  # or ?id=<window ID>
 open "expanse://space?name=Safari"  # a full-screen app's Space, or "Desktop"
 open "expanse://pause"             # windows back to the macOS layout
 open "expanse://resume"

@@ -131,8 +131,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     controller.switchToSpace(space)
                 }
             case "focus":
+                // ?app=Safari (its front window), or ?id= a window ID (from dump).
                 let name = (query["app"] ?? "").lowercased()
-                if let w = controller.windows.last(where: { $0.appName.lowercased() == name }) { controller.focus(w) }
+                let id = number("id").map { CGWindowID($0) }
+                if let w = controller.windows.last(where: { id != nil ? $0.id == id : $0.appName.lowercased() == name }) {
+                    controller.focus(w)
+                }
             default: break
             }
     }
