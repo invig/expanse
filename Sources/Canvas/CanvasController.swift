@@ -1105,6 +1105,18 @@ final class CanvasController: NSObject {
         return CGSize(width: w.canvasFrame.width * backing * factor, height: w.canvasFrame.height * backing * factor)
     }
 
+    /// Zoomed-out pictures are captured at reduced resolution. Before zooming in, switch every
+    /// window that will be on screen at `target` to full resolution, so it's sharp on arrival.
+    private func sharpen(for target: Camera) {
+        resolutionWork?.cancel()
+        let backing = screen.backingScaleFactor
+        let arriving = CGRect(origin: .zero, size: viewSize)
+        for w in windows where target.toView(w.canvasFrame).intersects(arriving) {
+            w.capture.update(pixelSize: CGSize(width: w.canvasFrame.width * backing, height: w.canvasFrame.height * backing),
+                             fps: Self.canvasFPS)
+        }
+    }
+
     private func updateCapture(_ w: ManagedWindow) {
         w.capture.update(pixelSize: pixelSize(for: w), fps: isActive ? Self.canvasFPS : Self.liveFPS)
     }
@@ -1158,6 +1170,7 @@ final class CanvasController: NSObject {
             // Straight back where you were, unless you've moved around since zooming out.
             target = returnCamera ?? Camera.centered(on: camera.center(in: viewSize), scale: 1, viewSize: viewSize)
         }
+        sharpen(for: target)
         animate(to: target, duration: 0.18) { [weak self] in
             guard let self else { return }
             self.commit()
