@@ -36,7 +36,8 @@ the canvas glides to it, centred, at 100%, ready to type into.
 - **Spatial navigation.** <kbd>⌃</kbd> + arrow keys hop to the nearest window in that direction.
   Press quickly and the hops chain into one continuous move.
 - **Arrange like a design tool.** Drag windows around the canvas; they snap to edges, centres
-  and an even 20pt gap. Box-select or <kbd>⇧</kbd>-click to move groups together.
+  and an even 20pt gap. Box-select or <kbd>⇧</kbd>-click to move groups together, or close
+  them all with one click.
 - **Follows you between screens.** Expanse keeps a *home* layout at full size. On a laptop the
   layout tightens up (each window keeps its gap to its neighbours); plug back into the big
   display and everything returns exactly.
@@ -101,7 +102,7 @@ Expanse to have them:
 | <kbd>T</kbd> | Tidy up |
 | <kbd>0</kbd> · <kbd>1</kbd> · <kbd>-</kbd> · <kbd>=</kbd> | Fit everything · 100% · zoom out · zoom in |
 | <kbd>Return</kbd> · <kbd>Esc</kbd> | Dive into the highlighted window · clear selection, then back to 100% |
-| Hover <kbd>×</kbd>, or <kbd>⌘</kbd><kbd>W</kbd> | Close the hovered window |
+| Hover <kbd>×</kbd>, or <kbd>⌘</kbd><kbd>W</kbd> | Close the hovered window, or every selected window at once |
 | <kbd>⌥</kbd><kbd>⇧</kbd><kbd>`</kbd> | Auto-centre on or off. Off: clicking a window that's partly on screen leaves the canvas where it is, for side-by-side work |
 | Menu bar icon | Hot corner choice, desktop picture, Pause, Tidy Up, Restore All Windows, Welcome & Shortcuts |
 

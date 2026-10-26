@@ -175,12 +175,16 @@ final class CanvasView: NSView {
         let s = c.camera.scale
         world.sublayerTransform = CATransform3DMakeAffineTransform(
             CGAffineTransform(a: s, b: 0, c: 0, d: s, tx: -s * c.camera.origin.x, ty: bounds.height + s * c.camera.origin.y))
+        // Hovering a window in a selection shows × on every selected window: it closes them all.
+        let groupHovered = hovered.map(isInGroup) ?? false
         for w in c.windows {
             w.node.place(canvasFrame: w.canvasFrame)
             let r = c.camera.toView(w.canvasFrame)
             // In live mode the real window covers its proxy; only parked windows are drawn.
             let visible = r.insetBy(dx: -30, dy: -30).intersects(viewRect) && (c.isActive || w.parked)
-            w.node.style(scale: s, hovered: w === hovered, selected: selected.contains(w.id),
+            let isSelected = selected.contains(w.id)
+            w.node.style(scale: s, hovered: w === hovered, selected: isSelected,
+                         showsClose: w === hovered || (groupHovered && isSelected),
                          visible: visible, screenRect: flip(r))
         }
         let picked = c.windows.filter { selected.contains($0.id) }.map { c.camera.toView($0.canvasFrame) }
@@ -192,6 +196,21 @@ final class CanvasView: NSView {
         }
         minimap.update(windows: c.windows.map(\.canvasFrame), viewport: c.camera.toCanvas(viewRect), scale: c.camera.scale)
         CATransaction.commit()
+    }
+
+    /// Part of a selection of more than one window (which × and ⌘W close together).
+    private func isInGroup(_ w: ManagedWindow) -> Bool {
+        selected.count > 1 && selected.contains(w.id)
+    }
+
+    /// Close `w`, or the whole selection if `w` is part of it.
+    private func close(_ w: ManagedWindow) {
+        if isInGroup(w) {
+            controller.close(controller.windows.filter { selected.contains($0.id) })
+            selected.removeAll()
+        } else {
+            controller.close([w])
+        }
     }
 
     private func flip(_ r: CGRect) -> CGRect {
@@ -274,10 +293,10 @@ final class CanvasView: NSView {
             drag = .pan(last: p)
             NSCursor.closedHand.set()
         } else if let w = controller.window(atView: p) {
-            if w === hovered, w.node.closeVisible,
-               WindowNode.closeRect(in: controller.camera.toView(w.canvasFrame)).contains(p) {
+            if w.node.closeVisible, WindowNode.closeRect(in: controller.camera.toView(w.canvasFrame)).contains(p) {
                 drag = .none
-                controller.close(w)
+                close(w)
+                render()
                 return
             }
             if shift {
@@ -433,7 +452,11 @@ final class CanvasView: NSView {
             controller.cameraMovedByUser()
             controller.animate(to: t, duration: 0.22)
         case kVK_ANSI_W where e.modifierFlags.contains(.command):
-            if let w = hovered { controller.close(w) }
+            // The selection if there is one, otherwise the window under the pointer.
+            if let w = controller.windows.first(where: { selected.contains($0.id) }) ?? hovered {
+                close(w)
+                render()
+            }
         default:
             super.keyDown(with: e)
         }

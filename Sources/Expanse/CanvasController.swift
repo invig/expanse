@@ -2365,9 +2365,16 @@ final class CanvasController: NSObject {
         view.bringToFront(w.node)
     }
 
-    func close(_ w: ManagedWindow) {
-        if let ax = w.ax { AX.close(ax) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.sync() }
+    /// Presses each window's own close button, so apps ask about unsaved changes as usual. Off the
+    /// main thread: pressing waits on the app.
+    func close(_ ws: [ManagedWindow]) {
+        let elements = ws.compactMap(\.ax)
+        guard !elements.isEmpty else { return }
+        if elements.count > 1 { logger.info("closing \(elements.count) windows") }
+        axQueue.async { [weak self] in
+            elements.forEach(AX.close)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.sync() }
+        }
     }
 
     /// Snap a dragged frame (one window, or a group's bounding box) to the other windows.

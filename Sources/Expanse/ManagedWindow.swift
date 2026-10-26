@@ -110,7 +110,7 @@ final class WindowNode {
     var closeVisible: Bool { !closeButton.isHidden && !container.isHidden }
 
     private var placedFrame = CGRect.null
-    private var styled: (scale: CGFloat, hovered: Bool, selected: Bool)?
+    private var styled: (scale: CGFloat, hovered: Bool, selected: Bool, showsClose: Bool)?
 
     init() {
         container.shadowColor = NSColor.black.cgColor
@@ -184,7 +184,8 @@ final class WindowNode {
 
     /// Details that stay the same size on screen at any zoom: border, close button, label.
     /// `screenRect` is the window on screen in layer coordinates (bottom-left origin).
-    func style(scale s: CGFloat, hovered: Bool, selected: Bool, visible: Bool, screenRect: CGRect) {
+    /// `showsClose`: hovered, or in a selection whose window is hovered (× closes them all).
+    func style(scale s: CGFloat, hovered: Bool, selected: Bool, showsClose: Bool, visible: Bool, screenRect: CGRect) {
         container.isHidden = !visible
         label.isHidden = !visible || screenRect.width < 70
         guard visible else { return }
@@ -192,10 +193,11 @@ final class WindowNode {
         let width = max((max(screenRect.width - 4, 60) / 32).rounded(.down) * 32, 60)
         if label.bounds.width != width { label.bounds = CGRect(x: 0, y: 0, width: width, height: 15) }
         label.position = CGPoint(x: screenRect.minX + 2, y: screenRect.maxY + 5)
-        if let styled, styled.scale == s, styled.hovered == hovered, styled.selected == selected { return }
-        styled = (s, hovered, selected)
+        if let styled, styled.scale == s, styled.hovered == hovered, styled.selected == selected,
+           styled.showsClose == showsClose { return }
+        styled = (s, hovered, selected, showsClose)
         highlight.borderWidth = (selected ? 3 : hovered ? 2 : 0) / s
-        closeButton.isHidden = !hovered || screenRect.width < WindowNode.closeMinWidth
+        closeButton.isHidden = !showsClose || screenRect.width < WindowNode.closeMinWidth
         closeButton.transform = CATransform3DMakeScale(1 / s, 1 / s, 1)
         let inset = (WindowNode.closeInset + WindowNode.closeSize / 2) / s
         closeButton.position = CGPoint(x: placedFrame.width - inset, y: placedFrame.height - inset)
