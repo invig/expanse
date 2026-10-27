@@ -307,14 +307,20 @@ final class CanvasView: NSView {
         guard !controller.gliding else { return }
         guard controller.isActive else {
             // Live mode: a click on a parked window's picture on the backdrop goes to that window,
-            // and the Spaces bar works here too.
+            // and the Spaces bar works here too. Anywhere else on the backdrop (the desktop, as
+            // far as you can tell), it zooms out.
             drag = .none
-            if let i = spacesBarHit(e).tile {
+            let bar = spacesBarHit(e)
+            if let i = bar.tile {
                 spacesBar.hovered = nil
                 controller.switchToSpace(spacesBar.spaces[i])
                 return
             }
-            if let w = controller.window(atView: point(e), parkedOnly: true) { controller.focus(w) }
+            if let w = controller.window(atView: point(e), parkedOnly: true) {
+                controller.focus(w)
+            } else if !bar.over {
+                controller.enter(zoomOut: true)
+            }
             return
         }
         controller.cancelAnimation()
