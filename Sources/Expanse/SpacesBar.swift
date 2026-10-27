@@ -2,7 +2,8 @@ import AppKit
 
 /// Beside the minimap: one tile per Space on the main display. Full-screen apps live in Spaces of
 /// their own, off the canvas; this is how you see them and get to them (and back). Only shown
-/// when there's more than one Space.
+/// when there's more than one Space. Drawn on glass (see GlassPanel), in the colours
+/// applyAppearance gives it.
 final class SpacesBar: CALayer {
     private static let tile = CGSize(width: 104, height: 65)   // the screen's shape, roughly
     private static let gap: CGFloat = 10
@@ -14,6 +15,7 @@ final class SpacesBar: CALayer {
     private var labels: [CATextLayer] = []
     private let heading = CATextLayer()
     private var scale: CGFloat = 2
+    private var appearance = NSAppearance(named: .darkAqua)!
     /// The tile under the pointer.
     var hovered: Int? {
         didSet { if hovered != oldValue { styleTiles() } }
@@ -21,14 +23,9 @@ final class SpacesBar: CALayer {
 
     override init() {
         super.init()
-        backgroundColor = NSColor(white: 0.12, alpha: 0.88).cgColor
-        cornerRadius = 12
-        borderColor = NSColor(white: 1, alpha: 0.08).cgColor
-        borderWidth = 1
         heading.string = "Spaces"
         heading.fontSize = 10
         heading.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
-        heading.foregroundColor = NSColor(white: 1, alpha: 0.55).cgColor
         addSublayer(heading)
         isHidden = true
     }
@@ -42,6 +39,12 @@ final class SpacesBar: CALayer {
         heading.contentsScale = s
         for tile in tiles { tile.sublayers?.forEach { $0.contentsScale = s } }
         for label in labels { label.contentsScale = s }
+    }
+
+    /// Dark text on light glass, light text on dark.
+    func applyAppearance(_ appearance: NSAppearance) {
+        self.appearance = appearance
+        styleTiles()
     }
 
     /// Rebuilt only when something changed. Hidden with a single Space: nothing to switch to.
@@ -71,7 +74,9 @@ final class SpacesBar: CALayer {
         let tile = CALayer()
         tile.frame = CGRect(x: Self.gap + CGFloat(i) * (Self.tile.width + Self.gap), y: 34,
                             width: Self.tile.width, height: Self.tile.height)
-        tile.cornerRadius = 6
+        // Concentric with the panel's corners.
+        tile.cornerRadius = GlassPanel.radius - Self.gap
+        tile.cornerCurve = .continuous
         tile.masksToBounds = true
         if space.isDesktop {
             // The desktop: its picture, as on the canvas.
@@ -98,7 +103,6 @@ final class SpacesBar: CALayer {
         label.string = space.name
         label.fontSize = 10
         label.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-        label.foregroundColor = NSColor(white: 1, alpha: 0.8).cgColor
         label.alignmentMode = .center
         label.truncationMode = .end
         label.contentsScale = scale
@@ -110,12 +114,16 @@ final class SpacesBar: CALayer {
     private func styleTiles() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (i, tile) in tiles.enumerated() {
-            let current = spaces[i].id == active
-            tile.borderWidth = current ? 2 : 1
-            tile.borderColor = current ? NSColor.controlAccentColor.cgColor
-                : NSColor(white: 1, alpha: i == hovered ? 0.7 : 0.15).cgColor
-            tile.opacity = current || i == hovered ? 1 : 0.85
+        appearance.performAsCurrentDrawingAppearance {
+            heading.foregroundColor = NSColor.secondaryLabelColor.cgColor
+            for label in labels { label.foregroundColor = NSColor.labelColor.cgColor }
+            for (i, tile) in tiles.enumerated() {
+                let current = spaces[i].id == active
+                tile.borderWidth = current ? 2 : 1
+                tile.borderColor = current ? NSColor.controlAccentColor.cgColor
+                    : i == hovered ? NSColor.labelColor.withAlphaComponent(0.5).cgColor : NSColor.separatorColor.cgColor
+                tile.opacity = current || i == hovered ? 1 : 0.85
+            }
         }
         CATransaction.commit()
     }

@@ -1,6 +1,7 @@
 import AppKit
 
 /// Bottom-right overview: every window as a block, the viewport as an outline, the zoom level.
+/// Drawn on glass (see GlassPanel), in the colours applyAppearance gives it.
 final class Minimap: CALayer {
     static let size = CGSize(width: 208, height: 136)
 
@@ -20,22 +21,12 @@ final class Minimap: CALayer {
         mapArea = CGRect(x: 10, y: 26, width: Minimap.size.width - 20, height: Minimap.size.height - 36)
         super.init()
         bounds = CGRect(origin: .zero, size: Minimap.size)
-        backgroundColor = NSColor(white: 0.12, alpha: 0.88).cgColor
-        cornerRadius = 12
-        borderColor = NSColor(white: 1, alpha: 0.08).cgColor
-        borderWidth = 1
-
-        windowsShape.fillColor = NSColor(white: 0.85, alpha: 0.75).cgColor
         addSublayer(windowsShape)
-
-        viewportShape.fillColor = NSColor(white: 1, alpha: 0.06).cgColor
-        viewportShape.strokeColor = NSColor(white: 1, alpha: 0.9).cgColor
         viewportShape.lineWidth = 1
         addSublayer(viewportShape)
 
         zoomText.fontSize = 10
         zoomText.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        zoomText.foregroundColor = NSColor(white: 1, alpha: 0.7).cgColor
         zoomText.frame = CGRect(x: 10, y: 7, width: 80, height: 13)
         addSublayer(zoomText)
     }
@@ -50,6 +41,20 @@ final class Minimap: CALayer {
     func setContentsScale(_ s: CGFloat) {
         contentsScale = s
         zoomText.contentsScale = s
+    }
+
+    /// Dark marks on light glass, light ones on dark.
+    func applyAppearance(_ appearance: NSAppearance) {
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        appearance.performAsCurrentDrawingAppearance {
+            windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.5 : 0.35).cgColor
+            viewportShape.fillColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
+            viewportShape.strokeColor = NSColor.labelColor.cgColor
+            zoomText.foregroundColor = NSColor.secondaryLabelColor.cgColor
+        }
+        CATransaction.commit()
     }
 
     /// All rects are canvas space (top-left origin).
