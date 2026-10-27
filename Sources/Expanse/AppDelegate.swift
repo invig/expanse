@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let screenRecordingItem = NSMenuItem(title: "", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
     private let installUpdateItem = NSMenuItem(title: "", action: #selector(installUpdate), keyEquivalent: "")
     private let autoUpdateItem = NSMenuItem(title: "Check for Updates Automatically", action: #selector(toggleAutoUpdate), keyEquivalent: "")
+    private let restoreLayoutItem = NSMenuItem(title: "Restore Layout", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setUpStatusItem()
@@ -153,6 +154,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "fit": controller.animate(to: controller.fitCamera())
             case "restore": controller.restoreAll()
             case "tidy": controller.tidy()
+            case "layout":
+                // A layout snapshot, 0 the newest (see Restore Layout in the menu).
+                let all = LayoutStore.snapshots(), n = Int(number("snapshot") ?? 0)
+                if all.indices.contains(n), let layout = LayoutStore.load(all[n]) { controller.restoreLayout(layout) }
             case "welcome": showWelcome()
             case "place":
                 if let id = windowID("id"), let x = number("x"), let y = number("y") {
@@ -242,6 +247,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(centreItem)
         menu.addItem(wallpaperItem)
         menu.addItem(NSMenuItem(title: "Tidy Up Windows", action: #selector(tidy), keyEquivalent: ""))
+        restoreLayoutItem.submenu = NSMenu()
+        menu.addItem(restoreLayoutItem)
         menu.addItem(NSMenuItem(title: "Restore All Windows", action: #selector(restoreAll), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Welcome & Shortcuts…", action: #selector(showWelcome), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -273,6 +280,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         autoUpdateItem.state = Updater.shared.automatic ? .on : .off
         autoUpdateItem.isHidden = !Updater.shared.isRelease
         screenRecordingItem.title = sr ? "Screen Recording: granted" : "Grant Screen Recording…"
+        fillRestoreLayoutMenu()
+    }
+
+    /// The layout snapshots, newest first: "12 minutes ago (8:30 am)".
+    private func fillRestoreLayoutMenu() {
+        guard let submenu = restoreLayoutItem.submenu else { return }
+        submenu.removeAllItems()
+        let ago = RelativeDateTimeFormatter()
+        ago.unitsStyle = .full
+        let time = DateFormatter()
+        time.dateStyle = Calendar.current.isDateInToday(Date()) ? .none : .short
+        time.timeStyle = .short
+        time.doesRelativeDateFormatting = true
+        for snapshot in LayoutStore.snapshots() {
+            let when = Date().timeIntervalSince(snapshot.date) < 60 ? "Just now" : ago.localizedString(for: snapshot.date, relativeTo: Date())
+            let item = NSMenuItem(title: "\(when.prefix(1).uppercased() + when.dropFirst()) (\(time.string(from: snapshot.date)))",
+                                  action: #selector(restoreLayout(_:)), keyEquivalent: "")
+            item.representedObject = snapshot.url
+            submenu.addItem(item)
+        }
+        if submenu.items.isEmpty {
+            let none = NSMenuItem(title: "No earlier layouts yet", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            submenu.addItem(none)
+        }
+        restoreLayoutItem.isEnabled = !controller.isPaused
+    }
+
+    @objc private func restoreLayout(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL,
+              let snapshot = LayoutStore.snapshots().first(where: { $0.url == url }),
+              let layout = LayoutStore.load(snapshot) else { return }
+        controller.whenIdle { [weak self] in self?.controller.restoreLayout(layout) }
     }
 
     @objc private func toggleCanvas() { controller.whenIdle { [weak self] in self?.controller.toggle() } }
