@@ -5,13 +5,17 @@ import AppKit
 /// when there's more than one Space. Drawn on glass (see GlassPanel), in the colours
 /// applyAppearance gives it.
 final class SpacesBar: CALayer {
-    private static let tile = CGSize(width: 104, height: 65)   // the screen's shape, roughly
+    private static let tile = CGSize(width: 100, height: 63)   // the screen's shape, roughly
     private static let gap: CGFloat = 10
+    /// From the panel's edges to the tiles and heading.
+    private static let inset: CGFloat = 14
 
     private(set) var spaces: [Spaces.Space] = []
     private var active: UInt64?
     private var wallpaper: CGImage?
     private var tiles: [CALayer] = []
+    /// Around each tile, shown for the current Space (and the one under the pointer).
+    private var rings: [CALayer] = []
     private var labels: [CATextLayer] = []
     private let heading = CATextLayer()
     private var scale: CGFloat = 2
@@ -54,13 +58,14 @@ final class SpacesBar: CALayer {
         self.active = active
         self.wallpaper = wallpaper
         isHidden = spaces.count < 2
-        (tiles + labels).forEach { $0.removeFromSuperlayer() }
+        (tiles + rings + labels).forEach { $0.removeFromSuperlayer() }
         tiles = spaces.enumerated().map { makeTile($1, at: $0) }
+        rings = tiles.map(makeRing)
         labels = spaces.enumerated().map { makeLabel($1, under: tiles[$0]) }
-        (tiles + labels).forEach(addSublayer)
-        let width = Self.gap + CGFloat(spaces.count) * (Self.tile.width + Self.gap)
+        (tiles + rings + labels).forEach(addSublayer)
+        let width = Self.inset * 2 + CGFloat(spaces.count) * (Self.tile.width + Self.gap) - Self.gap
         bounds = CGRect(x: 0, y: 0, width: width, height: Minimap.size.height)
-        heading.frame = CGRect(x: Self.gap, y: Minimap.size.height - 25, width: 120, height: 14)
+        heading.frame = CGRect(x: Self.inset, y: Minimap.size.height - 25, width: 120, height: 14)
         styleTiles()
     }
 
@@ -72,10 +77,10 @@ final class SpacesBar: CALayer {
 
     private func makeTile(_ space: Spaces.Space, at i: Int) -> CALayer {
         let tile = CALayer()
-        tile.frame = CGRect(x: Self.gap + CGFloat(i) * (Self.tile.width + Self.gap), y: 34,
+        tile.frame = CGRect(x: Self.inset + CGFloat(i) * (Self.tile.width + Self.gap), y: 36,
                             width: Self.tile.width, height: Self.tile.height)
         // Concentric with the panel's corners.
-        tile.cornerRadius = GlassPanel.radius - Self.gap
+        tile.cornerRadius = GlassPanel.radius - Self.inset
         tile.cornerCurve = .continuous
         tile.masksToBounds = true
         if space.isDesktop {
@@ -102,6 +107,17 @@ final class SpacesBar: CALayer {
         return tile
     }
 
+    /// A ring outside the tile with a gap, as macOS marks a chosen picture, so it doesn't cover
+    /// the thumbnail's edge.
+    private func makeRing(around tile: CALayer) -> CALayer {
+        let ring = CALayer()
+        ring.frame = tile.frame.insetBy(dx: -Self.ringOutset, dy: -Self.ringOutset)
+        ring.cornerRadius = tile.cornerRadius + Self.ringOutset
+        ring.cornerCurve = .continuous
+        return ring
+    }
+    private static let ringOutset: CGFloat = 4.5
+
     private func makeLabel(_ space: Spaces.Space, under tile: CALayer) -> CATextLayer {
         let label = CATextLayer()
         label.string = space.name
@@ -116,12 +132,13 @@ final class SpacesBar: CALayer {
     /// The Space you're on is outlined in the accent colour and named in bold; the one under the
     /// pointer lights up.
     private func styleTiles() {
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         appearance.performAsCurrentDrawingAppearance {
             // Text in a layer gets no vibrancy from the glass, so secondary text is darker than
             // secondaryLabelColor, or it would be too faint to read.
-            heading.foregroundColor = NSColor.labelColor.withAlphaComponent(0.75).cgColor
+            heading.foregroundColor = NSColor.labelColor.withAlphaComponent(dark ? 0.85 : 0.75).cgColor
             for (i, tile) in tiles.enumerated() {
                 let current = spaces[i].id == active
                 labels[i].foregroundColor = NSColor.labelColor.cgColor
@@ -130,9 +147,11 @@ final class SpacesBar: CALayer {
                     // A quiet well in the glass: black would outweigh the current Space.
                     tile.backgroundColor = NSColor.labelColor.withAlphaComponent(0.1).cgColor
                 }
-                tile.borderWidth = current ? 2 : i == hovered ? 1 : 0.5
-                tile.borderColor = (current ? NSColor.controlAccentColor
-                    : NSColor.labelColor.withAlphaComponent(i == hovered ? 0.5 : 0.12)).cgColor
+                tile.borderWidth = current ? 0 : 0.5
+                tile.borderColor = NSColor.labelColor.withAlphaComponent(0.1).cgColor
+                rings[i].isHidden = !current && i != hovered
+                rings[i].borderWidth = current ? 2.5 : 1.5
+                rings[i].borderColor = (current ? NSColor.controlAccentColor : NSColor.labelColor.withAlphaComponent(0.3)).cgColor
                 tile.opacity = current || i == hovered ? 1 : 0.85
             }
         }
