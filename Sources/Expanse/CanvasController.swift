@@ -257,7 +257,9 @@ final class CanvasController: NSObject {
         if !isActive {
             if final { restoreSizesAndPlace() } else { commitInBackground() }
         } else if final {
-            // Zoomed out, there's no window to centre.
+            // Zoomed out, the layout still fits the new screen (the real windows follow on the way
+            // out), but there's no window to centre.
+            fitLayoutToScreen(margin: 0, tidy: false)
             screenResized = false
             centreAfterResize = nil
         }
@@ -1396,10 +1398,15 @@ final class CanvasController: NSObject {
             remove(w)
         }
 
+        // Windows put back where the saved layout had them (at launch, after the lock screen, an
+        // app that had windows last time opening again) come with the sizes and spots of the
+        // screen it was saved on, a laptop's say: fit the layout to this one before anything moves.
+        if restoredAny { fitLayoutToScreen(margin: 0, tidy: false) }
+
         // Windows that opened since the last scan (see arrive), and any that came back from a
         // move (see cameBack), move together, off the main thread; and when several opened at
         // once, there's one glide, to the one in front.
-        if arrivals.place || replaceAny { commitInBackground() }
+        if arrivals.place || replaceAny || restoredAny && !firstSync { commitInBackground() }
         if let w = arrivals.glide.first(where: { focusedWindowByApp[$0.pid] == $0.id })
             ?? arrivals.glide.max(by: { $0.id < $1.id }) {
             glideWhenIdle(to: w)
