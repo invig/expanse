@@ -29,9 +29,8 @@ final class SpacesBar: CALayer {
     override init() {
         super.init()
         heading.string = "Spaces"
-        // A module title, as in Control Center: the strongest text in the panel.
-        heading.fontSize = 13
-        heading.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        heading.fontSize = 11
+        heading.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         addSublayer(heading)
         isHidden = true
     }
@@ -67,7 +66,7 @@ final class SpacesBar: CALayer {
         (tiles + rings + labels).forEach(addSublayer)
         let width = Self.inset * 2 + CGFloat(spaces.count) * (Self.tile.width + Self.gap) - Self.gap
         bounds = CGRect(x: 0, y: 0, width: width, height: Minimap.size.height)
-        heading.frame = CGRect(x: Self.inset, y: Minimap.size.height - 27, width: 160, height: 16)
+        heading.frame = CGRect(x: Self.inset, y: Minimap.size.height - 25, width: 120, height: 14)
         styleTiles()
     }
 
@@ -134,12 +133,13 @@ final class SpacesBar: CALayer {
     /// The Space you're on is ringed in the accent colour and named in bold; the one under the
     /// pointer gets a quiet ring. (The others aren't dimmed: that would read as disabled.)
     private func styleTiles() {
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         appearance.performAsCurrentDrawingAppearance {
             // Text in a layer gets no vibrancy from the glass, so secondary text is darker than
             // secondaryLabelColor, or it would be too faint to read.
-            heading.foregroundColor = NSColor.labelColor.cgColor
+            heading.foregroundColor = (dark ? NSColor.labelColor : NSColor.labelColor.withAlphaComponent(0.75)).cgColor
             for (i, tile) in tiles.enumerated() {
                 let current = spaces[i].id == active
                 labels[i].foregroundColor = NSColor.labelColor.cgColor

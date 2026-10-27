@@ -36,16 +36,14 @@ final class Minimap: CALayer {
         addSublayer(viewportShape)
 
         title.string = "Canvas"
-        // A module title, as the Spaces strip's.
-        title.fontSize = 13
-        title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        title.frame = CGRect(x: 14, y: Minimap.size.height - 27, width: 120, height: 16)
+        title.fontSize = 11
+        title.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        title.frame = CGRect(x: 14, y: Minimap.size.height - 25, width: 120, height: 14)
         addSublayer(title)
         zoomText.fontSize = 11
         zoomText.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         zoomText.alignmentMode = .right
-        // (On the title's baseline: text layers draw from the top, and 11pt sits 2pt lower than 13pt.)
-        zoomText.frame = CGRect(x: Minimap.size.width - 74, y: Minimap.size.height - 27, width: 60, height: 14)
+        zoomText.frame = CGRect(x: Minimap.size.width - 74, y: Minimap.size.height - 25, width: 60, height: 14)
         addSublayer(zoomText)
     }
 
@@ -70,9 +68,9 @@ final class Minimap: CALayer {
         appearance.performAsCurrentDrawingAppearance {
             // Quieter than the viewport, each with an edge so overlapping windows stay apart: a
             // dark seam on light glass (a light one would outline them like stickers), light on dark.
-            windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.38 : 0.32).cgColor
+            windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.38 : 0.2).cgColor
             windowsShape.strokeColor = (dark ? NSColor.windowBackgroundColor.withAlphaComponent(0.5)
-                : NSColor.labelColor.withAlphaComponent(0.22)).cgColor
+                : NSColor.labelColor.withAlphaComponent(0.24)).cgColor
             windowsShape.lineWidth = dark ? 0.75 : 0.5
             // Where you are, in the accent colour, as the current Space is beside it.
             viewportFill.fillColor = NSColor.controlAccentColor.withAlphaComponent(dark ? 0.14 : 0.1).cgColor
@@ -80,8 +78,9 @@ final class Minimap: CALayer {
             quietRing = NSColor.labelColor.withAlphaComponent(dark ? 0.35 : 0.28).cgColor
             viewportShape.strokeColor = viewportFill.isHidden ? quietRing : accentRing
             // (Darker than secondaryLabelColor: text in a layer gets no vibrancy from the glass.)
-            title.foregroundColor = NSColor.labelColor.cgColor
-            zoomText.foregroundColor = NSColor.labelColor.withAlphaComponent(dark ? 0.8 : 0.85).cgColor
+            let secondary = dark ? NSColor.labelColor : NSColor.labelColor.withAlphaComponent(0.75)
+            title.foregroundColor = secondary.cgColor
+            zoomText.foregroundColor = secondary.cgColor
         }
         CATransaction.commit()
     }
@@ -102,8 +101,7 @@ final class Minimap: CALayer {
             let path = CGMutablePath()
             for r in windows {
                 let m = toMap(r)
-                // Crisp: windows, not pebbles.
-                let radius = Self.radius(for: m, min: 1, max: 2, share: 0.1)
+                let radius = Self.radius(for: m, min: 2, max: 3, share: 0.18)
                 path.addRoundedRect(in: m, cornerWidth: radius, cornerHeight: radius)
             }
             windowsShape.path = path
