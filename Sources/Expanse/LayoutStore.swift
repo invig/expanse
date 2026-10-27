@@ -42,12 +42,14 @@ struct SavedLayout: Codable {
 }
 
 enum LayoutStore {
-    private static var url: URL {
+    private static var folder: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = support.appendingPathComponent("Expanse", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("layout.json")
+        return dir
     }
+
+    private static var url: URL { folder.appendingPathComponent("layout.json") }
 
     static func load() -> SavedLayout? {
         guard let data = try? Data(contentsOf: url) else { return nil }
@@ -55,10 +57,52 @@ enum LayoutStore {
     }
 
     static func save(_ layout: SavedLayout) {
+        write(layout, to: url)
+    }
+
+    private static func write(_ layout: SavedLayout, to url: URL) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(layout) else { return }
         try? data.write(to: url, options: .atomic)
+    }
+
+    // MARK: Snapshots
+
+    /// Earlier layouts to go back to (Restore Layout in the menu), newest first. One is taken when
+    /// the layout has changed and the newest is `snapshotSpacing` old, so they're minutes apart,
+    /// not one per window move; only the newest `snapshotsKept` stay.
+    struct Snapshot {
+        let date: Date
+        let url: URL
+    }
+    static let snapshotsKept = 3
+    static let snapshotSpacing: TimeInterval = 15 * 60
+
+    private static var snapshotFolder: URL {
+        let dir = folder.appendingPathComponent("Snapshots", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func snapshots() -> [Snapshot] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: snapshotFolder, includingPropertiesForKeys: nil)) ?? []
+        return files.compactMap { file in
+            // Named for the time they were taken (seconds since 1970).
+            guard file.pathExtension == "json", let t = TimeInterval(file.deletingPathExtension().lastPathComponent) else { return nil }
+            return Snapshot(date: Date(timeIntervalSince1970: t), url: file)
+        }.sorted { $0.date > $1.date }
+    }
+
+    static func saveSnapshot(_ layout: SavedLayout) {
+        let now = Int(Date().timeIntervalSince1970)
+        write(layout, to: snapshotFolder.appendingPathComponent("\(now).json"))
+        for old in snapshots().dropFirst(snapshotsKept) { try? FileManager.default.removeItem(at: old.url) }
+    }
+
+    static func load(_ snapshot: Snapshot) -> SavedLayout? {
+        guard let data = try? Data(contentsOf: snapshot.url) else { return nil }
+        return try? JSONDecoder().decode(SavedLayout.self, from: data)
     }
 
     /// Window titles can be private (document names, mail subjects), so the layout file stores

@@ -946,6 +946,54 @@ final class CanvasController: NSObject {
         guard let data = try? JSONEncoder().encode(layout), data != lastSavedLayout else { return }
         lastSavedLayout = data
         LayoutStore.save(layout)
+        if Date().timeIntervalSince(lastSnapshotAt) >= LayoutStore.snapshotSpacing { snapshot(layout) }
+        lastLayout = layout
+    }
+
+    /// When the newest snapshot was taken (see LayoutStore.Snapshot).
+    private var lastSnapshotAt = LayoutStore.snapshots().first?.date ?? .distantPast
+    /// The layout as last saved, for a snapshot before restoring another.
+    private var lastLayout: SavedLayout?
+
+    private func snapshot(_ layout: SavedLayout) {
+        LayoutStore.saveSnapshot(layout)
+        lastSnapshotAt = Date()
+    }
+
+    /// Puts every window back where `layout` (a snapshot) had it; windows it doesn't know stay
+    /// where they are. The layout it replaces becomes a snapshot itself, so this can be undone.
+    /// Shown zoomed out, like Tidy Up.
+    func restoreLayout(_ layout: SavedLayout) {
+        guard !isPaused else { return }
+        guard !gliding else { whenIdle { [weak self] in self?.restoreLayout(layout) }; return }
+        guard isActive else {
+            enter(zoomOut: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                if self?.isActive == true { self?.restoreLayout(layout) }
+            }
+            return
+        }
+        save()
+        if let lastLayout { snapshot(lastLayout) }
+        var pool = layout.windows
+        let open = Set(windows.map { LayoutStore.windowKey(pid: $0.pid, id: $0.id) })
+        var restored = 0
+        for w in windows {
+            guard let e = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid,
+                                                open: open, from: &pool) else { continue }
+            w.canvasFrame.origin = CGPoint(x: e.x, y: e.y)
+            if let hx = e.hx, let hy = e.hy { w.home = CGPoint(x: hx, y: hy) }
+            if let pw = e.pw, let ph = e.ph, pw > 0 { w.preferredSize = CGSize(width: pw, height: ph) }
+            if let sw = e.w, let sh = e.h, let ax = w.ax,
+               abs(sw - w.canvasFrame.width) > 1 || abs(sh - w.canvasFrame.height) > 1 {
+                w.canvasFrame.size = resizeReal(w, ax, to: CGSize(width: sw, height: sh))
+            }
+            restored += 1
+        }
+        logger.info("restored a layout: \(restored) of \(self.windows.count) windows")
+        view.render()
+        animate(to: fitCamera())
+        scheduleSave()
     }
 
     /// ⌥ + pinch-in anywhere opens the canvas.
