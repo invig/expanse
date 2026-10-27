@@ -21,15 +21,30 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var configured: (size: CGSize, fps: Int) = (.zero, 0)
     private var window: SCWindow?
     private var starting = false
+    /// Bumped by each start, so the answer to one that was given up on (see start) is ignored.
+    private var startToken = 0
     /// Whether the stream should be running; a pause during start-up stops it once it's up.
     private var wanted = false
 
     var isRunning: Bool { stream != nil || starting }
 
+    /// How long to wait for replayd, which runs every capture on the Mac. When it's restarted (or
+    /// stuck), requests already sent never get an answer, and waiting for one would leave a stream
+    /// "starting" for ever, or a snapshot holding one of the few places (see pumpSnapshots).
+    static let replaydTimeout: TimeInterval = 5
+
     func start(window: SCWindow, pixelSize: CGSize, fps: Int) {
         wanted = true
         guard !isRunning else { return }
         starting = true
+        startToken += 1
+        let token = startToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.replaydTimeout) { [weak self] in
+            guard let self, self.starting, self.startToken == token else { return }
+            logger.info("stream start for \(window.windowID) timed out")
+            self.starting = false
+            self.startToken += 1
+        }
         self.window = window
         self.pixelSize = pixelSize
         self.fps = fps
@@ -51,6 +66,11 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             stream.startCapture { [weak self] error in
                 DispatchQueue.main.async {
                     guard let self else { return }
+                    // Given up on meanwhile: not this capture's stream any more.
+                    guard self.startToken == token else {
+                        if error == nil { self.queue.async { stream.stopCapture(completionHandler: nil) } }
+                        return
+                    }
                     self.starting = false
                     if let error {
                         logger.error("startCapture failed for \(window.windowID): \(error.localizedDescription)")
@@ -68,14 +88,25 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// frame. `completion` runs on the main thread either way.
     func snapshot(window: SCWindow, pixelSize: CGSize, completion: @escaping (_ ok: Bool) -> Void) {
         let config = Self.configuration(pixelSize: pixelSize, fps: 1)
+        // Once, on the main thread: when replayd answers, or when it's taken too long.
+        var finished = false
+        let finish = { (ok: Bool) in
+            guard !finished else { return }
+            finished = true
+            completion(ok)
+        }
         queue.async { [weak self] in
             let filter = SCContentFilter(desktopIndependentWindow: window)
             SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: config) { sample, error in
                 let ok = sample?.imageBuffer != nil
                 if let self, let sample, ok { FramePump.shared.post(sample, for: self, snapshot: true) }
                 if let error { logger.info("snapshot of \(window.windowID) failed: \(error.localizedDescription, privacy: .public)") }
-                DispatchQueue.main.async { completion(ok) }
+                DispatchQueue.main.async { finish(ok) }
             }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.replaydTimeout) {
+            if !finished { logger.info("snapshot of \(window.windowID) timed out") }
+            finish(false)
         }
     }
 
