@@ -177,6 +177,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "pause": controller.pause()
             case "resume": controller.resume()
             case "dump": controller.dump()
+            case "appearance":
+                // Light or dark for Expanse alone, to check its look in both (anything else: the Mac's).
+                let names: [String: NSAppearance.Name] = ["light": .aqua, "dark": .darkAqua]
+                NSApp.appearance = (query["mode"]).flatMap { names[$0] }.flatMap { NSAppearance(named: $0) }
             case "screen":
                 if let w = number("w"), let h = number("h") {
                     controller.simulateScreen(CGSize(width: w, height: h))
