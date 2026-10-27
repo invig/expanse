@@ -500,6 +500,14 @@ final class CanvasController: NSObject {
         }
     }
 
+    /// ⌃⌥C: the window you're in, to the middle of the screen, with the same glide as a hop.
+    /// Zoomed out, back to 100% on the window you were last in.
+    func centreCurrentWindow() {
+        guard !isPaused, let w = currentWindow() else { return }
+        logger.info("centre \(w.appName, privacy: .public)[\(w.id)]")
+        focus(w)
+    }
+
     /// Center `w` at 100% and make it the active window, from either mode.
     func focus(_ w: ManagedWindow) {
         if isActive { exit(focus: w) } else { glide(to: w) }

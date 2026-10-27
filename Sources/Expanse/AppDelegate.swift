@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var hotKey: HotKey?
     private var centreHotKey: HotKey?
+    private var centreWindowHotKey: HotKey?
     private var arrowHotKeys: [HotKey] = []
     private let centreItem = NSMenuItem(title: "Auto-Centre Focused Window", action: #selector(toggleAutoCentre), keyEquivalent: "`")
     private var signalSources: [DispatchSourceSignal] = []
@@ -66,6 +67,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // ⌥⇧` toggles auto-centring.
         centreHotKey = HotKey(keyCode: kVK_ANSI_Grave, modifiers: optionKey | shiftKey, id: 2) { [weak self] in
             self?.toggleAutoCentre()
+        }
+        // ⌃⌥C centres the window you're in (as Rectangle's Center does; ⌃Space is editors'
+        // autocomplete, and macOS's input-source switch for anyone with two keyboard layouts).
+        centreWindowHotKey = HotKey(keyCode: kVK_ANSI_C, modifiers: controlKey | optionKey, id: 3) { [weak self] in
+            self?.controller.centreCurrentWindow()
         }
         controller.start()
     }
@@ -141,6 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             func index(_ key: String) -> Int? { number(key).flatMap { Int(exactly: $0) } }
             switch command {
             case "toggle": controller.toggle()
+            case "centre", "center": controller.centreCurrentWindow()
             case "enter": controller.enter(zoomOut: query["zoomOut"] != "0")
             case "exit": controller.exit()
             case "fit": controller.animate(to: controller.fitCamera())
@@ -227,6 +234,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             cornerMenu.addItem(item)
         }
         menu.addItem(cornerItem)
+        let centreWindow = NSMenuItem(title: "Centre Current Window", action: #selector(centreCurrentWindow), keyEquivalent: "c")
+        centreWindow.keyEquivalentModifierMask = [.control, .option]
+        menu.addItem(centreWindow)
         centreItem.keyEquivalentModifierMask = [.option, .shift]
         centreItem.target = self
         menu.addItem(centreItem)
@@ -266,6 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleCanvas() { controller.whenIdle { [weak self] in self?.controller.toggle() } }
+    @objc private func centreCurrentWindow() { controller.whenIdle { [weak self] in self?.controller.centreCurrentWindow() } }
     @objc private func restoreAll() { controller.whenIdle { [weak self] in self?.controller.restoreAll() } }
     /// The walkthrough is an ordinary window: zoomed out, leave the canvas first, or it would
     /// open underneath.
@@ -302,7 +313,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// The canvas's own commands wait until Expanse has started (see turnOn).
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        let canvasOnly: Set<Selector> = [#selector(toggleCanvas), #selector(togglePause), #selector(tidy), #selector(restoreAll)]
+        let canvasOnly: Set<Selector> = [#selector(toggleCanvas), #selector(togglePause), #selector(tidy), #selector(restoreAll),
+                                         #selector(centreCurrentWindow)]
         return isOn || !canvasOnly.contains(menuItem.action ?? #selector(showWelcome))
     }
 }

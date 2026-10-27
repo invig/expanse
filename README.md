@@ -108,6 +108,7 @@ tells you which ones are in the way; to change them yourself:
 | <kbd>⌥</kbd><kbd>`</kbd>, or rest the pointer in a screen corner | Zoom out to every window, and back to where you were |
 | Click a window | Fly to it, centred at 100%, and use it |
 | <kbd>⌃</kbd> + <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> | Jump to the nearest window in that direction |
+| <kbd>⌃</kbd><kbd>⌥</kbd><kbd>C</kbd> | Centre the window you're in |
 | Pinch, or <kbd>⌘</kbd> + scroll | Zoom the canvas around the pointer |
 | Two-finger scroll, or <kbd>Space</kbd> + drag | Pan |
 | Scroll or pinch on empty desktop | Start moving around the canvas from 100% |
@@ -128,6 +129,7 @@ tells you which ones are in the way; to change them yourself:
 open "expanse://toggle"            # zoom out / back
 open "expanse://tidy"
 open "expanse://nav?dir=left"      # left | right | up | down
+open "expanse://centre"            # the window you're in, to the middle
 open "expanse://focus?app=Safari"
 open "expanse://space?name=Safari"  # a full-screen app's Space, or "Desktop"
 open "expanse://pause"             # windows back to the macOS layout

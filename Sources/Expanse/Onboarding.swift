@@ -722,6 +722,7 @@ private struct ReadyPage: View {
         (["⌥", "`"], "Zoom out to every window, and back"),
         (["Click"], "Dive into a window"),
         (["⌃", "← → ↑ ↓"], "Hop to the nearest window that way"),
+        (["⌃", "⌥", "C"], "Centre the window you're in"),
         (["Pinch", "Scroll"], "Zoom and pan the canvas"),
         (["Space", "Drag"], "Hold Space and drag to move around"),
         (["Drag"], "Move windows; they snap into place"),
