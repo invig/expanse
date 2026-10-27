@@ -158,6 +158,16 @@ final class CanvasController: NSObject {
     // MARK: Display changes
 
     private var lastViewportSize: CGSize = .zero
+    /// The screen changed size since the layout was last fitted to it (see restoreSizesAndPlace).
+    private var screenResized = false
+    private weak var centreAfterResize: ManagedWindow?
+
+    /// The window you're in: the front app's focused window or, failing that (at the lock screen,
+    /// say), the front-most one on screen.
+    private func currentWindow() -> ManagedWindow? {
+        if let app = NSWorkspace.shared.frontmostApplication, let w = focusedWindow(of: app.processIdentifier) { return w }
+        return windows.last { !$0.parked }
+    }
     /// True while displays are changing: macOS shoves windows around and we must not
     /// mistake that for the user moving them.
     private var suspendTracking = false
@@ -182,6 +192,9 @@ final class CanvasController: NSObject {
 
     private func displaysWillChange() {
         guard !isPaused else { return }
+        // The window you're in, before macOS shuffles windows (or the lock screen hides it): it
+        // goes in the middle once the layout fits the new screen (see restoreSizesAndPlace).
+        if centreAfterResize == nil { centreAfterResize = currentWindow() }
         suspendTracking = true
         settleUntil = .distantFuture
         relayoutWork.forEach { $0.cancel() }
@@ -229,6 +242,7 @@ final class CanvasController: NSObject {
             camera = Camera.centered(on: center, scale: camera.scale, viewSize: newSize)
             if !isActive { camera.origin = CGPoint(x: camera.origin.x.rounded(), y: camera.origin.y.rounded()) }
             logger.info("display changed: \(NSStringFromSize(self.lastViewportSize), privacy: .public) -> \(NSStringFromSize(newSize), privacy: .public)")
+            screenResized = true
         }
         lastViewportSize = newSize
         updateOverlayFrame()
@@ -237,6 +251,10 @@ final class CanvasController: NSObject {
         windows.forEach { $0.lastPlaced = nil }
         if !isActive {
             if final { restoreSizesAndPlace() } else { commitInBackground() }
+        } else if final {
+            // Zoomed out, there's no window to centre.
+            screenResized = false
+            centreAfterResize = nil
         }
         view.render()
         if final {
@@ -263,6 +281,14 @@ final class CanvasController: NSObject {
         // Same as Tidy Up: sizes back to what you chose (capped at this screen), overlaps pushed
         // apart, clusters pulled back to the standard gap.
         fitLayoutToScreen(margin: 0, tidy: false)
+        // The screen changed size: the window you were in goes in the middle. Fitting moves windows
+        // (the layout tightens on a smaller screen), so the old middle can be somewhere else now.
+        if screenResized, let w = centreAfterResize ?? currentWindow(), windows.contains(where: { $0 === w }) {
+            camera = focusCamera(for: w)
+            logger.info("display change: centred on \(w.appName, privacy: .public)[\(w.id)]")
+        }
+        screenResized = false
+        centreAfterResize = nil
         view.render()
         // Like a glide's last step: input waits while the real windows move in the background.
         gliding = true
@@ -714,6 +740,8 @@ final class CanvasController: NSObject {
     /// Whether `w` moving now, not by you, is down to a full-screen window coming or going (see
     /// movedAroundFullScreen). If so it's noted, to be put back.
     private func movedByFullScreen(_ w: ManagedWindow, inFullScreenSpace: Bool) -> Bool {
+        // A display change moves every window (and the Space with it): that's its own business.
+        guard !suspendTracking else { return false }
         guard inFullScreenSpace || CACurrentMediaTime() < fullScreenSettleUntil else { return false }
         if movedAroundFullScreen.insert(w.id).inserted {
             logger.info("\(w.appName, privacy: .public)[\(w.id)] moved as a full-screen window came or went; putting it back")
@@ -848,7 +876,10 @@ final class CanvasController: NSObject {
         // empty, and saving would wipe the layout and the crash-recovery originals.
         guard !isPaused, hasSynced else { return }
         // While no window is shrunk for a smaller screen, the canvas layout is the home layout.
-        if !isDerived { windows.forEach { $0.home = $0.canvasFrame.origin } }
+        // Not while the screen is changing: coming back to the big screen, macOS gives windows
+        // their big sizes back before Expanse has put them back where they were, and the
+        // tightened layout would become home.
+        if !isDerived, !suspendTracking { windows.forEach { $0.home = $0.canvasFrame.origin } }
         // Saved positions are canvas coordinates relative to a scale-1 camera.
         let center = camera.center(in: viewSize)
         let layout = SavedLayout(
@@ -1644,7 +1675,12 @@ final class CanvasController: NSObject {
             updateCapture(w)
         }
 
-        let origins = Self.derive(home: home, sizes: windows.map(\.canvasFrame.size))
+        // A point or two off its home size is an app rounding, not a smaller screen: counted as
+        // home, or the windows beyond it would creep a point every time the screen changes.
+        let sizes = zip(windows, home).map { w, h in
+            abs(w.canvasFrame.width - h.width) <= 2 && abs(w.canvasFrame.height - h.height) <= 2 ? h.size : w.canvasFrame.size
+        }
+        let origins = Self.derive(home: home, sizes: sizes)
         var frames = zip(origins, windows).map { CGRect(origin: $0, size: $1.canvasFrame.size) }
         // Only overlaps this screen caused, pushed apart to the standard gap. Windows you have
         // overlapping in the home layout stay that way (pushing them apart would push everything
