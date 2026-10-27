@@ -139,7 +139,7 @@ final class SpacesBar: CALayer {
         appearance.performAsCurrentDrawingAppearance {
             // Text in a layer gets no vibrancy from the glass, so secondary text is darker than
             // secondaryLabelColor, or it would be too faint to read.
-            heading.foregroundColor = NSColor.labelColor.withAlphaComponent(dark ? 0.8 : 0.7).cgColor
+            heading.foregroundColor = (dark ? NSColor.labelColor : NSColor.labelColor.withAlphaComponent(0.75)).cgColor
             for (i, tile) in tiles.enumerated() {
                 let current = spaces[i].id == active
                 labels[i].foregroundColor = NSColor.labelColor.cgColor

@@ -341,7 +341,6 @@ final class CanvasView: NSView {
         }
         if let mp = minimapPoint(e) {
             drag = .minimap
-            NSCursor.closedHand.set()
             controller.center(on: minimap.canvasPoint(at: mp))
             return
         }
@@ -454,8 +453,6 @@ final class CanvasView: NSView {
             }
         case .pan:
             if spaceHeld { NSCursor.openHand.set() }
-        case .minimap:
-            (spaceHeld || minimapPoint(e) != nil ? NSCursor.openHand : NSCursor.arrow).set()
         default:
             break
         }
@@ -464,15 +461,9 @@ final class CanvasView: NSView {
     }
 
     override func mouseMoved(with e: NSEvent) {
-        guard controller.isActive else { minimap.hovered = false; return }
+        guard controller.isActive else { return }
         let bar = spacesBarHit(e)
         spacesBar.hovered = bar.tile
-        let overMap = minimapPoint(e) != nil
-        if overMap != minimap.hovered {
-            minimap.hovered = overMap
-            // The map pans: an open hand over it, as for panning with Space held.
-            if !spaceHeld { (overMap ? NSCursor.openHand : NSCursor.arrow).set() }
-        }
         let w = minimapPoint(e) == nil && !bar.over ? controller.window(atView: point(e)) : nil
         if w !== hovered {
             hovered?.node.label.string = hovered?.appName
