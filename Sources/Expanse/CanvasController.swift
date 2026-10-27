@@ -128,7 +128,18 @@ final class CanvasController: NSObject {
     /// found there is hidden, not moved, even if a placement failed to register (apps answer
     /// slowly around sleep and wake), so it must never take that spot as its canvas position.
     private func inParkingCorner(_ p: CGPoint) -> Bool {
-        p.x >= screenRectCG.maxX - 12 && p.y >= screenRectCG.maxY - 80
+        let corner = parkingCorner
+        return p.x >= corner.x && p.y >= corner.y
+    }
+
+    /// Top-left of the parking corner. macOS nudges a parked window back until a strip of it is
+    /// inside the usable screen area (30-50pt up), and a Dock that's always shown shrinks that
+    /// area: so the corner is measured from the usable area's edges, not the screen's.
+    private var parkingCorner: CGPoint {
+        let f = screen.frame, usable = screen.visibleFrame
+        let right = screenRectCG.maxX - max(0, f.maxX - usable.maxX)
+        let bottom = screenRectCG.maxY - max(0, usable.minY - f.minY)
+        return CGPoint(x: right - 40, y: bottom - 80)
     }
 
     private var viewSize: CGSize { viewport.size }
@@ -1022,7 +1033,7 @@ final class CanvasController: NSObject {
 
     private func scanInput() -> ScanInput {
         var input = ScanInput(kinds: windowKinds, live: !isActive && !suspendTracking,
-                              corner: CGPoint(x: screenRectCG.maxX - 12, y: screenRectCG.maxY - 80),
+                              corner: parkingCorner,
                               moves: ManagedWindow.moves, camera: camera)
         let vp = viewport
         for w in windows {
