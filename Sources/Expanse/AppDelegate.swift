@@ -25,11 +25,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let canRecord = CGPreflightScreenCaptureAccess()
         logger.info("accessibility=\(trusted) screenRecording=\(canRecord)")
         Onboarding.hotCorner = controller.hotCorner
-        if Onboarding.needed { Onboarding.show {} }
+        // Expanse stays off (it moves no windows and takes no shortcuts) until the walkthrough is
+        // finished, skipped or closed: setting up shouldn't have windows moving under you.
+        if Onboarding.needed { Onboarding.show { [weak self] in self?.turnOn() } } else { turnOn() }
         // Launching Expanse again while it's running shows this window (see main.swift).
         DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.invignation.expanse.showWelcome"),
                                                             object: nil, queue: .main) { _ in Onboarding.show {} }
 
+        // Never leave windows stranded in the corner: restore them on SIGTERM / SIGINT too.
+        for sig in [SIGTERM, SIGINT] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler { NSApp.terminate(nil) }
+            source.resume()
+            signalSources.append(source)
+        }
+
+        Updater.shared.onReady = { [weak self] release in self?.updateReady(release) }
+        Updater.shared.start()
+    }
+
+    /// Expanse has started: the canvas and its shortcuts.
+    private var isOn = false
+
+    private func turnOn() {
+        guard !isOn else { return }
+        isOn = true
         // ⌥` toggles the canvas.
         hotKey = HotKey(keyCode: kVK_ANSI_Grave, modifiers: optionKey, id: 1) { [weak self] in
             self?.controller.toggle()
@@ -46,20 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         centreHotKey = HotKey(keyCode: kVK_ANSI_Grave, modifiers: optionKey | shiftKey, id: 2) { [weak self] in
             self?.toggleAutoCentre()
         }
-
-        // Never leave windows stranded in the corner: restore them on SIGTERM / SIGINT too.
-        for sig in [SIGTERM, SIGINT] {
-            signal(sig, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-            source.setEventHandler { NSApp.terminate(nil) }
-            source.resume()
-            signalSources.append(source)
-        }
-
         controller.start()
-
-        Updater.shared.onReady = { [weak self] release in self?.updateReady(release) }
-        Updater.shared.start()
     }
 
     /// An update has downloaded and checked out: say so, once per version unless you asked.
@@ -115,6 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let debugCommands: Set<String> = ["place", "prefer", "dump", "screen", "update"]
             if debugCommands.contains(command), !UserDefaults.standard.bool(forKey: "debugURLCommands") {
                 logger.info("ignored debug URL command \(command, privacy: .public) (debugURLCommands is off)")
+                continue
+            }
+            if !isOn, !["welcome", "update"].contains(command) {
+                logger.info("ignored URL command \(command, privacy: .public): Expanse starts once the walkthrough is done")
                 continue
             }
             if command == "nav" { runURLCommand(command, query: query, number: number); continue }
@@ -190,6 +202,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Never started: nothing to put back, and the saved layout must not be overwritten.
+        guard isOn else { return }
         controller.shutdown()
     }
 
@@ -281,7 +295,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
-    @objc private func openScreenRecordingSettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+    @objc private func openScreenRecordingSettings() { ScreenRecordingAccess.request() }
+
+    /// The canvas's own commands wait until Expanse has started (see turnOn).
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        let canvasOnly: Set<Selector> = [#selector(toggleCanvas), #selector(togglePause), #selector(tidy), #selector(restoreAll)]
+        return isOn || !canvasOnly.contains(menuItem.action ?? #selector(showWelcome))
     }
 }

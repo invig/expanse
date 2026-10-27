@@ -10,14 +10,24 @@ enum Onboarding {
     static var hotCorner: HotCorner?
     private static var window: NSWindow?
     private static let closer = Closer()
+    /// Runs once the walkthrough closes, finished or not.
+    private static var onFinish: (() -> Void)?
 
-    /// Closing with the title-bar button releases the window, its view and the status timer.
+    /// Closing (with the title-bar button too) releases the window, its view and the status timer.
     private final class Closer: NSObject, NSWindowDelegate {
         func windowWillClose(_ notification: Notification) {
             Onboarding.window?.contentView = nil
             Onboarding.window = nil
+            let finish = Onboarding.onFinish
+            Onboarding.onFinish = nil
+            finish?()
         }
     }
+
+    static func markDone() { UserDefaults.standard.set(true, forKey: doneKey) }
+
+    /// The walkthrough floats above the canvas; a macOS prompt it should let in front lowers it.
+    static func float(_ on: Bool) { window?.level = on ? .modalPanel : .normal }
 
     /// First launch, or a permission is missing.
     static var needed: Bool {
@@ -30,10 +40,10 @@ enum Onboarding {
             window.makeKeyAndOrderFront(nil)
             return
         }
+        Onboarding.onFinish = onFinish
         let view = OnboardingView {
-            UserDefaults.standard.set(true, forKey: doneKey)
+            markDone()
             window?.close()
-            onFinish()
         }
         let w = NSWindow(contentRect: NSRect(origin: .zero, size: OnboardingView.size),
                          styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -101,6 +111,68 @@ enum SystemShortcuts {
     }
 }
 
+// MARK: - Asking for Screen Recording
+
+/// macOS adds Expanse to the Screen Recording list in System Settings only once you've answered
+/// its prompt; asking alone doesn't. So opening System Settings as well shows a list without
+/// Expanse, over a prompt hidden behind it. Instead: ask, and bring the prompt to the front. Its
+/// Open System Settings button goes there with Expanse listed. macOS asks only the first time;
+/// with no prompt, Expanse is listed already and System Settings opens straight away.
+enum ScreenRecordingAccess {
+    private static let settings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+
+    static func request() {
+        guard !CGPreflightScreenCaptureAccess() else { NSWorkspace.shared.open(settings); return }
+        let before = Set(prompts().map(\.id))
+        _ = CGRequestScreenCaptureAccess()
+        // The prompt takes a moment to appear.
+        var tries = 0
+        func look() {
+            if let prompt = prompts().first(where: { !before.contains($0.id) }) {
+                bringForward(prompt)
+            } else if tries < 15 {
+                tries += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: look)
+            } else {
+                NSWorkspace.shared.open(settings)
+            }
+        }
+        look()
+    }
+
+    /// macOS's permission prompts on screen.
+    private static func prompts() -> [(pid: pid_t, id: CGWindowID)] {
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return info.compactMap { w in
+            guard w[kCGWindowOwnerName as String] as? String == "universalAccessAuthWarn",
+                  let pid = w[kCGWindowOwnerPID as String] as? pid_t,
+                  let id = w[kCGWindowNumber as String] as? CGWindowID else { return nil }
+            return (pid, id)
+        }
+    }
+
+    /// In front of everything, the floating walkthrough included, until it's answered.
+    private static func bringForward(_ prompt: (pid: pid_t, id: CGWindowID)) {
+        logger.info("Screen Recording prompt up [\(prompt.id)]")
+        Onboarding.float(false)
+        if let app = NSRunningApplication(processIdentifier: prompt.pid) {
+            NSApp.yieldActivation(to: app)
+            app.activate()
+        }
+        if let ax = AX.windows(pid: prompt.pid).first(where: { AX.windowID($0) == prompt.id }) {
+            AXUIElementPerformAction(ax, kAXRaiseAction as CFString)
+        }
+        func waitForAnswer() {
+            if prompts().contains(where: { $0.id == prompt.id }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: waitForAnswer)
+            } else {
+                Onboarding.float(true)
+            }
+        }
+        waitForAnswer()
+    }
+}
+
 extension HotCorner.Corner {
     /// The screen corners this setting uses.
     var corners: [HotCorner.Corner] {
@@ -163,9 +235,7 @@ final class SetupModel: ObservableObject {
 
     func requestScreenRecording() {
         screenRecordingRequested = true
-        if !CGRequestScreenCaptureAccess() {
-            open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-        }
+        ScreenRecordingAccess.request()
     }
 
     func openScreenRecording() { open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") }
@@ -289,9 +359,14 @@ struct OnboardingView: View {
             // Until a step is done, its own button is the one to press; this one only skips.
             Button(page == 0 ? "Get started" : page == pages - 1 ? "Start using Expanse" : stepDone ? "Continue" : "Skip for now") {
                 if page == pages - 1 {
-                    finish()
-                    // Screen Recording only takes effect after a relaunch; do it for them.
-                    if model.screenRecordingRequested && !model.screenRecording { model.relaunch() }
+                    // Screen Recording only takes effect after a relaunch: do it for them, and
+                    // Expanse starts then rather than just before quitting.
+                    if model.screenRecordingRequested && !model.screenRecording {
+                        Onboarding.markDone()
+                        model.relaunch()
+                    } else {
+                        finish()
+                    }
                 } else {
                     go(to: page + 1)
                 }
@@ -561,7 +636,7 @@ private struct ScreenRecordingPage: View {
                      actionTitle: model.screenRecordingRequested && !model.screenRecording ? "Reopen Expanse" : "Open Settings",
                      action: model.screenRecording ? model.openScreenRecording
                          : model.screenRecordingRequested ? model.relaunch : model.requestScreenRecording)
-            HowTo(steps: ["Click **Open Settings**.",
+            HowTo(steps: ["Click **Open Settings**, then **Open System Settings** when macOS asks.",
                           "Switch on **Expanse**.",
                           "Click **Reopen Expanse**: macOS applies it the next time Expanse opens."])
         }
