@@ -1,89 +1,211 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 560" width="1200" height="560" role="img" aria-labelledby="title desc">
   <title id="title">Expanse</title>
-  <desc id="desc">Windows arranged on an infinite canvas, seen zoomed out, with a minimap in the corner.</desc>
+  <desc id="desc">Windows in groups on an infinite canvas in deep space, seen zoomed out: the focused window outlined in amber, more windows running off the edges, and the Spaces strip and minimap in the corner.</desc>
   <defs>
-    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#28205c"/>
-      <stop offset="0.55" stop-color="#6b388c"/>
-      <stop offset="1" stop-color="#ee8c6b"/>
+    <linearGradient id="space" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c1b40"/>
+      <stop offset="0.6" stop-color="#03091e"/>
+      <stop offset="1" stop-color="#000"/>
     </linearGradient>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="140%">
-      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000" flood-opacity="0.28"/>
+    <radialGradient id="portal" cx="0.47" cy="0.46" r="0.6">
+      <stop offset="0" stop-color="#3086d1" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#3086d1" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#3086d1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="corner" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#80d1fc" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#80d1fc" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c1b40"/><stop offset="1" stop-color="#03091e"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity="0.45"/>
     </filter>
-    <symbol id="win" viewBox="0 0 100 70" preserveAspectRatio="none">
-      <rect width="100" height="70" rx="3" fill="#fbfbfd"/>
-    </symbol>
+    <filter id="focus" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#f2a33a" flood-opacity="0.65"/>
+    </filter>
+    <clipPath id="card"><rect width="1200" height="560" rx="20"/></clipPath>
   </defs>
-  <rect width="1200" height="560" rx="20" fill="url(#sky)"/>
+  <g clip-path="url(#card)" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Helvetica, Arial, sans-serif">
+  <rect width="1200" height="560" fill="url(#space)"/>
+  <rect width="1200" height="560" fill="url(#portal)"/>
+  <g>
+    <circle cx="544" cy="313" r="1.2" fill="#fff" fill-opacity="0.52"/>
+    <circle cx="1020" cy="111" r="1.6" fill="#fff" fill-opacity="0.54"/>
+    <circle cx="735" cy="109" r="1.2" fill="#fff" fill-opacity="0.43"/>
+    <circle cx="115" cy="448" r="0.6" fill="#fff" fill-opacity="0.61"/>
+    <circle cx="477" cy="254" r="1.6" fill="#fff" fill-opacity="0.64"/>
+    <circle cx="746" cy="460" r="0.6" fill="#fff" fill-opacity="0.29"/>
+    <circle cx="233" cy="140" r="0.6" fill="#fff" fill-opacity="0.72"/>
+    <circle cx="394" cy="329" r="0.8" fill="#fff" fill-opacity="0.56"/>
+    <circle cx="766" cy="280" r="0.6" fill="#fff" fill-opacity="0.52"/>
+    <circle cx="337" cy="551" r="0.6" fill="#fff" fill-opacity="0.67"/>
+    <circle cx="381" cy="133" r="1.0" fill="#fff" fill-opacity="0.27"/>
+    <circle cx="675" cy="67" r="0.6" fill="#fff" fill-opacity="0.76"/>
+    <circle cx="466" cy="529" r="0.6" fill="#fff" fill-opacity="0.38"/>
+    <circle cx="1106" cy="36" r="1.2" fill="#fff" fill-opacity="0.84"/>
+    <circle cx="479" cy="48" r="0.8" fill="#fff" fill-opacity="0.72"/>
+    <circle cx="327" cy="55" r="1.0" fill="#fff" fill-opacity="0.26"/>
+    <circle cx="494" cy="510" r="0.8" fill="#fff" fill-opacity="0.4"/>
+    <circle cx="128" cy="41" r="1.2" fill="#fff" fill-opacity="0.36"/>
+    <circle cx="670" cy="251" r="0.8" fill="#fff" fill-opacity="0.84"/>
+    <circle cx="919" cy="236" r="1.2" fill="#fff" fill-opacity="0.32"/>
+    <circle cx="506" cy="124" r="1.0" fill="#fff" fill-opacity="0.77"/>
+    <circle cx="1162" cy="330" r="0.6" fill="#fff" fill-opacity="0.38"/>
+    <circle cx="475" cy="473" r="1.6" fill="#fff" fill-opacity="0.31"/>
+    <circle cx="1179" cy="124" r="1.0" fill="#fff" fill-opacity="0.26"/>
+    <circle cx="731" cy="460" r="1.2" fill="#fff" fill-opacity="0.29"/>
+    <circle cx="115" cy="325" r="0.8" fill="#fff" fill-opacity="0.26"/>
+    <circle cx="445" cy="346" r="0.8" fill="#fff" fill-opacity="0.83"/>
+    <circle cx="581" cy="321" r="1.2" fill="#fff" fill-opacity="0.36"/>
+    <circle cx="190" cy="502" r="1.6" fill="#fff" fill-opacity="0.4"/>
+    <circle cx="233" cy="410" r="1.6" fill="#fff" fill-opacity="0.37"/>
+    <circle cx="1133" cy="488" r="1.6" fill="#fff" fill-opacity="0.3"/>
+    <circle cx="64" cy="67" r="1.6" fill="#fff" fill-opacity="0.83"/>
+    <circle cx="290" cy="391" r="1.0" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="1079" cy="275" r="1.6" fill="#fff" fill-opacity="0.36"/>
+    <circle cx="861" cy="45" r="0.8" fill="#fff" fill-opacity="0.54"/>
+    <circle cx="782" cy="343" r="0.6" fill="#fff" fill-opacity="0.42"/>
+    <circle cx="1094" cy="119" r="0.6" fill="#fff" fill-opacity="0.29"/>
+    <circle cx="495" cy="143" r="0.6" fill="#fff" fill-opacity="0.36"/>
+    <circle cx="445" cy="319" r="0.8" fill="#fff" fill-opacity="0.31"/>
+    <circle cx="172" cy="253" r="1.0" fill="#fff" fill-opacity="0.64"/>
+    <circle cx="826" cy="326" r="0.8" fill="#fff" fill-opacity="0.6"/>
+    <circle cx="1102" cy="266" r="1.0" fill="#fff" fill-opacity="0.67"/>
+    <circle cx="1148" cy="20" r="0.6" fill="#fff" fill-opacity="0.54"/>
+    <circle cx="873" cy="181" r="0.6" fill="#fff" fill-opacity="0.3"/>
+    <circle cx="655" cy="409" r="0.8" fill="#fff" fill-opacity="0.73"/>
+    <circle cx="1091" cy="199" r="1.2" fill="#fff" fill-opacity="0.79"/>
+    <circle cx="1039" cy="235" r="0.6" fill="#fff" fill-opacity="0.77"/>
+    <circle cx="686" cy="348" r="1.2" fill="#fff" fill-opacity="0.48"/>
+    <circle cx="23" cy="47" r="0.6" fill="#fff" fill-opacity="0.63"/>
+    <circle cx="1184" cy="487" r="1.0" fill="#fff" fill-opacity="0.48"/>
+    <circle cx="878" cy="324" r="1.2" fill="#fff" fill-opacity="0.53"/>
+    <circle cx="649" cy="290" r="1.6" fill="#fff" fill-opacity="0.27"/>
+    <circle cx="720" cy="270" r="0.8" fill="#fff" fill-opacity="0.82"/>
+    <circle cx="142" cy="432" r="1.2" fill="#fff" fill-opacity="0.4"/>
+    <circle cx="21" cy="172" r="1.6" fill="#fff" fill-opacity="0.37"/>
+    <circle cx="209" cy="501" r="1.2" fill="#fff" fill-opacity="0.55"/>
+    <circle cx="294" cy="228" r="1.0" fill="#fff" fill-opacity="0.37"/>
+    <circle cx="518" cy="446" r="0.8" fill="#fff" fill-opacity="0.78"/>
+    <circle cx="463" cy="325" r="1.0" fill="#fff" fill-opacity="0.38"/>
+    <circle cx="167" cy="199" r="0.6" fill="#fff" fill-opacity="0.68"/>
+    <circle cx="1133" cy="159" r="0.8" fill="#fff" fill-opacity="0.32"/>
+    <circle cx="566" cy="512" r="1.2" fill="#fff" fill-opacity="0.48"/>
+    <circle cx="624" cy="374" r="1.6" fill="#fff" fill-opacity="0.52"/>
+    <circle cx="96" cy="25" r="1.6" fill="#fff" fill-opacity="0.27"/>
+    <circle cx="847" cy="318" r="1.0" fill="#fff" fill-opacity="0.64"/>
+    <circle cx="676" cy="357" r="1.2" fill="#fff" fill-opacity="0.52"/>
+    <circle cx="37" cy="459" r="0.8" fill="#fff" fill-opacity="0.72"/>
+    <circle cx="951" cy="543" r="0.6" fill="#fff" fill-opacity="0.52"/>
+    <circle cx="754" cy="364" r="1.0" fill="#fff" fill-opacity="0.83"/>
+    <circle cx="818" cy="116" r="1.2" fill="#fff" fill-opacity="0.4"/>
+    <circle cx="854" cy="419" r="1.6" fill="#fff" fill-opacity="0.68"/>
+    <circle cx="220" cy="156" r="1.0" fill="#fff" fill-opacity="0.57"/>
+    <circle cx="1129" cy="280" r="0.8" fill="#fff" fill-opacity="0.49"/>
+    <circle cx="946" cy="501" r="0.6" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="1065" cy="219" r="1.2" fill="#fff" fill-opacity="0.52"/>
+    <circle cx="749" cy="503" r="1.2" fill="#fff" fill-opacity="0.58"/>
+    <circle cx="781" cy="281" r="1.0" fill="#fff" fill-opacity="0.53"/>
+    <circle cx="779" cy="119" r="0.6" fill="#fff" fill-opacity="0.38"/>
+    <circle cx="1074" cy="541" r="1.0" fill="#fff" fill-opacity="0.57"/>
+    <circle cx="944" cy="182" r="0.6" fill="#fff" fill-opacity="0.46"/>
+  </g>
 
-  <!-- A cluster of windows, snapped together with even gaps -->
-  <g filter="url(#shadow)" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Helvetica, Arial, sans-serif">
-    <!-- browser -->
-    <g transform="translate(120 120)">
-      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Browser</text>
-      <rect width="300" height="200" rx="9" fill="#fbfbfd"/>
-      <rect width="300" height="26" rx="9" fill="#e8e8ef"/><rect y="17" width="300" height="9" fill="#e8e8ef"/>
-      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
-      <rect x="20" y="44" width="170" height="12" rx="3" fill="#7d6cf2" fill-opacity="0.55"/>
-      <rect x="20" y="66" width="260" height="7" rx="3" fill="#c9c8d6"/><rect x="20" y="80" width="230" height="7" rx="3" fill="#c9c8d6"/>
-      <rect x="20" y="102" width="120" height="78" rx="6" fill="#efe9ff"/><rect x="152" y="102" width="128" height="78" rx="6" fill="#ffe9e1"/>
+  <!-- Out past the edges: the canvas keeps going -->
+  <g filter="url(#shadow)" opacity="0.6">
+    <g transform="translate(-70 150)"><rect width="150" height="100" rx="8" fill="#eef3fb"/><rect x="14" y="34" width="110" height="7" rx="3" fill="#3086d1" fill-opacity="0.35"/><rect x="14" y="48" width="90" height="7" rx="3" fill="#3086d1" fill-opacity="0.2"/></g>
+    <g transform="translate(1110 120)"><text x="2" y="-10" fill="#fff" fill-opacity="0.82" font-size="13" font-weight="600">Music</text><rect width="160" height="110" rx="8" fill="#eef3fb"/><circle cx="11.2" cy="10.4" r="3.6" fill="#ff5f57"/><circle cx="22.4" cy="10.4" r="3.6" fill="#febc2e"/><circle cx="33.6" cy="10.4" r="3.6" fill="#28c840"/><rect x="12" y="28" width="30" height="30" rx="4" fill="#3086d1" fill-opacity="0.75"/><rect x="48" y="28" width="30" height="30" rx="4" fill="#f2a33a" fill-opacity="0.75"/><rect x="84" y="28" width="30" height="30" rx="4" fill="#0c1b40" fill-opacity="0.75"/></g>
+    <g transform="translate(300 560)"><rect width="220" height="120" rx="8" fill="#eef3fb"/></g>
+    <g transform="translate(900 -60)"><rect width="180" height="110" rx="8" fill="#eef3fb"/><rect x="14" y="80" width="120" height="7" rx="3" fill="#3086d1" fill-opacity="0.25"/></g>
+  </g>
+
+  <!-- A group: browser, editor; calendar, notes, snapped with even gaps -->
+  <g filter="url(#shadow)">
+    <g transform="translate(120 150)">
+      <text x="2" y="-10" fill="#fff" fill-opacity="0.82" font-size="13" font-weight="600">Safari</text>
+      <rect width="300" height="190" rx="9" fill="#f6f9fd"/>
+      <rect width="300" height="26" rx="9" fill="#e3ebf6"/><rect y="17" width="300" height="9" fill="#e3ebf6"/>
+      <circle cx="14.0" cy="13.0" r="4.5" fill="#ff5f57"/><circle cx="28.0" cy="13.0" r="4.5" fill="#febc2e"/><circle cx="42.0" cy="13.0" r="4.5" fill="#28c840"/>
+      <rect x="20" y="44" width="170" height="12" rx="3" fill="#2474c4" fill-opacity="0.6"/>
+      <rect x="20" y="66" width="260" height="7" rx="3" fill="#c3d0e3"/><rect x="20" y="80" width="230" height="7" rx="3" fill="#c3d0e3"/>
+      <rect x="20" y="100" width="120" height="72" rx="6" fill="#dceafa"/><rect x="152" y="100" width="128" height="72" rx="6" fill="#fdebd3"/>
     </g>
-    <!-- editor -->
-    <g transform="translate(440 120)">
-      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Editor</text>
-      <rect width="250" height="200" rx="9" fill="#1f2130"/>
-      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
-      <rect x="18" y="40" width="80" height="7" rx="3" fill="#c792ea"/><rect x="104" y="40" width="110" height="7" rx="3" fill="#82aaff"/>
-      <rect x="32" y="56" width="140" height="7" rx="3" fill="#89ddff" fill-opacity="0.8"/><rect x="32" y="72" width="170" height="7" rx="3" fill="#c3e88d" fill-opacity="0.8"/>
-      <rect x="32" y="88" width="96" height="7" rx="3" fill="#f78c6c" fill-opacity="0.8"/><rect x="18" y="104" width="40" height="7" rx="3" fill="#c792ea"/>
-      <rect x="18" y="128" width="150" height="7" rx="3" fill="#676e95"/><rect x="18" y="144" width="190" height="7" rx="3" fill="#676e95"/>
+    <g transform="translate(440 150)">
+      <text x="2" y="-10" fill="#fff" fill-opacity="0.82" font-size="13" font-weight="600">Xcode</text>
+      <rect width="240" height="190" rx="9" fill="#0f1a33"/>
+      <circle cx="14.0" cy="13.0" r="4.5" fill="#ff5f57"/><circle cx="28.0" cy="13.0" r="4.5" fill="#febc2e"/><circle cx="42.0" cy="13.0" r="4.5" fill="#28c840"/>
+      <rect x="18" y="40" width="80" height="7" rx="3" fill="#80d1fc"/><rect x="104" y="40" width="100" height="7" rx="3" fill="#3086d1"/>
+      <rect x="32" y="56" width="140" height="7" rx="3" fill="#80d1fc" fill-opacity="0.7"/><rect x="32" y="72" width="160" height="7" rx="3" fill="#f2a33a" fill-opacity="0.8"/>
+      <rect x="32" y="88" width="96" height="7" rx="3" fill="#3086d1" fill-opacity="0.9"/><rect x="18" y="104" width="40" height="7" rx="3" fill="#80d1fc"/>
+      <rect x="18" y="128" width="150" height="7" rx="3" fill="#2c3d63"/><rect x="18" y="144" width="186" height="7" rx="3" fill="#2c3d63"/>
     </g>
-    <!-- chat, the focused window -->
-    <g transform="translate(710 120)">
-      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Messages</text>
-      <rect width="170" height="200" rx="9" fill="#fbfbfd"/>
-      <rect width="170" height="200" rx="9" fill="none" stroke="#fff" stroke-width="3"/>
-      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
-      <rect x="14" y="40" width="96" height="22" rx="11" fill="#e9e9ef"/><rect x="60" y="72" width="96" height="22" rx="11" fill="#7d6cf2"/>
-      <rect x="14" y="104" width="120" height="22" rx="11" fill="#e9e9ef"/><rect x="74" y="136" width="82" height="22" rx="11" fill="#7d6cf2"/>
+    <g transform="translate(120 380)">
+      <text x="2" y="-10" fill="#fff" fill-opacity="0.82" font-size="13" font-weight="600">Calendar</text>
+      <rect width="300" height="110" rx="9" fill="#f6f9fd"/>
+      <circle cx="14.0" cy="13.0" r="4.5" fill="#ff5f57"/><circle cx="28.0" cy="13.0" r="4.5" fill="#febc2e"/><circle cx="42.0" cy="13.0" r="4.5" fill="#28c840"/>
+      <rect x="16" y="36" width="64" height="24" rx="4" fill="#dceafa"/><rect x="88" y="50" width="64" height="32" rx="4" fill="#cfe6fb"/>
+      <rect x="160" y="36" width="64" height="20" rx="4" fill="#fdebd3"/><rect x="232" y="58" width="52" height="34" rx="4" fill="#d6e2f3"/>
     </g>
-    <!-- second row -->
-    <g transform="translate(120 360)">
-      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Calendar</text>
-      <rect width="420" height="120" rx="9" fill="#fbfbfd"/>
-      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
-      <rect x="16" y="36" width="90" height="26" rx="4" fill="#d9f2e3"/><rect x="118" y="52" width="90" height="34" rx="4" fill="#e3e6ff"/>
-      <rect x="220" y="36" width="90" height="20" rx="4" fill="#ffe7cf"/><rect x="322" y="62" width="82" height="38" rx="4" fill="#ffd9e2"/>
-    </g>
-    <g transform="translate(560 360)">
-      <text x="2" y="-10" fill="#fff" fill-opacity="0.85" font-size="13" font-weight="600">Notes</text>
-      <rect width="320" height="120" rx="9" fill="#fffaf0"/>
-      <circle cx="14" cy="13" r="4.5" fill="#ff5f57"/><circle cx="28" cy="13" r="4.5" fill="#febc2e"/><circle cx="42" cy="13" r="4.5" fill="#28c840"/>
-      <rect x="18" y="38" width="150" height="9" rx="3" fill="#d4a017" fill-opacity="0.65"/>
-      <rect x="18" y="58" width="270" height="6" rx="3" fill="#d6cfbf"/><rect x="18" y="72" width="240" height="6" rx="3" fill="#d6cfbf"/><rect x="18" y="86" width="200" height="6" rx="3" fill="#d6cfbf"/>
+    <g transform="translate(440 380)">
+      <text x="2" y="-10" fill="#fff" fill-opacity="0.82" font-size="13" font-weight="600">Notes</text>
+      <rect width="240" height="110" rx="9" fill="#fdfaf3"/>
+      <circle cx="14.0" cy="13.0" r="4.5" fill="#ff5f57"/><circle cx="28.0" cy="13.0" r="4.5" fill="#febc2e"/><circle cx="42.0" cy="13.0" r="4.5" fill="#28c840"/>
+      <rect x="18" y="38" width="120" height="9" rx="3" fill="#f2a33a" fill-opacity="0.65"/>
+      <rect x="18" y="58" width="200" height="6" rx="3" fill="#ddd6c6"/><rect x="18" y="72" width="180" height="6" rx="3" fill="#ddd6c6"/><rect x="18" y="86" width="150" height="6" rx="3" fill="#ddd6c6"/>
     </g>
   </g>
 
-  <!-- A lone window further out on the canvas -->
-  <g transform="translate(955 300)" filter="url(#shadow)" opacity="0.9">
-    <rect width="120" height="80" rx="7" fill="#fbfbfd"/>
-    <circle cx="11" cy="10" r="3.5" fill="#ff5f57"/><circle cx="22" cy="10" r="3.5" fill="#febc2e"/><circle cx="33" cy="10" r="3.5" fill="#28c840"/>
-    <rect x="12" y="28" width="80" height="6" rx="3" fill="#c9c8d6"/><rect x="12" y="40" width="64" height="6" rx="3" fill="#c9c8d6"/>
+  <!-- Another group, a little way off: the focused window, outlined in amber -->
+  <g transform="translate(760 190)" filter="url(#focus)">
+    <text x="2" y="-10" fill="#fff" fill-opacity="0.82" font-size="13" font-weight="600">Messages</text>
+    <rect width="180" height="200" rx="9" fill="#f6f9fd"/>
+    <circle cx="14.0" cy="13.0" r="4.5" fill="#ff5f57"/><circle cx="28.0" cy="13.0" r="4.5" fill="#febc2e"/><circle cx="42.0" cy="13.0" r="4.5" fill="#28c840"/>
+    <rect x="14" y="40" width="100" height="22" rx="11" fill="#e3ebf6"/><rect x="66" y="72" width="100" height="22" rx="11" fill="#2474c4"/>
+    <rect x="14" y="104" width="124" height="22" rx="11" fill="#e3ebf6"/><rect x="80" y="136" width="86" height="22" rx="11" fill="#2474c4"/>
+    <rect width="180" height="200" rx="9" fill="none" stroke="#f2a33a" stroke-width="3"/>
+  </g>
+  <g transform="translate(960 190)" filter="url(#shadow)">
+    <text x="2" y="-10" fill="#fff" fill-opacity="0.82" font-size="13" font-weight="600">Finder</text>
+    <rect width="130" height="140" rx="9" fill="#f6f9fd"/>
+    <circle cx="14.0" cy="13.0" r="4.5" fill="#ff5f57"/><circle cx="28.0" cy="13.0" r="4.5" fill="#febc2e"/><circle cx="42.0" cy="13.0" r="4.5" fill="#28c840"/>
+    <rect x="0" y="26" width="38" height="114" fill="#e3ebf6"/>
+    <rect x="48" y="38" width="66" height="6" rx="3" fill="#c3d0e3"/><rect x="48" y="52" width="56" height="6" rx="3" fill="#c3d0e3"/><rect x="48" y="66" width="70" height="6" rx="3" fill="#c3d0e3"/><rect x="48" y="80" width="50" height="6" rx="3" fill="#c3d0e3"/>
   </g>
 
-  <!-- Minimap -->
-  <g transform="translate(1004 438)">
-    <rect width="168" height="102" rx="12" fill="#14121f" fill-opacity="0.88"/>
-    <rect x="16" y="18" width="40" height="27" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
-    <rect x="60" y="18" width="33" height="27" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
-    <rect x="97" y="18" width="22" height="27" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
-    <rect x="16" y="50" width="56" height="16" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
-    <rect x="76" y="50" width="43" height="16" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
-    <rect x="128" y="42" width="17" height="11" rx="1.5" fill="#d9d9e3" fill-opacity="0.8"/>
-    <rect x="12" y="13" width="140" height="58" rx="2" fill="none" stroke="#fff" stroke-opacity="0.9"/>
-    <text x="14" y="90" fill="#fff" fill-opacity="0.7" font-family="SF Mono, Menlo, monospace" font-size="11">42%</text>
+  <!-- A flick to the hot corner -->
+  <circle cx="1196" cy="4" r="90" fill="url(#corner)"/>
+  <path d="M1150 34 l0 22 l5.5 -5 l4 9 l3.6 -1.6 l-4 -8.8 l7.4 -0.2 z" fill="#fff" stroke="#000" stroke-opacity="0.5" stroke-width="1.2" stroke-linejoin="round"/>
+
+  <!-- Spaces and the minimap -->
+  <g transform="translate(762 418)">
+    <rect width="232" height="122" rx="12" fill="#0b1224" fill-opacity="0.9" stroke="#fff" stroke-opacity="0.08"/>
+    <text x="12" y="20" fill="#fff" fill-opacity="0.55" font-size="10" font-weight="600">Spaces</text>
+    <g transform="translate(10 32)">
+      <rect width="100" height="62" rx="6" fill="url(#tile)" stroke="#3086d1" stroke-width="2"/>
+      <rect x="10" y="12" width="22" height="15" rx="1.5" fill="#eef3fb" fill-opacity="0.85"/><rect x="35" y="12" width="17" height="15" rx="1.5" fill="#eef3fb" fill-opacity="0.85"/>
+      <rect x="10" y="30" width="22" height="9" rx="1.5" fill="#eef3fb" fill-opacity="0.85"/><rect x="35" y="30" width="17" height="9" rx="1.5" fill="#eef3fb" fill-opacity="0.85"/>
+      <rect x="62" y="16" width="13" height="16" rx="1.5" fill="#f2a33a" fill-opacity="0.9"/><rect x="78" y="16" width="10" height="11" rx="1.5" fill="#eef3fb" fill-opacity="0.85"/>
+      <text x="50" y="80" fill="#fff" fill-opacity="0.8" font-size="10" font-weight="500" text-anchor="middle">Canvas</text>
+    </g>
+    <g transform="translate(122 32)">
+      <rect width="100" height="62" rx="6" fill="#06080d" stroke="#fff" stroke-opacity="0.15"/>
+      <rect x="35" y="16" width="30" height="30" rx="7" fill="#2474c4"/><circle cx="50" cy="31" r="9" fill="none" stroke="#fff" stroke-width="2"/><path d="M47 28 l7 3 l-7 3 z" fill="#fff"/>
+      <text x="50" y="80" fill="#fff" fill-opacity="0.8" font-size="10" font-weight="500" text-anchor="middle">TV</text>
+    </g>
+  </g>
+  <g transform="translate(1006 418)">
+    <rect width="174" height="122" rx="12" fill="#0b1224" fill-opacity="0.9" stroke="#fff" stroke-opacity="0.08"/>
+    <rect x="16" y="22" width="38" height="24" rx="1.5" fill="#d9e2f0" fill-opacity="0.8"/><rect x="58" y="22" width="30" height="24" rx="1.5" fill="#d9e2f0" fill-opacity="0.8"/>
+    <rect x="16" y="50" width="38" height="14" rx="1.5" fill="#d9e2f0" fill-opacity="0.8"/><rect x="58" y="50" width="30" height="14" rx="1.5" fill="#d9e2f0" fill-opacity="0.8"/>
+    <rect x="98" y="27" width="22" height="26" rx="1.5" fill="#f2a33a" fill-opacity="0.9"/><rect x="124" y="27" width="16" height="18" rx="1.5" fill="#d9e2f0" fill-opacity="0.8"/>
+    <rect x="146" y="20" width="16" height="12" rx="1.5" fill="#d9e2f0" fill-opacity="0.5"/><rect x="6" y="38" width="8" height="10" rx="1.5" fill="#d9e2f0" fill-opacity="0.5"/>
+    <rect x="11" y="16" width="140" height="56" rx="2" fill="none" stroke="#fff" stroke-opacity="0.9"/>
+    <text x="14" y="108" fill="#80d1fc" fill-opacity="0.75" font-family="SF Mono, Menlo, monospace" font-size="11">42%</text>
   </g>
 
-  <text x="120" y="70" fill="#fff" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Helvetica, Arial, sans-serif" font-size="38" font-weight="700">Expanse</text>
-  <text x="280" y="70" fill="#fff" fill-opacity="0.75" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Helvetica, Arial, sans-serif" font-size="20">your Mac, on an infinite canvas</text>
+  <text x="120" y="78" fill="#fff" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', Helvetica, Arial, sans-serif" font-size="40" font-weight="700">Expanse</text>
+  <text x="290" y="78" fill="#80d1fc" fill-opacity="0.8" font-size="20">your Mac, on an infinite canvas</text>
+  </g>
 </svg>
