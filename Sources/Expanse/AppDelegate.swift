@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if Onboarding.needed { Onboarding.show { [weak self] in self?.turnOn() } } else { turnOn() }
         // Launching Expanse again while it's running shows this window (see main.swift).
         DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.invignation.expanse.showWelcome"),
-                                                            object: nil, queue: .main) { _ in Onboarding.show {} }
+                                                            object: nil, queue: .main) { [weak self] _ in self?.showWelcome() }
 
         // Never leave windows stranded in the corner: restore them on SIGTERM / SIGINT too.
         for sig in [SIGTERM, SIGINT] {
@@ -146,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "fit": controller.animate(to: controller.fitCamera())
             case "restore": controller.restoreAll()
             case "tidy": controller.tidy()
-            case "welcome": Onboarding.show {}
+            case "welcome": showWelcome()
             case "place":
                 if let id = windowID("id"), let x = number("x"), let y = number("y") {
                     controller.setCanvasOrigin(id, CGPoint(x: x, y: y), commit: query["commit"] == "1")
@@ -267,7 +267,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleCanvas() { controller.whenIdle { [weak self] in self?.controller.toggle() } }
     @objc private func restoreAll() { controller.whenIdle { [weak self] in self?.controller.restoreAll() } }
-    @objc private func showWelcome() { Onboarding.show {} }
+    /// The walkthrough is an ordinary window: zoomed out, leave the canvas first, or it would
+    /// open underneath.
+    @objc private func showWelcome() {
+        if controller.isActive, !controller.gliding { controller.exit() }
+        Onboarding.show {}
+    }
     @objc private func tidy() { controller.whenIdle { [weak self] in self?.controller.tidy() } }
     @objc private func pickCorner(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let corner = HotCorner.Corner(rawValue: raw) else { return }
@@ -291,11 +296,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func openAccessibilitySettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-    }
+    @objc private func openAccessibilitySettings() { Permissions.requestAccessibility() }
 
-    @objc private func openScreenRecordingSettings() { ScreenRecordingAccess.request() }
+    @objc private func openScreenRecordingSettings() { Permissions.requestScreenRecording() }
 
     /// The canvas's own commands wait until Expanse has started (see turnOn).
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

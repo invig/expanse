@@ -24,10 +24,14 @@ enum Onboarding {
         }
     }
 
-    static func markDone() { UserDefaults.standard.set(true, forKey: doneKey) }
+    /// The page you're on, until you've finished: the walkthrough picks up there after Expanse
+    /// reopens (Screen Recording takes effect only then).
+    static let pageKey = "onboardingPage"
 
-    /// The walkthrough floats above the canvas; a macOS prompt it should let in front lowers it.
-    static func float(_ on: Bool) { window?.level = on ? .modalPanel : .normal }
+    static func markDone() {
+        UserDefaults.standard.set(true, forKey: doneKey)
+        UserDefaults.standard.removeObject(forKey: pageKey)
+    }
 
     /// First launch, or a permission is missing.
     static var needed: Bool {
@@ -41,7 +45,8 @@ enum Onboarding {
             return
         }
         Onboarding.onFinish = onFinish
-        let view = OnboardingView {
+        let defaults = UserDefaults.standard
+        let view = OnboardingView(startPage: defaults.bool(forKey: doneKey) ? 0 : defaults.integer(forKey: pageKey)) {
             markDone()
             window?.close()
         }
@@ -51,10 +56,17 @@ enum Onboarding {
         w.titleVisibility = .hidden
         w.isMovableByWindowBackground = true
         w.isReleasedWhenClosed = false
-        // Above the canvas overlay, which sits just under the menu bar while zoomed out.
-        w.level = .modalPanel
-        w.contentView = NSHostingView(rootView: view)
+        // An ordinary window, so System Settings (and macOS's prompts) open in front of it. The
+        // canvas is never up meanwhile: Expanse starts once the walkthrough is done, and opening
+        // it from the menu leaves the canvas first.
+        // The page runs up under the see-through title bar, so the window is the page's size
+        // exactly. (Left to size the window itself, the hosting view adds the title bar's height,
+        // which showed as a strip along the bottom.)
+        let hosting = NSHostingView(rootView: view)
+        hosting.sizingOptions = []
+        w.contentView = hosting
         w.delegate = closer
+        w.setFrame(NSRect(origin: .zero, size: OnboardingView.size), display: false)
         w.center()
         window = w
         NSApp.activate(ignoringOtherApps: true)
@@ -111,20 +123,30 @@ enum SystemShortcuts {
     }
 }
 
-// MARK: - Asking for Screen Recording
+// MARK: - Asking for permissions
 
-/// macOS adds Expanse to the Screen Recording list in System Settings only once you've answered
-/// its prompt; asking alone doesn't. So opening System Settings as well shows a list without
-/// Expanse, over a prompt hidden behind it. Instead: ask, and bring the prompt to the front. Its
-/// Open System Settings button goes there with Expanse listed. macOS asks only the first time;
-/// with no prompt, Expanse is listed already and System Settings opens straight away.
-enum ScreenRecordingAccess {
-    private static let settings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+/// Asking macOS for Accessibility or Screen Recording. macOS asks you itself, with a prompt whose
+/// Open System Settings button goes to the right list (for Screen Recording, Expanse is only in
+/// that list once you've answered it). Opening System Settings as well would cover the prompt,
+/// so Expanse asks and brings the prompt to the front. macOS asks only the first time; with no
+/// prompt, System Settings opens straight away.
+enum Permissions {
+    private static let accessibility = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+    private static let screenRecording = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
 
-    static func request() {
-        guard !CGPreflightScreenCaptureAccess() else { NSWorkspace.shared.open(settings); return }
+    static func requestAccessibility() {
+        guard !AX.isTrusted(prompt: false) else { NSWorkspace.shared.open(accessibility); return }
+        ask(settings: accessibility) { _ = AX.isTrusted(prompt: true) }
+    }
+
+    static func requestScreenRecording() {
+        guard !CGPreflightScreenCaptureAccess() else { NSWorkspace.shared.open(screenRecording); return }
+        ask(settings: screenRecording) { _ = CGRequestScreenCaptureAccess() }
+    }
+
+    private static func ask(settings: URL, _ request: () -> Void) {
         let before = Set(prompts().map(\.id))
-        _ = CGRequestScreenCaptureAccess()
+        request()
         // The prompt takes a moment to appear.
         var tries = 0
         func look() {
@@ -151,10 +173,9 @@ enum ScreenRecordingAccess {
         }
     }
 
-    /// In front of everything, the floating walkthrough included, until it's answered.
+    /// In front of everything, the walkthrough included.
     private static func bringForward(_ prompt: (pid: pid_t, id: CGWindowID)) {
-        logger.info("Screen Recording prompt up [\(prompt.id)]")
-        Onboarding.float(false)
+        logger.info("permission prompt up [\(prompt.id)]")
         if let app = NSRunningApplication(processIdentifier: prompt.pid) {
             NSApp.yieldActivation(to: app)
             app.activate()
@@ -162,14 +183,6 @@ enum ScreenRecordingAccess {
         if let ax = AX.windows(pid: prompt.pid).first(where: { AX.windowID($0) == prompt.id }) {
             AXUIElementPerformAction(ax, kAXRaiseAction as CFString)
         }
-        func waitForAnswer() {
-            if prompts().contains(where: { $0.id == prompt.id }) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: waitForAnswer)
-            } else {
-                Onboarding.float(true)
-            }
-        }
-        waitForAnswer()
     }
 }
 
@@ -228,14 +241,11 @@ final class SetupModel: ObservableObject {
         if arrows != arrowsInTheWay { arrowsInTheWay = arrows }
     }
 
-    func requestAccessibility() {
-        _ = AX.isTrusted(prompt: true)   // adds Expanse to the list
-        open("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-    }
+    func requestAccessibility() { Permissions.requestAccessibility() }
 
     func requestScreenRecording() {
         screenRecordingRequested = true
-        ScreenRecordingAccess.request()
+        Permissions.requestScreenRecording()
     }
 
     func openScreenRecording() { open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") }
@@ -379,6 +389,8 @@ struct OnboardingView: View {
     private func go(to newPage: Int) {
         animateIn = true
         withAnimation(.easeOut(duration: 0.2)) { page = newPage }
+        // Reopening Expanse (for Screen Recording) comes back to this page.
+        UserDefaults.standard.set(newPage, forKey: Onboarding.pageKey)
     }
 }
 
@@ -616,7 +628,7 @@ private struct AccessibilityPage: View {
                        why: "macOS only lets an app move, resize and focus other apps’ windows once you switch on Accessibility for it.")
             StepCard(symbol: "hand.raised", title: "Accessibility", done: model.accessibility, doneText: "On",
                      problem: "Off", actionTitle: "Open Settings", action: model.requestAccessibility)
-            HowTo(steps: ["Click **Open Settings**.",
+            HowTo(steps: ["Click **Open Settings**, then **Open System Settings** when macOS asks.",
                           "Switch on **Expanse**. Not in the list? Press **+** and choose it."])
         }
     }
