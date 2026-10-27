@@ -25,8 +25,20 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var startToken = 0
     /// Whether the stream should be running; a pause during start-up stops it once it's up.
     private var wanted = false
+    /// Streams told to stop that haven't yet.
+    private var stopping = 0
+    /// pause(stopped:) callers waiting for every stream to have stopped.
+    private var whenStopped: [() -> Void] = []
 
     var isRunning: Bool { stream != nil || starting }
+    /// Nothing running, starting or still stopping.
+    var isStopped: Bool { !isRunning && stopping == 0 }
+
+    private func notifyStopped() {
+        let waiting = whenStopped
+        whenStopped = []
+        waiting.forEach { $0() }
+    }
 
     /// How long to wait for replayd, which runs every capture on the Mac. When it's restarted (or
     /// stuck), requests already sent never get an answer, and waiting for one would leave a stream
@@ -44,6 +56,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             logger.info("stream start for \(window.windowID) timed out")
             self.starting = false
             self.startToken += 1
+            if self.isStopped { self.notifyStopped() }
         }
         self.window = window
         self.pixelSize = pixelSize
@@ -60,7 +73,10 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                 try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.queue)
             } catch {
                 logger.error("addStreamOutput failed: \(error.localizedDescription)")
-                DispatchQueue.main.async { self.starting = false }
+                DispatchQueue.main.async {
+                    self.starting = false
+                    if self.isStopped { self.notifyStopped() }
+                }
                 return
             }
             stream.startCapture { [weak self] error in
@@ -74,10 +90,17 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                     self.starting = false
                     if let error {
                         logger.error("startCapture failed for \(window.windowID): \(error.localizedDescription)")
+                        if self.isStopped { self.notifyStopped() }
                         self.onStop?()
                     } else {
                         self.stream = stream
-                        if !self.wanted { self.pause() } else { self.restartIfResized() }
+                        if !self.wanted {
+                            self.pause()
+                        } else {
+                            // Wanted again meanwhile: nothing to wait for.
+                            self.notifyStopped()
+                            self.restartIfResized()
+                        }
                     }
                 }
             }
@@ -130,14 +153,29 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     /// Stop capturing but keep the callbacks, so start() can pick up again later. The layer
-    /// keeps showing the last frame meanwhile.
-    func pause() {
+    /// keeps showing the last frame meanwhile. `stopped`, if given, runs on the main thread once
+    /// no stream is left: straight away if none is running, else once it has stopped (a stream
+    /// still starting is stopped as soon as it's up; see start).
+    func pause(stopped: (() -> Void)? = nil) {
         wanted = false
         // Only the picture on the layer is needed now; let ScreenCaptureKit have the rest back.
         if recentSamples.count > 1 { recentSamples.removeFirst(recentSamples.count - 1) }
-        guard let stream else { return }
-        queue.async { stream.stopCapture(completionHandler: nil) }
+        if let stopped { whenStopped.append(stopped) }
+        guard let stream else {
+            if isStopped { notifyStopped() }
+            return
+        }
         self.stream = nil
+        stopping += 1
+        queue.async { [weak self] in
+            stream.stopCapture { _ in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.stopping -= 1
+                    if self.isStopped { self.notifyStopped() }
+                }
+            }
+        }
     }
 
     func stop() {
@@ -146,6 +184,8 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         stream = nil
         onFrame = nil
         onStop = nil
+        // The window's gone (or going): nothing left to wait for.
+        notifyStopped()
     }
 
     private static func configuration(pixelSize: CGSize, fps: Int) -> SCStreamConfiguration {

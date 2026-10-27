@@ -68,6 +68,8 @@ final class CanvasController: NSObject {
         var start: CFTimeInterval
         var duration: CFTimeInterval
         var completion: (() -> Void)?
+        /// Zooming back in to the real windows, which take over where it ends (see exit).
+        var handsBack = false
         var frames = 0
         var firstFrame: CFTimeInterval = 0
         var lastFrame: CFTimeInterval = 0
@@ -292,14 +294,18 @@ final class CanvasController: NSObject {
         view.render()
         // Like a glide's last step: input waits while the real windows move in the background.
         gliding = true
+        beginHandBack()
         commitAsync { [weak self] _ in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                guard let self else { return }
-                self.overlay.level = OverlayWindow.backdropLevel
-                self.isActive = false
-                self.gliding = false
-                self.view.render()
-                self.updateStreamingSoon()
+            self?.stopStreamsOnScreen {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    guard let self else { return }
+                    self.handingBackTo = nil
+                    self.overlay.level = OverlayWindow.backdropLevel
+                    self.isActive = false
+                    self.gliding = false
+                    self.view.render()
+                    self.updateStreamingSoon()
+                }
             }
         }
     }
@@ -547,6 +553,7 @@ final class CanvasController: NSObject {
     /// has started meanwhile, in which case it finishes the job.
     private func finishGlide(_ generation: Int, prep: CFTimeInterval) {
         let c0 = CACurrentMediaTime()
+        beginHandBack()
         commitAsync { moves in
             guard generation == self.glideGeneration else { return }
             logger.info("glide timing: prep \(Int(prep * 1000))ms, \(self.lastAnimationStats, privacy: .public), commit \(Int((CACurrentMediaTime() - c0) * 1000))ms")
@@ -581,29 +588,37 @@ final class CanvasController: NSObject {
     }
 
     /// Runs `handBack` (dropping the overlay behind the real windows) once the window server shows
-    /// `moves` done and focusing `w` has been applied, plus a frame to draw them. Otherwise, other
-    /// windows visibly blink on top: switching apps can bring the new app's windows forward after
-    /// the overlay drops, and windows not yet moved show the old layout. Never later than a
+    /// `moves` done, focusing `w` has been applied and the streams of windows on screen have
+    /// stopped, plus a frame to draw them. Otherwise, other windows visibly blink on top: switching
+    /// apps can bring the new app's windows forward after the overlay drops, windows not yet moved
+    /// show the old layout, and streamed ones show macOS's capture badge. Never later than a
     /// quarter of a second, so a slow app can't hold things up.
     private func focus(_ w: ManagedWindow?, after moves: [Move], thenHandBack handBack: @escaping () -> Void) {
         let asked = CACurrentMediaTime()
         let since = { Int((CACurrentMediaTime() - asked) * 1000) }
-        var done = false, focused: Int? = w == nil ? 0 : nil, landed: Int?
+        var done = false, focused: Int? = w == nil ? 0 : nil, landed: Int?, stopped: Int?
+        let area = handingBackTo
         let once = {
             guard !done else { return }
             done = true
+            // (Unless a newer hop has started handing back meanwhile.)
+            if self.handingBackTo == area { self.handingBackTo = nil }
             let waited = since()
             if waited > 60 {
-                logger.info("hand-back waited \(waited)ms: \(w?.appName ?? "-", privacy: .public) \(focused.map { "focused after \($0)ms" } ?? "not focused yet", privacy: .public), windows \(landed.map { "landed after \($0)ms" } ?? "still moving", privacy: .public)")
+                logger.info("hand-back waited \(waited)ms: \(w?.appName ?? "-", privacy: .public) \(focused.map { "focused after \($0)ms" } ?? "not focused yet", privacy: .public), windows \(landed.map { "landed after \($0)ms" } ?? "still moving", privacy: .public), streams \(stopped.map { "stopped after \($0)ms" } ?? "still stopping", privacy: .public)")
             }
             handBack()
         }
         let ready = {
-            if focused != nil, landed != nil { DispatchQueue.main.asyncAfter(deadline: .now() + 0.02, execute: once) }
+            if focused != nil, landed != nil, stopped != nil { DispatchQueue.main.asyncAfter(deadline: .now() + 0.02, execute: once) }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: once)
         whenOnScreen(moves, until: asked + 0.25) {
             landed = since()
+            ready()
+        }
+        stopStreamsOnScreen {
+            stopped = since()
             ready()
         }
         if let w {
@@ -1970,12 +1985,14 @@ final class CanvasController: NSObject {
 
     /// Every stream costs the window server work, and macOS marks every captured window with a
     /// purple indicator, so Expanse only captures pictures that can be seen: on the canvas and
-    /// during glides, windows in view or on the camera's path (the overlay covers the indicators);
-    /// at 100%, parked windows whose stand-in shows on the backdrop. Each window is captured once
-    /// when first seen; a paused window keeps its last picture. `start`: capture it; `keep`: don't
-    /// stop yet (a wider margin, so panning back and forth doesn't restart streams).
+    /// during glides, windows in view or on the camera's path (the overlay covers the indicators;
+    /// the windows it's handing back to stop first, see handingBackTo); at 100%, parked windows
+    /// whose stand-in shows on the backdrop. Each window is captured once when first seen; a
+    /// paused window keeps its last picture. `start`: capture it; `keep`: don't stop yet (a wider
+    /// margin, so panning back and forth doesn't restart streams).
     private func wantsCapture(_ w: ManagedWindow, in region: CGRect) -> (start: Bool, keep: Bool) {
         if w.needsFirstFrame { return (true, true) }
+        if let area = handBackArea, w.canvasFrame.intersects(area) { return (false, false) }
         guard isActive || w.parked else { return (false, false) }
         let near = region.insetBy(dx: -region.width * 0.1, dy: -region.height * 0.1)
         let far = region.insetBy(dx: -region.width * 0.35, dy: -region.height * 0.35)
@@ -2191,8 +2208,47 @@ final class CanvasController: NSObject {
 
     private var streamingWork: DispatchWorkItem?
 
-    /// After handing back to the real windows: keep capturing a moment longer (quick successive
-    /// hops reuse the streams), then stop for windows that are on screen.
+    /// While handing back to the real windows (from a glide's last third, or the start of the zoom
+    /// back in from the canvas, until the overlay drops), the canvas area they'll show. Windows
+    /// there don't stream meanwhile: macOS would badge them (see stopStreamsOnScreen), and a
+    /// stream started now would only come up once the real window shows.
+    private var handingBackTo: CGRect?
+
+    private var handBackArea: CGRect? {
+        if let a = animation, a.handsBack { return a.to.toCanvas(CGRect(origin: .zero, size: viewSize)) }
+        return handingBackTo
+    }
+
+    private func beginHandBack() {
+        handingBackTo = camera.toCanvas(CGRect(origin: .zero, size: viewSize))
+    }
+
+    /// While a window is streamed, macOS draws a purple badge over its traffic lights, inside the
+    /// app's own window, where nothing can cover it (one-off pictures and whole-screen captures
+    /// don't get one). So before the overlay drops, the streams of windows that will be on screen
+    /// stop; `done` runs once they have and the badges have gone (about 50ms later), or after a
+    /// quarter of a second whatever happens.
+    private func stopStreamsOnScreen(then done: @escaping () -> Void) {
+        let streamed = windows.filter { !$0.parked && !$0.capture.isStopped }
+        guard !streamed.isEmpty else { done(); return }
+        var left = streamed.count, finished = false
+        let finish = {
+            guard !finished else { return }
+            finished = true
+            done()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: finish)
+        for w in streamed {
+            w.capture.pause {
+                left -= 1
+                if left == 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: finish) }
+            }
+        }
+    }
+
+    /// After handing back to the real windows (whose streams have stopped; see
+    /// stopStreamsOnScreen): keep capturing parked ones a moment longer, so quick successive hops
+    /// reuse their streams.
     private func updateStreamingSoon() {
         streamingWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
@@ -2421,13 +2477,15 @@ final class CanvasController: NSObject {
             // Straight back where you were, unless you've moved around since zooming out.
             target = returnCamera ?? Camera.centered(on: camera.center(in: viewSize), scale: 1, viewSize: viewSize)
         }
-        animate(to: target, duration: 0.18) { [weak self] in
+        animate(to: target, duration: 0.18, handsBack: true) { [weak self] in
             guard let self else { return }
             // Like a glide's last step: input waits while the real windows move in the background.
             self.gliding = true
+            self.beginHandBack()
             self.commitAsync { moves in
                 // Sink the overlay beneath the real windows so it becomes the desktop.
                 let handBack = {
+                    self.handingBackTo = nil
                     self.overlay.level = OverlayWindow.backdropLevel
                     self.isActive = false
                     self.gliding = false
@@ -2704,8 +2762,11 @@ final class CanvasController: NSObject {
 
     // MARK: Animation
 
-    func animate(to target: Camera, duration: CFTimeInterval = 0.22, completion: (() -> Void)? = nil) {
-        animation = CameraAnimation(from: camera, to: target, start: CACurrentMediaTime(), duration: duration, completion: completion)
+    func animate(to target: Camera, duration: CFTimeInterval = 0.22, handsBack: Bool = false, completion: (() -> Void)? = nil) {
+        animation = CameraAnimation(from: camera, to: target, start: CACurrentMediaTime(), duration: duration,
+                                    completion: completion, handsBack: handsBack)
+        // Moving on (a hop during the last one's hand-back, say): nothing's being handed back to.
+        handingBackTo = nil
         if isActive {
             // Pictures for everything the camera will pass over, before it gets there.
             let screen = CGRect(origin: .zero, size: viewSize)
@@ -2742,6 +2803,13 @@ final class CanvasController: NSObject {
         let s = exp(lerp(log(a.from.scale), log(a.to.scale), e))
         let c0 = a.from.center(in: viewSize), c1 = a.to.center(in: viewSize)
         camera = Camera.centered(on: CGPoint(x: lerp(c0.x, c1.x, e), y: lerp(c0.y, c1.y, e)), scale: s, viewSize: viewSize)
+        // A glide's last third moves the camera a few points: the windows it lands on stop
+        // streaming now (see handingBackTo), as replayd takes 20ms a stream to stop them, which
+        // the hand-back would otherwise wait for.
+        if gliding, glideTarget != nil, handingBackTo == nil, t >= 0.65 {
+            handingBackTo = a.to.toCanvas(CGRect(origin: .zero, size: viewSize))
+            updateStreaming(reconfigure: false)
+        }
         if t >= 1 {
             lastAnimationStats = "first frame after \(Int((a.firstFrame - a.start) * 1000))ms, \(a.frames) frames, max gap \(Int(a.maxGap * 1000))ms"
             if a.maxGap > 0.034 || a.firstFrame - a.start > 0.034 { logger.info("slow: animation \(self.lastAnimationStats, privacy: .public)") }
