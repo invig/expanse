@@ -92,6 +92,11 @@ final class SpacesBar: CALayer {
             image.contentsGravity = .resizeAspect
             image.frame = CGRect(x: (Self.tile.width - 36) / 2, y: (Self.tile.height - 36) / 2, width: 36, height: 36)
             image.contentsScale = scale
+            // Lifted off the well a little, like an icon in the Dock.
+            image.shadowColor = NSColor.black.cgColor
+            image.shadowOpacity = 0.25
+            image.shadowRadius = 2
+            image.shadowOffset = CGSize(width: 0, height: -1)
             tile.addSublayer(image)
         }
         return tile
@@ -111,7 +116,6 @@ final class SpacesBar: CALayer {
     /// The Space you're on is outlined in the accent colour and named in bold; the one under the
     /// pointer lights up.
     private func styleTiles() {
-        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         appearance.performAsCurrentDrawingAppearance {
@@ -123,10 +127,8 @@ final class SpacesBar: CALayer {
                 labels[i].foregroundColor = NSColor.labelColor.cgColor
                 labels[i].font = NSFont.systemFont(ofSize: 11, weight: current ? .semibold : .regular)
                 if !spaces[i].isDesktop {
-                    // Black like the Space itself in dark; in light, black would outweigh the
-                    // current Space, so a quiet grey.
-                    tile.backgroundColor = dark ? NSColor(white: 0.06, alpha: 1).cgColor
-                        : NSColor.labelColor.withAlphaComponent(0.1).cgColor
+                    // A quiet well in the glass: black would outweigh the current Space.
+                    tile.backgroundColor = NSColor.labelColor.withAlphaComponent(0.1).cgColor
                 }
                 tile.borderWidth = current ? 2 : i == hovered ? 1 : 0.5
                 tile.borderColor = (current ? NSColor.controlAccentColor

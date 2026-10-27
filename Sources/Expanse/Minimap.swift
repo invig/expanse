@@ -1,12 +1,15 @@
 import AppKit
 
-/// Bottom-right overview: every window as a block, the viewport as an outline, the zoom level.
-/// Drawn on glass (see GlassPanel), in the colours applyAppearance gives it.
+/// Bottom-right overview of the canvas: every window as a block, the viewport as an outline,
+/// the zoom level. Drawn on glass (see GlassPanel), in the colours applyAppearance gives it.
 final class Minimap: CALayer {
     static let size = CGSize(width: 208, height: 136)
 
     private let windowsShape = CAShapeLayer()
+    /// The viewport's tint, under the windows (its outline, viewportShape, is over them).
+    private let viewportFill = CAShapeLayer()
     private let viewportShape = CAShapeLayer()
+    private let title = CATextLayer()
     private let zoomText = CATextLayer()
     private let mapArea: CGRect
 
@@ -18,17 +21,27 @@ final class Minimap: CALayer {
     private var drawn: (windows: [CGRect], bounds: CGRect)?
 
     override init() {
-        // Below a header row level with the Spaces strip's ("Spaces" there, the zoom here).
+        // Below a header row level with the Spaces strip's: the title, and the zoom as its value.
         mapArea = CGRect(x: 10, y: 10, width: Minimap.size.width - 20, height: Minimap.size.height - 42)
         super.init()
         bounds = CGRect(origin: .zero, size: Minimap.size)
+        addSublayer(viewportFill)
+        windowsShape.lineWidth = 1
+        windowsShape.lineJoin = .round
         addSublayer(windowsShape)
-        viewportShape.lineWidth = 1.5
+        viewportShape.lineWidth = 2
+        viewportShape.fillColor = nil
         addSublayer(viewportShape)
 
+        title.string = "Canvas"
+        title.fontSize = 11
+        title.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        title.frame = CGRect(x: 10, y: Minimap.size.height - 25, width: 120, height: 14)
+        addSublayer(title)
         zoomText.fontSize = 11
-        zoomText.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        zoomText.frame = CGRect(x: 10, y: Minimap.size.height - 25, width: 80, height: 14)
+        zoomText.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        zoomText.alignmentMode = .right
+        zoomText.frame = CGRect(x: Minimap.size.width - 70, y: Minimap.size.height - 25, width: 60, height: 14)
         addSublayer(zoomText)
     }
 
@@ -41,6 +54,7 @@ final class Minimap: CALayer {
 
     func setContentsScale(_ s: CGFloat) {
         contentsScale = s
+        title.contentsScale = s
         zoomText.contentsScale = s
     }
 
@@ -50,11 +64,14 @@ final class Minimap: CALayer {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         appearance.performAsCurrentDrawingAppearance {
-            windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.5 : 0.35).cgColor
+            // Quieter than the viewport, each with an edge so overlapping windows stay apart.
+            windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.38 : 0.3).cgColor
+            windowsShape.strokeColor = NSColor.windowBackgroundColor.withAlphaComponent(dark ? 0.5 : 0.75).cgColor
             // Where you are, in the accent colour, as the current Space is beside it.
-            viewportShape.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+            viewportFill.fillColor = NSColor.controlAccentColor.withAlphaComponent(dark ? 0.14 : 0.1).cgColor
             viewportShape.strokeColor = NSColor.controlAccentColor.cgColor
             // (Darker than secondaryLabelColor: text in a layer gets no vibrancy from the glass.)
+            title.foregroundColor = NSColor.labelColor.withAlphaComponent(0.75).cgColor
             zoomText.foregroundColor = NSColor.labelColor.withAlphaComponent(0.75).cgColor
         }
         CATransaction.commit()
@@ -73,16 +90,29 @@ final class Minimap: CALayer {
             drawn = (windows, bounds)
             let path = CGMutablePath()
             for r in windows {
-                path.addRoundedRect(in: toMap(r), cornerWidth: 1.5, cornerHeight: 1.5)
+                let m = toMap(r)
+                let radius = Self.radius(for: m, min: 1.5, max: 3, share: 0.15)
+                path.addRoundedRect(in: m, cornerWidth: radius, cornerHeight: radius)
             }
             windowsShape.path = path
         }
         // Never so small it can't be found (zoomed in, among a lot of windows).
         let v = toMap(viewport)
         let shown = v.insetBy(dx: min(0, (v.width - 14) / 2), dy: min(0, (v.height - 9) / 2))
-        viewportShape.path = CGPath(roundedRect: shown, cornerWidth: 3, cornerHeight: 3, transform: nil)
+        // Concentric with the panel when it fills the map (22pt corners, 10pt in).
+        let radius = Self.radius(for: shown, min: 3, max: GlassPanel.radius - mapArea.minX, share: 0.14)
+        let path = CGPath(roundedRect: shown, cornerWidth: radius, cornerHeight: radius, transform: nil)
+        viewportShape.path = path
+        viewportFill.path = path
+        // Seeing everything, the outline says so; a tint over the whole map would only cloud it.
+        viewportFill.isHidden = shown.width * shown.height > 0.5 * mapArea.width * mapArea.height
         let zoom = "\(Int((scale * 100).rounded()))%"
         if zoomText.string as? String != zoom { zoomText.string = zoom }
+    }
+
+    /// A corner radius in proportion to `r`, within `min`...`max` (and never more than it fits).
+    private static func radius(for r: CGRect, min lo: CGFloat, max hi: CGFloat, share: CGFloat) -> CGFloat {
+        Swift.min(Swift.min(hi, Swift.max(lo, Swift.min(r.width, r.height) * share)), Swift.min(r.width, r.height) / 2)
     }
 
     /// Minimap point (this layer's coords) -> canvas point.
