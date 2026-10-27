@@ -43,6 +43,8 @@ the canvas glides to it, centred, at 100%, ready to type into.
   display and everything returns exactly.
 - **Tidy Up** (<kbd>T</kbd>): fit windows to the current screen, push overlaps apart and pull each
   group back to even gaps, without rebuilding your layout.
+- **Restore Layout**: Expanse keeps the last three layouts, taken 15 minutes or more apart, and can
+  put your windows back the way one had them (from the menu bar). Restoring is undoable too.
 - **New windows open in free space**, next to what you were working on, instead of on top of it.
 - **Switch in and out cleanly.** Pause or quit and every window goes back to exactly where macOS
   had it. Launch again and the canvas comes back. Even after a crash, the next quit restores
@@ -121,7 +123,7 @@ tells you which ones are in the way; to change them yourself:
 | Hover <kbd>×</kbd>, or <kbd>⌘</kbd><kbd>W</kbd> | Close the hovered window, or every selected window at once |
 | <kbd>⌥</kbd><kbd>⇧</kbd><kbd>`</kbd> | Auto-centre on or off. Off: clicking a window that's partly on screen leaves the canvas where it is, for side-by-side work |
 | Spaces, beside the minimap | Jump to a full-screen app (they live in Spaces of their own), or back to the canvas |
-| Menu bar icon | Hot corner choice, desktop picture, Pause, Tidy Up, Restore All Windows, Welcome & Shortcuts |
+| Menu bar icon | Hot corner choice, desktop picture, Pause, Tidy Up, Restore Layout, Restore All Windows, Welcome & Shortcuts |
 
 ### Scripting
 
@@ -132,6 +134,7 @@ open "expanse://nav?dir=left"      # left | right | up | down
 open "expanse://centre"            # the window you're in, to the middle
 open "expanse://focus?app=Safari"
 open "expanse://space?name=Safari"  # a full-screen app's Space, "Desktop", or "Expanse"
+open "expanse://layout?snapshot=0"  # back to the newest saved layout (1, 2: older ones)
 open "expanse://pause"             # windows back to the macOS layout
 open "expanse://resume"
 ```

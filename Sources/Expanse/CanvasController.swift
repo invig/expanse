@@ -960,9 +960,9 @@ final class CanvasController: NSObject {
         lastSnapshotAt = Date()
     }
 
-    /// Puts every window back where `layout` (a snapshot) had it; windows it doesn't know stay
-    /// where they are. The layout it replaces becomes a snapshot itself, so this can be undone.
-    /// Shown zoomed out, like Tidy Up.
+    /// Puts every window back where `layout` (a snapshot) had it, fitted to this screen (it may
+    /// have been taken on another); windows it doesn't know stay where they are. The layout it
+    /// replaces becomes a snapshot itself, so this can be undone. Shown zoomed out, like Tidy Up.
     func restoreLayout(_ layout: SavedLayout) {
         guard !isPaused else { return }
         guard !gliding else { whenIdle { [weak self] in self?.restoreLayout(layout) }; return }
@@ -981,15 +981,13 @@ final class CanvasController: NSObject {
         for w in windows {
             guard let e = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid,
                                                 open: open, from: &pool) else { continue }
-            w.canvasFrame.origin = CGPoint(x: e.x, y: e.y)
-            if let hx = e.hx, let hy = e.hy { w.home = CGPoint(x: hx, y: hy) }
-            if let pw = e.pw, let ph = e.ph, pw > 0 { w.preferredSize = CGSize(width: pw, height: ph) }
-            if let sw = e.w, let sh = e.h, let ax = w.ax,
-               abs(sw - w.canvasFrame.width) > 1 || abs(sh - w.canvasFrame.height) > 1 {
-                w.canvasFrame.size = resizeReal(w, ax, to: CGSize(width: sw, height: sh))
-            }
+            // Its home spot and chosen size; fitting (below) works out where it goes on this screen.
+            w.home = CGPoint(x: e.hx ?? e.x, y: e.hy ?? e.y)
+            w.canvasFrame.origin = w.home ?? w.canvasFrame.origin
+            if let pw = e.pw ?? e.w, let ph = e.ph ?? e.h, pw > 0 { w.preferredSize = CGSize(width: pw, height: ph) }
             restored += 1
         }
+        fitLayoutToScreen(margin: 0, tidy: false)
         logger.info("restored a layout: \(restored) of \(self.windows.count) windows")
         view.render()
         animate(to: fitCamera())
