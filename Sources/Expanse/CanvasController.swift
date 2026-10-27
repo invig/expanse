@@ -2366,9 +2366,9 @@ final class CanvasController: NSObject {
 
     func refreshSpaces() {
         let (spaces, active) = Spaces.list()
-        // The desktop the canvas lives on is the canvas, as far as you're concerned.
+        // The desktop the canvas lives on is Expanse, as far as you're concerned.
         let canvas = canvasDesktop
-        view.updateSpaces(spaces.map { $0.id == canvas ? Spaces.Space(id: $0.id, pid: nil, window: nil, name: "Canvas") : $0 },
+        view.updateSpaces(spaces.map { $0.id == canvas ? Spaces.Space(id: $0.id, pid: nil, window: nil, name: "Expanse") : $0 },
                           active: active)
     }
 

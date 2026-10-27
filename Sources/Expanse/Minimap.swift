@@ -35,7 +35,7 @@ final class Minimap: CALayer {
         viewportShape.fillColor = nil
         addSublayer(viewportShape)
 
-        title.string = "Canvas"
+        title.string = "Expanse"
         title.fontSize = 11
         title.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         title.frame = CGRect(x: 14, y: Minimap.size.height - 25, width: 120, height: 14)
