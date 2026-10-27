@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let wallpaperItem = NSMenuItem(title: "Desktop Picture Background", action: #selector(toggleWallpaper), keyEquivalent: "")
     private let pauseItem = NSMenuItem(title: "Pause Expanse", action: #selector(togglePause), keyEquivalent: "")
     private let screenRecordingItem = NSMenuItem(title: "", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
+    private let installUpdateItem = NSMenuItem(title: "", action: #selector(installUpdate), keyEquivalent: "")
+    private let autoUpdateItem = NSMenuItem(title: "Check for Updates Automatically", action: #selector(toggleAutoUpdate), keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setUpStatusItem()
@@ -55,7 +57,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         controller.start()
+
+        Updater.shared.onReady = { [weak self] release in self?.updateReady(release) }
+        Updater.shared.start()
     }
+
+    /// An update has downloaded and checked out: say so, once per version unless you asked.
+    private var askedToCheck = false
+    private func updateReady(_ release: Updater.Release) {
+        let key = "updatePromptedFor"
+        guard askedToCheck || UserDefaults.standard.string(forKey: key) != release.version else { return }
+        // Zoomed out, the canvas would cover the prompt: wait until you're back at 100%.
+        guard !controller.isActive else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in self?.updateReady(release) }
+            return
+        }
+        askedToCheck = false
+        UserDefaults.standard.set(release.version, forKey: key)
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Expanse \(release.version) is ready to install"
+        alert.informativeText = "Expanse relaunches, and your windows stay where they are. You can also install it later from the menu bar icon."
+        alert.addButton(withTitle: "Install and Relaunch")
+        alert.addButton(withTitle: "Later")
+        alert.addButton(withTitle: "What's New")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: Updater.shared.install()
+        case .alertThirdButtonReturn: NSWorkspace.shared.open(release.page)
+        default: break
+        }
+    }
+
+    @objc private func checkForUpdates() {
+        askedToCheck = true
+        Updater.shared.check(interactive: true)
+    }
+
+    @objc private func installUpdate() { Updater.shared.install() }
+
+    @objc private func toggleAutoUpdate() { Updater.shared.automatic.toggle() }
 
     /// expanse://toggle | enter | exit | fit | restore | zoom?scale=0.5 | pan?dx=100&dy=0 | focus?app=Safari
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -72,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Any app or web page can open expanse:// links. Commands that reach into individual
             // windows or fake the display are for debugging only and stay off unless enabled with
             // `defaults write com.invignation.expanse debugURLCommands -bool true`.
-            let debugCommands: Set<String> = ["place", "prefer", "dump", "screen"]
+            let debugCommands: Set<String> = ["place", "prefer", "dump", "screen", "update"]
             if debugCommands.contains(command), !UserDefaults.standard.bool(forKey: "debugURLCommands") {
                 logger.info("ignored debug URL command \(command, privacy: .public) (debugURLCommands is off)")
                 continue
@@ -108,6 +148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         self?.controller.navigate(d)
                     }
                 }
+            case "update":
+                // Check now; ?install=1 installs a newer release without asking (for testing).
+                Updater.shared.check(interactive: false, install: query["install"] == "1")
             case "pause": controller.pause()
             case "resume": controller.resume()
             case "dump": controller.dump()
@@ -173,6 +216,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Restore All Windows", action: #selector(restoreAll), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Welcome & Shortcuts…", action: #selector(showWelcome), keyEquivalent: ""))
         menu.addItem(.separator())
+        menu.addItem(installUpdateItem)
+        menu.addItem(NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: ""))
+        menu.addItem(autoUpdateItem)
+        menu.addItem(.separator())
         menu.addItem(accessibilityItem)
         menu.addItem(screenRecordingItem)
         menu.addItem(.separator())
@@ -191,6 +238,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         centreItem.state = controller.autoCentre ? .on : .off
         pauseItem.title = controller.isPaused ? "Resume Expanse" : "Pause Expanse (back to macOS layout)"
         accessibilityItem.title = ax ? "Accessibility: granted" : "Grant Accessibility…"
+        let update = Updater.shared.ready?.release.version
+        installUpdateItem.title = "Install Expanse \(update ?? "")…"
+        installUpdateItem.isHidden = update == nil
+        autoUpdateItem.state = Updater.shared.automatic ? .on : .off
+        autoUpdateItem.isHidden = !Updater.shared.isRelease
         screenRecordingItem.title = sr ? "Screen Recording: granted" : "Grant Screen Recording…"
     }
 

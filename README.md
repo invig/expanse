@@ -57,6 +57,13 @@ the canvas glides to it, centred, at 100%, ready to type into.
 move **Expanse.app** to Applications. It's signed and notarised by Apple and runs on macOS 15 or
 later, on Apple Silicon and Intel Macs.
 
+From then on Expanse keeps itself up to date, straight from this repository's GitHub releases:
+once a day it checks for a newer one, downloads it, and asks before installing (it relaunches,
+and your windows stay put). It installs only a copy Apple's code signing says is from the same
+developer and notarised. Menu bar icon › Check for Updates… checks now; untick Check for Updates
+Automatically to stop the daily check. (Versions before 0.1.7 don't have this: download 0.1.7 or
+later once.)
+
 Or build it from source with the Swift 6 toolchain (Xcode 16+ or the Command Line Tools):
 
 ```bash
@@ -123,7 +130,8 @@ open "expanse://resume"
 ```
 
 Also `enter`, `exit`, `fit`, `zoom?scale=0.5`, `pan?dx=100&dy=0` and `restore`. Debugging
-commands (`dump`, `screen?w=1512&h=982` to pretend the display is that size, `place`, `prefer`)
+commands (`dump`, `screen?w=1512&h=982` to pretend the display is that size, `place`, `prefer`,
+`update?install=1` to update without asking)
 are off unless you run `defaults write com.invignation.expanse debugURLCommands -bool true`, since
 any app or web page can open `expanse://` links.
 
@@ -177,7 +185,9 @@ Expanse runs on a stock, SIP-enabled Mac. That shapes everything:
 ## Privacy
 
 Window pictures exist only in memory, on your Mac, to draw the canvas. Nothing is recorded,
-written to disk or sent anywhere. Expanse makes no network connections. The only file it writes
+written to disk or sent anywhere. The only network request Expanse makes is the daily update check:
+it asks GitHub (`api.github.com`) for this repository's latest release, and downloads it from
+GitHub when it's newer. You can turn the check off in the menu bar. The only file it writes
 is its layout in `~/Library/Application Support/Expanse/layout.json`: window positions and sizes,
 app names, and a hash of each window's title (enough to recognise the window next time, not to
 read the title). Window titles are redacted in the system log.
@@ -200,7 +210,13 @@ log stream --level info --predicate 'subsystem == "com.invignation.expanse"'
 ```
 
 To publish a release (signed, notarised, universal): `scripts/release.sh`. See the script's
-header for the one-time setup.
+header for the one-time setup. Installed copies pick it up from GitHub within a day; development
+builds are signed differently and never update.
+
+Don't run a copy signed differently from your development build (a release, say) on the same Mac:
+it shares the app ID, and macOS's Accessibility permission for Expanse can come out of it confused.
+Expanse still reports itself trusted but sees no windows; turning Expanse off and on again in
+System Settings › Privacy & Security › Accessibility fixes it.
 
 The log shows every window Expanse moves, resizes or follows, glide timings, and anything slow.
 With `debugURLCommands` on, `open "expanse://dump"` writes the full layout to it.
