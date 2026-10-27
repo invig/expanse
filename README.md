@@ -131,7 +131,7 @@ open "expanse://tidy"
 open "expanse://nav?dir=left"      # left | right | up | down
 open "expanse://centre"            # the window you're in, to the middle
 open "expanse://focus?app=Safari"
-open "expanse://space?name=Safari"  # a full-screen app's Space, or "Desktop"
+open "expanse://space?name=Safari"  # a full-screen app's Space, "Desktop", or "Expanse"
 open "expanse://pause"             # windows back to the macOS layout
 open "expanse://resume"
 ```

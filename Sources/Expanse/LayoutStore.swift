@@ -72,6 +72,14 @@ enum LayoutStore {
     /// Identifies a window for as long as its app keeps running.
     static func windowKey(pid: pid_t, id: CGWindowID) -> String { "\(pid):\(id)" }
 
+    /// Whether the window server still has this window, on screen or not.
+    private static func exists(id: CGWindowID, pid: pid_t) -> Bool {
+        var ids = [UnsafeRawPointer(bitPattern: UInt(id))]
+        guard let array = CFArrayCreate(nil, &ids, 1, nil),
+              let info = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]] else { return false }
+        return info.contains { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid }
+    }
+
     /// Picks the saved entry for a window: the same window (same ID in the same app process),
     /// then same app and title, then same app. Matched entries are removed so two windows never
     /// claim the same slot, and `open` (keys of windows open now) keeps the fallbacks from taking
@@ -83,7 +91,9 @@ enum LayoutStore {
         }
         func free(_ e: SavedLayout.Window) -> Bool {
             guard let eid = e.id, let epid = e.pid else { return true }
-            return !open.contains(windowKey(pid: epid, id: eid))
+            // Not for another window while its own is open, or out of view (hidden, minimised)
+            // and due back.
+            return !open.contains(windowKey(pid: epid, id: eid)) && !exists(id: eid, pid: epid)
         }
         let key = titleKey(title)
         // Older layout files stored the title itself.

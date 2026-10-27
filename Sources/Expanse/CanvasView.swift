@@ -19,6 +19,8 @@ final class CanvasView: NSView {
     private var spaceHeld = false
     private let minimap = Minimap()
     private let spacesBar = SpacesBar()
+    private lazy var minimapGlass = GlassPanel(content: minimap) { [weak self] in self?.minimap.applyAppearance($0) }
+    private lazy var spacesGlass = GlassPanel(content: spacesBar) { [weak self] in self?.spacesBar.applyAppearance($0) }
     var hovered: ManagedWindow?
 
     private enum Drag {
@@ -63,8 +65,8 @@ final class CanvasView: NSView {
             l.actions = ["path": NSNull()]
             root.addSublayer(l)
         }
-        root.addSublayer(minimap)
-        root.addSublayer(spacesBar)
+        addSubview(spacesGlass)
+        addSubview(minimapGlass)
         applyAppearance()
     }
 
@@ -81,7 +83,7 @@ final class CanvasView: NSView {
         for l in [world, labels, guides, marquee, selectionBox] { l.frame = bounds }
         // Pinned exactly where the real desktop picture is: the top strip sits under the menu bar.
         wallpaper.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + menuBarHeight)
-        minimap.frame.origin = CGPoint(x: bounds.maxX - Minimap.size.width - 16, y: 16)
+        minimapGlass.frame = CGRect(origin: CGPoint(x: bounds.maxX - Minimap.size.width - 16, y: 16), size: Minimap.size)
         placeSpacesBar()
         CATransaction.commit()
         render()
@@ -112,7 +114,9 @@ final class CanvasView: NSView {
     }
 
     private func placeSpacesBar() {
-        spacesBar.frame.origin = CGPoint(x: minimap.frame.minX - 12 - spacesBar.bounds.width, y: 16)
+        spacesGlass.isHidden = spacesBar.isHidden
+        spacesGlass.frame = CGRect(x: minimapGlass.frame.minX - 12 - spacesBar.bounds.width, y: 16,
+                                   width: spacesBar.bounds.width, height: spacesBar.bounds.height)
     }
 
     func setWallpaper(_ image: CGImage?) {
@@ -217,8 +221,8 @@ final class CanvasView: NSView {
         // Gliding at 100%, the overlay is over the real windows, showing their pictures for a
         // moment: the minimap and Spaces stay under the windows, as they are before and after,
         // rather than jumping in front of them. Zoomed out, they're on top to be clicked.
-        minimap.zPosition = c.gliding ? -1 : 0
-        spacesBar.zPosition = minimap.zPosition
+        minimapGlass.layer?.zPosition = c.gliding ? -1 : 0
+        spacesGlass.layer?.zPosition = c.gliding ? -1 : 0
         CATransaction.commit()
     }
 

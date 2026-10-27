@@ -52,6 +52,9 @@ final class CanvasController: NSObject {
     /// another Space) or closed, so it comes back exactly as it was and is still restored on quit.
     private struct Departed {
         let pid: pid_t
+        let bundleID: String
+        let appName: String
+        let title: String
         let canvasFrame: CGRect
         let originalFrame: CGRect
         let preferredSize: CGSize
@@ -254,7 +257,9 @@ final class CanvasController: NSObject {
         if !isActive {
             if final { restoreSizesAndPlace() } else { commitInBackground() }
         } else if final {
-            // Zoomed out, there's no window to centre.
+            // Zoomed out, the layout still fits the new screen (the real windows follow on the way
+            // out), but there's no window to centre.
+            fitLayoutToScreen(margin: 0, tidy: false)
             screenResized = false
             centreAfterResize = nil
         }
@@ -905,6 +910,24 @@ final class CanvasController: NSObject {
         if !isDerived, !suspendTracking { windows.forEach { $0.home = $0.canvasFrame.origin } }
         // Saved positions are canvas coordinates relative to a scale-1 camera.
         let center = camera.center(in: viewSize)
+        // Windows out of view (app hidden, minimised, another Space) are saved too, newest
+        // first, so a restart while they're away doesn't lose their spots. (Closed windows of
+        // apps still running are among them; their spots go to the app's next window, as at launch.)
+        let away = recentlyRemoved
+            .filter { NSRunningApplication(processIdentifier: $0.value.pid) != nil }
+            .sorted { $0.value.at > $1.value.at }
+            .prefix(60)
+            .map { id, gone in
+                SavedLayout.Window(bundleID: gone.bundleID, appName: gone.appName, title: LayoutStore.titleKey(gone.title),
+                                   x: Double(gone.canvasFrame.minX), y: Double(gone.canvasFrame.minY),
+                                   w: Double(gone.canvasFrame.width), h: Double(gone.canvasFrame.height),
+                                   hx: Double((gone.home ?? gone.canvasFrame.origin).x),
+                                   hy: Double((gone.home ?? gone.canvasFrame.origin).y),
+                                   pw: Double(gone.preferredSize.width), ph: Double(gone.preferredSize.height),
+                                   ox: Double(gone.originalFrame.minX), oy: Double(gone.originalFrame.minY),
+                                   ow: Double(gone.originalFrame.width), oh: Double(gone.originalFrame.height),
+                                   id: id, pid: gone.pid)
+            }
         let layout = SavedLayout(
             cameraX: Double(camera.origin.x), cameraY: Double(camera.origin.y),
             centerX: Double(center.x), centerY: Double(center.y),
@@ -919,7 +942,7 @@ final class CanvasController: NSObject {
                                    ox: Double($0.originalFrame.minX), oy: Double($0.originalFrame.minY),
                                    ow: Double($0.originalFrame.width), oh: Double($0.originalFrame.height),
                                    id: $0.id, pid: $0.pid)
-            } + savedPool.prefix(60))   // windows not open right now keep their saved spots
+            } + away + savedPool.prefix(60))   // windows not open right now keep their saved spots
         guard let data = try? JSONEncoder().encode(layout), data != lastSavedLayout else { return }
         lastSavedLayout = data
         LayoutStore.save(layout)
@@ -1375,10 +1398,15 @@ final class CanvasController: NSObject {
             remove(w)
         }
 
+        // Windows put back where the saved layout had them (at launch, after the lock screen, an
+        // app that had windows last time opening again) come with the sizes and spots of the
+        // screen it was saved on, a laptop's say: fit the layout to this one before anything moves.
+        if restoredAny { fitLayoutToScreen(margin: 0, tidy: false) }
+
         // Windows that opened since the last scan (see arrive), and any that came back from a
         // move (see cameBack), move together, off the main thread; and when several opened at
         // once, there's one glide, to the one in front.
-        if arrivals.place || replaceAny { commitInBackground() }
+        if arrivals.place || replaceAny || restoredAny && !firstSync { commitInBackground() }
         if let w = arrivals.glide.first(where: { focusedWindowByApp[$0.pid] == $0.id })
             ?? arrivals.glide.max(by: { $0.id < $1.id }) {
             glideWhenIdle(to: w)
@@ -1938,7 +1966,8 @@ final class CanvasController: NSObject {
         view.removeNode(w.node)
         windows.removeAll { $0 === w }
         if !isPaused {
-            recentlyRemoved[w.id] = Departed(pid: w.pid, canvasFrame: w.canvasFrame, originalFrame: w.originalFrame,
+            recentlyRemoved[w.id] = Departed(pid: w.pid, bundleID: w.bundleID, appName: w.appName, title: w.title,
+                                             canvasFrame: w.canvasFrame, originalFrame: w.originalFrame,
                                              preferredSize: w.preferredSize, home: w.home, parked: w.parked, at: Date())
             // Closed windows never come back; don't keep them forever.
             let weekAgo = Date().addingTimeInterval(-7 * 24 * 3600)
@@ -2344,9 +2373,9 @@ final class CanvasController: NSObject {
 
     func refreshSpaces() {
         let (spaces, active) = Spaces.list()
-        // The desktop the canvas lives on is the canvas, as far as you're concerned.
+        // The desktop the canvas lives on is Expanse, as far as you're concerned.
         let canvas = canvasDesktop
-        view.updateSpaces(spaces.map { $0.id == canvas ? Spaces.Space(id: $0.id, pid: nil, window: nil, name: "Canvas") : $0 },
+        view.updateSpaces(spaces.map { $0.id == canvas ? Spaces.Space(id: $0.id, pid: nil, window: nil, name: "Expanse") : $0 },
                           active: active)
     }
 
