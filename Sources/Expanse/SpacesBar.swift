@@ -24,8 +24,8 @@ final class SpacesBar: CALayer {
     override init() {
         super.init()
         heading.string = "Spaces"
-        heading.fontSize = 10
-        heading.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        heading.fontSize = 11
+        heading.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         addSublayer(heading)
         isHidden = true
     }
@@ -60,7 +60,7 @@ final class SpacesBar: CALayer {
         (tiles + labels).forEach(addSublayer)
         let width = Self.gap + CGFloat(spaces.count) * (Self.tile.width + Self.gap)
         bounds = CGRect(x: 0, y: 0, width: width, height: Minimap.size.height)
-        heading.frame = CGRect(x: 12, y: Minimap.size.height - 22, width: 120, height: 13)
+        heading.frame = CGRect(x: Self.gap, y: Minimap.size.height - 25, width: 120, height: 14)
         styleTiles()
     }
 
@@ -84,8 +84,7 @@ final class SpacesBar: CALayer {
             tile.contents = wallpaper
             tile.contentsGravity = .resizeAspectFill
         } else if let pid = space.pid, let icon = NSRunningApplication(processIdentifier: pid)?.icon {
-            // A full-screen app: its icon on black, like the Space itself.
-            tile.backgroundColor = NSColor(white: 0.05, alpha: 1).cgColor
+            // A full-screen app: its icon (on a colour that suits the glass; see styleTiles).
             let image = CALayer()
             // At the size it's drawn, in pixels (the default is a small, blurry version).
             var rect = CGRect(x: 0, y: 0, width: 36 * scale, height: 36 * scale)
@@ -101,27 +100,37 @@ final class SpacesBar: CALayer {
     private func makeLabel(_ space: Spaces.Space, under tile: CALayer) -> CATextLayer {
         let label = CATextLayer()
         label.string = space.name
-        label.fontSize = 10
-        label.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        label.fontSize = 11
         label.alignmentMode = .center
         label.truncationMode = .end
         label.contentsScale = scale
-        label.frame = CGRect(x: tile.frame.minX - 2, y: 14, width: Self.tile.width + 4, height: 13)
+        label.frame = CGRect(x: tile.frame.minX - 2, y: 13, width: Self.tile.width + 4, height: 14)
         return label
     }
 
-    /// The Space you're on is outlined in the accent colour; the one under the pointer lights up.
+    /// The Space you're on is outlined in the accent colour and named in bold; the one under the
+    /// pointer lights up.
     private func styleTiles() {
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         appearance.performAsCurrentDrawingAppearance {
-            heading.foregroundColor = NSColor.secondaryLabelColor.cgColor
-            for label in labels { label.foregroundColor = NSColor.labelColor.cgColor }
+            // Text in a layer gets no vibrancy from the glass, so secondary text is darker than
+            // secondaryLabelColor, or it would be too faint to read.
+            heading.foregroundColor = NSColor.labelColor.withAlphaComponent(0.75).cgColor
             for (i, tile) in tiles.enumerated() {
                 let current = spaces[i].id == active
-                tile.borderWidth = current ? 2 : 1
-                tile.borderColor = current ? NSColor.controlAccentColor.cgColor
-                    : i == hovered ? NSColor.labelColor.withAlphaComponent(0.5).cgColor : NSColor.separatorColor.cgColor
+                labels[i].foregroundColor = NSColor.labelColor.cgColor
+                labels[i].font = NSFont.systemFont(ofSize: 11, weight: current ? .semibold : .regular)
+                if !spaces[i].isDesktop {
+                    // Black like the Space itself in dark; in light, black would outweigh the
+                    // current Space, so a quiet grey.
+                    tile.backgroundColor = dark ? NSColor(white: 0.06, alpha: 1).cgColor
+                        : NSColor.labelColor.withAlphaComponent(0.1).cgColor
+                }
+                tile.borderWidth = current ? 2 : i == hovered ? 1 : 0.5
+                tile.borderColor = (current ? NSColor.controlAccentColor
+                    : NSColor.labelColor.withAlphaComponent(i == hovered ? 0.5 : 0.12)).cgColor
                 tile.opacity = current || i == hovered ? 1 : 0.85
             }
         }

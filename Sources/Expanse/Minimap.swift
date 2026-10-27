@@ -18,16 +18,17 @@ final class Minimap: CALayer {
     private var drawn: (windows: [CGRect], bounds: CGRect)?
 
     override init() {
-        mapArea = CGRect(x: 10, y: 26, width: Minimap.size.width - 20, height: Minimap.size.height - 36)
+        // Below a header row level with the Spaces strip's ("Spaces" there, the zoom here).
+        mapArea = CGRect(x: 10, y: 10, width: Minimap.size.width - 20, height: Minimap.size.height - 42)
         super.init()
         bounds = CGRect(origin: .zero, size: Minimap.size)
         addSublayer(windowsShape)
-        viewportShape.lineWidth = 1
+        viewportShape.lineWidth = 1.5
         addSublayer(viewportShape)
 
-        zoomText.fontSize = 10
-        zoomText.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        zoomText.frame = CGRect(x: 10, y: 7, width: 80, height: 13)
+        zoomText.fontSize = 11
+        zoomText.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        zoomText.frame = CGRect(x: 10, y: Minimap.size.height - 25, width: 80, height: 14)
         addSublayer(zoomText)
     }
 
@@ -50,9 +51,11 @@ final class Minimap: CALayer {
         CATransaction.setDisableActions(true)
         appearance.performAsCurrentDrawingAppearance {
             windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.5 : 0.35).cgColor
-            viewportShape.fillColor = NSColor.labelColor.withAlphaComponent(0.06).cgColor
-            viewportShape.strokeColor = NSColor.labelColor.cgColor
-            zoomText.foregroundColor = NSColor.secondaryLabelColor.cgColor
+            // Where you are, in the accent colour, as the current Space is beside it.
+            viewportShape.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.12).cgColor
+            viewportShape.strokeColor = NSColor.controlAccentColor.cgColor
+            // (Darker than secondaryLabelColor: text in a layer gets no vibrancy from the glass.)
+            zoomText.foregroundColor = NSColor.labelColor.withAlphaComponent(0.75).cgColor
         }
         CATransaction.commit()
     }
@@ -74,7 +77,10 @@ final class Minimap: CALayer {
             }
             windowsShape.path = path
         }
-        viewportShape.path = CGPath(roundedRect: toMap(viewport), cornerWidth: 2, cornerHeight: 2, transform: nil)
+        // Never so small it can't be found (zoomed in, among a lot of windows).
+        let v = toMap(viewport)
+        let shown = v.insetBy(dx: min(0, (v.width - 14) / 2), dy: min(0, (v.height - 9) / 2))
+        viewportShape.path = CGPath(roundedRect: shown, cornerWidth: 3, cornerHeight: 3, transform: nil)
         let zoom = "\(Int((scale * 100).rounded()))%"
         if zoomText.string as? String != zoom { zoomText.string = zoom }
     }
