@@ -111,6 +111,7 @@ tells you which ones are in the way; to change them yourself:
 | Pinch, or <kbd>⌘</kbd> + scroll | Zoom the canvas around the pointer |
 | Two-finger scroll, or <kbd>Space</kbd> + drag | Pan |
 | Scroll or pinch on empty desktop | Start moving around the canvas from 100% |
+| Click empty desktop | Zoom out to every window |
 | Drag a window | Move it; snaps to edges, a 20pt gap and the middle of the screen (hold <kbd>⌘</kbd> to turn snapping off) |
 | Drag on empty canvas, <kbd>⇧</kbd>-click, <kbd>⌘</kbd><kbd>A</kbd> | Select windows; drag any selected one to move the group |
 | <kbd>T</kbd> | Tidy up |
