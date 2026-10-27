@@ -10,6 +10,10 @@ final class Minimap: CALayer {
     private let viewportFill = CAShapeLayer()
     private let viewportShape = CAShapeLayer()
     private let title = CATextLayer()
+    /// The viewport's outline: the accent marks where you are; when it frames the whole map there's
+    /// nothing to single out, so it's a quiet line instead.
+    private var accentRing: CGColor?
+    private var quietRing: CGColor?
     private let zoomText = CATextLayer()
     private let mapArea: CGRect
 
@@ -26,7 +30,6 @@ final class Minimap: CALayer {
         super.init()
         bounds = CGRect(origin: .zero, size: Minimap.size)
         addSublayer(viewportFill)
-        windowsShape.lineWidth = 0.75
         windowsShape.lineJoin = .round
         addSublayer(windowsShape)
         viewportShape.fillColor = nil
@@ -65,15 +68,19 @@ final class Minimap: CALayer {
         appearance.performAsCurrentDrawingAppearance {
             // Quieter than the viewport, each with an edge so overlapping windows stay apart: a
             // dark seam on light glass (a light one would outline them like stickers), light on dark.
-            windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.38 : 0.24).cgColor
+            windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.38 : 0.2).cgColor
             windowsShape.strokeColor = (dark ? NSColor.windowBackgroundColor.withAlphaComponent(0.5)
-                : NSColor.labelColor.withAlphaComponent(0.38)).cgColor
+                : NSColor.labelColor.withAlphaComponent(0.24)).cgColor
+            windowsShape.lineWidth = dark ? 0.75 : 0.5
             // Where you are, in the accent colour, as the current Space is beside it.
             viewportFill.fillColor = NSColor.controlAccentColor.withAlphaComponent(dark ? 0.14 : 0.1).cgColor
-            viewportShape.strokeColor = NSColor.controlAccentColor.cgColor
+            accentRing = NSColor.controlAccentColor.cgColor
+            quietRing = NSColor.labelColor.withAlphaComponent(dark ? 0.35 : 0.28).cgColor
+            viewportShape.strokeColor = viewportFill.isHidden ? quietRing : accentRing
             // (Darker than secondaryLabelColor: text in a layer gets no vibrancy from the glass.)
-            title.foregroundColor = NSColor.labelColor.withAlphaComponent(dark ? 0.85 : 0.75).cgColor
-            zoomText.foregroundColor = NSColor.labelColor.withAlphaComponent(dark ? 0.85 : 0.75).cgColor
+            let secondary = dark ? NSColor.labelColor : NSColor.labelColor.withAlphaComponent(0.75)
+            title.foregroundColor = secondary.cgColor
+            zoomText.foregroundColor = secondary.cgColor
         }
         CATransaction.commit()
     }
@@ -94,7 +101,7 @@ final class Minimap: CALayer {
             let path = CGMutablePath()
             for r in windows {
                 let m = toMap(r)
-                let radius = Self.radius(for: m, min: 1.5, max: 3, share: 0.15)
+                let radius = Self.radius(for: m, min: 2, max: 3, share: 0.18)
                 path.addRoundedRect(in: m, cornerWidth: radius, cornerHeight: radius)
             }
             windowsShape.path = path
@@ -113,7 +120,8 @@ final class Minimap: CALayer {
         // Seeing everything, the outline says so (lighter); a tint over the whole map would only cloud it.
         let framesAll = shown.width * shown.height > 0.5 * mapArea.width * mapArea.height
         viewportFill.isHidden = framesAll
-        viewportShape.lineWidth = framesAll ? 1.5 : 2
+        viewportShape.lineWidth = framesAll ? 1 : 2
+        viewportShape.strokeColor = framesAll ? quietRing : accentRing
         let zoom = "\(Int((scale * 100).rounded()))%"
         if zoomText.string as? String != zoom { zoomText.string = zoom }
     }

@@ -6,7 +6,8 @@ import AppKit
 /// applyAppearance gives it.
 final class SpacesBar: CALayer {
     private static let tile = CGSize(width: 100, height: 63)   // the screen's shape, roughly
-    private static let gap: CGFloat = 10
+    /// Between tiles, as at the panel's edges, so the current Space's ring has the same air all round.
+    private static let gap: CGFloat = 14
     /// From the panel's edges to the tiles and heading.
     private static let inset: CGFloat = 14
 
@@ -129,8 +130,8 @@ final class SpacesBar: CALayer {
         return label
     }
 
-    /// The Space you're on is outlined in the accent colour and named in bold; the one under the
-    /// pointer lights up.
+    /// The Space you're on is ringed in the accent colour and named in bold; the one under the
+    /// pointer gets a quiet ring. (The others aren't dimmed: that would read as disabled.)
     private func styleTiles() {
         let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         CATransaction.begin()
@@ -138,7 +139,7 @@ final class SpacesBar: CALayer {
         appearance.performAsCurrentDrawingAppearance {
             // Text in a layer gets no vibrancy from the glass, so secondary text is darker than
             // secondaryLabelColor, or it would be too faint to read.
-            heading.foregroundColor = NSColor.labelColor.withAlphaComponent(dark ? 0.85 : 0.75).cgColor
+            heading.foregroundColor = (dark ? NSColor.labelColor : NSColor.labelColor.withAlphaComponent(0.75)).cgColor
             for (i, tile) in tiles.enumerated() {
                 let current = spaces[i].id == active
                 labels[i].foregroundColor = NSColor.labelColor.cgColor
@@ -152,7 +153,6 @@ final class SpacesBar: CALayer {
                 rings[i].isHidden = !current && i != hovered
                 rings[i].borderWidth = current ? 2.5 : 1.5
                 rings[i].borderColor = (current ? NSColor.controlAccentColor : NSColor.labelColor.withAlphaComponent(0.3)).cgColor
-                tile.opacity = current || i == hovered ? 1 : 0.85
             }
         }
         CATransaction.commit()
