@@ -52,6 +52,9 @@ final class CanvasController: NSObject {
     /// another Space) or closed, so it comes back exactly as it was and is still restored on quit.
     private struct Departed {
         let pid: pid_t
+        let bundleID: String
+        let appName: String
+        let title: String
         let canvasFrame: CGRect
         let originalFrame: CGRect
         let preferredSize: CGSize
@@ -905,6 +908,24 @@ final class CanvasController: NSObject {
         if !isDerived, !suspendTracking { windows.forEach { $0.home = $0.canvasFrame.origin } }
         // Saved positions are canvas coordinates relative to a scale-1 camera.
         let center = camera.center(in: viewSize)
+        // Windows out of view (app hidden, minimised, another Space) are saved too, newest
+        // first, so a restart while they're away doesn't lose their spots. (Closed windows of
+        // apps still running are among them; their spots go to the app's next window, as at launch.)
+        let away = recentlyRemoved
+            .filter { NSRunningApplication(processIdentifier: $0.value.pid) != nil }
+            .sorted { $0.value.at > $1.value.at }
+            .prefix(60)
+            .map { id, gone in
+                SavedLayout.Window(bundleID: gone.bundleID, appName: gone.appName, title: LayoutStore.titleKey(gone.title),
+                                   x: Double(gone.canvasFrame.minX), y: Double(gone.canvasFrame.minY),
+                                   w: Double(gone.canvasFrame.width), h: Double(gone.canvasFrame.height),
+                                   hx: Double((gone.home ?? gone.canvasFrame.origin).x),
+                                   hy: Double((gone.home ?? gone.canvasFrame.origin).y),
+                                   pw: Double(gone.preferredSize.width), ph: Double(gone.preferredSize.height),
+                                   ox: Double(gone.originalFrame.minX), oy: Double(gone.originalFrame.minY),
+                                   ow: Double(gone.originalFrame.width), oh: Double(gone.originalFrame.height),
+                                   id: id, pid: gone.pid)
+            }
         let layout = SavedLayout(
             cameraX: Double(camera.origin.x), cameraY: Double(camera.origin.y),
             centerX: Double(center.x), centerY: Double(center.y),
@@ -919,7 +940,7 @@ final class CanvasController: NSObject {
                                    ox: Double($0.originalFrame.minX), oy: Double($0.originalFrame.minY),
                                    ow: Double($0.originalFrame.width), oh: Double($0.originalFrame.height),
                                    id: $0.id, pid: $0.pid)
-            } + savedPool.prefix(60))   // windows not open right now keep their saved spots
+            } + away + savedPool.prefix(60))   // windows not open right now keep their saved spots
         guard let data = try? JSONEncoder().encode(layout), data != lastSavedLayout else { return }
         lastSavedLayout = data
         LayoutStore.save(layout)
@@ -1938,7 +1959,8 @@ final class CanvasController: NSObject {
         view.removeNode(w.node)
         windows.removeAll { $0 === w }
         if !isPaused {
-            recentlyRemoved[w.id] = Departed(pid: w.pid, canvasFrame: w.canvasFrame, originalFrame: w.originalFrame,
+            recentlyRemoved[w.id] = Departed(pid: w.pid, bundleID: w.bundleID, appName: w.appName, title: w.title,
+                                             canvasFrame: w.canvasFrame, originalFrame: w.originalFrame,
                                              preferredSize: w.preferredSize, home: w.home, parked: w.parked, at: Date())
             // Closed windows never come back; don't keep them forever.
             let weekAgo = Date().addingTimeInterval(-7 * 24 * 3600)
