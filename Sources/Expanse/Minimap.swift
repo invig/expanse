@@ -68,17 +68,17 @@ final class Minimap: CALayer {
         appearance.performAsCurrentDrawingAppearance {
             // Quieter than the viewport, each with an edge so overlapping windows stay apart: a
             // dark seam on light glass (a light one would outline them like stickers), light on dark.
-            windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.38 : 0.2).cgColor
+            windowsShape.fillColor = NSColor.labelColor.withAlphaComponent(dark ? 0.38 : 0.26).cgColor
             windowsShape.strokeColor = (dark ? NSColor.windowBackgroundColor.withAlphaComponent(0.5)
-                : NSColor.labelColor.withAlphaComponent(0.24)).cgColor
+                : NSColor.labelColor.withAlphaComponent(0.16)).cgColor
             windowsShape.lineWidth = dark ? 0.75 : 0.5
             // Where you are, in the accent colour, as the current Space is beside it.
             viewportFill.fillColor = NSColor.controlAccentColor.withAlphaComponent(dark ? 0.14 : 0.1).cgColor
             accentRing = NSColor.controlAccentColor.cgColor
             quietRing = NSColor.labelColor.withAlphaComponent(dark ? 0.35 : 0.28).cgColor
-            viewportShape.strokeColor = viewportFill.isHidden ? quietRing : accentRing
+            styleRing()
             // (Darker than secondaryLabelColor: text in a layer gets no vibrancy from the glass.)
-            let secondary = dark ? NSColor.labelColor : NSColor.labelColor.withAlphaComponent(0.75)
+            let secondary = NSColor.labelColor.withAlphaComponent(dark ? 0.8 : 0.7)
             title.foregroundColor = secondary.cgColor
             zoomText.foregroundColor = secondary.cgColor
         }
@@ -101,7 +101,8 @@ final class Minimap: CALayer {
             let path = CGMutablePath()
             for r in windows {
                 let m = toMap(r)
-                let radius = Self.radius(for: m, min: 2, max: 3, share: 0.18)
+                // Crisp: windows, not pebbles.
+                let radius = Self.radius(for: m, min: 1, max: 2, share: 0.1)
                 path.addRoundedRect(in: m, cornerWidth: radius, cornerHeight: radius)
             }
             windowsShape.path = path
@@ -120,10 +121,20 @@ final class Minimap: CALayer {
         // Seeing everything, the outline says so (lighter); a tint over the whole map would only cloud it.
         let framesAll = shown.width * shown.height > 0.5 * mapArea.width * mapArea.height
         viewportFill.isHidden = framesAll
-        viewportShape.lineWidth = framesAll ? 1 : 2
-        viewportShape.strokeColor = framesAll ? quietRing : accentRing
+        styleRing()
         let zoom = "\(Int((scale * 100).rounded()))%"
         if zoomText.string as? String != zoom { zoomText.string = zoom }
+    }
+
+    /// Under the pointer (the map can be clicked and dragged): the viewport's outline thickens.
+    var hovered = false {
+        didSet { if hovered != oldValue { styleRing() } }
+    }
+
+    private func styleRing() {
+        let framesAll = viewportFill.isHidden
+        viewportShape.lineWidth = (framesAll ? 1 : 2) + (hovered ? 0.5 : 0)
+        viewportShape.strokeColor = framesAll ? quietRing : accentRing
     }
 
     private static let ringOutset: CGFloat = 3
