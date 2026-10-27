@@ -302,7 +302,11 @@ final class CanvasView: NSView {
             // Live mode: a click on a parked window's picture on the backdrop goes to that window,
             // and the Spaces bar works here too.
             drag = .none
-            if let i = spacesBarHit(e).tile { controller.switchToSpace(spacesBar.spaces[i]); return }
+            if let i = spacesBarHit(e).tile {
+                spacesBar.hovered = nil
+                controller.switchToSpace(spacesBar.spaces[i])
+                return
+            }
             if let w = controller.window(atView: point(e), parkedOnly: true) { controller.focus(w) }
             return
         }
@@ -311,7 +315,11 @@ final class CanvasView: NSView {
         let bar = spacesBarHit(e)
         if bar.over {
             drag = .none
-            if let i = bar.tile { controller.switchToSpace(spacesBar.spaces[i]) }
+            if let i = bar.tile {
+                // Hover only updates while zoomed out; don't leave the tile lit after leaving.
+                spacesBar.hovered = nil
+                controller.switchToSpace(spacesBar.spaces[i])
+            }
             return
         }
         if let mp = minimapPoint(e) {

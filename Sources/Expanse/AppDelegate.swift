@@ -123,6 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func runURLCommand(_ command: String, query: [String: String], number: (String) -> CGFloat?) {
+            // A window ID or an index: a whole number in range, or nothing. Converting anything
+            // else traps, and any web page can open these links.
+            func windowID(_ key: String) -> CGWindowID? { number(key).flatMap { CGWindowID(exactly: $0) } }
+            func index(_ key: String) -> Int? { number(key).flatMap { Int(exactly: $0) } }
             switch command {
             case "toggle": controller.toggle()
             case "enter": controller.enter(zoomOut: query["zoomOut"] != "0")
@@ -132,13 +136,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "tidy": controller.tidy()
             case "welcome": Onboarding.show {}
             case "place":
-                if let id = number("id"), let x = number("x"), let y = number("y") {
-                    controller.setCanvasOrigin(CGWindowID(id), CGPoint(x: x, y: y), commit: query["commit"] == "1")
+                if let id = windowID("id"), let x = number("x"), let y = number("y") {
+                    controller.setCanvasOrigin(id, CGPoint(x: x, y: y), commit: query["commit"] == "1")
                 }
             case "prefer":
                 // Repair: set the size a window should have (by window ID), e.g. after it was lost.
-                if let id = number("id"), let w = number("w"), let h = number("h") {
-                    controller.setPreferredSize(CGWindowID(id), CGSize(width: w, height: h))
+                if let id = windowID("id"), let w = number("w"), let h = number("h") {
+                    controller.setPreferredSize(id, CGSize(width: w, height: h))
                 }
             case "nav":
                 let dirs: [String: CanvasController.Direction] = ["left": .left, "right": .right, "up": .up, "down": .down]
@@ -167,16 +171,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // Mission Control's order, from 1.
                 let spaces = Spaces.list().spaces
                 let name = (query["name"] ?? "").lowercased()
-                let index = Int(number("index") ?? 0) - 1
+                let position = (index("index") ?? 0) - 1
                 if let space = (name == "canvas" ? spaces.first { $0.id == controller.canvasDesktop } : nil)
                     ?? spaces.first(where: { $0.name.lowercased() == name })
-                    ?? (spaces.indices.contains(index) ? spaces[index] : nil) {
+                    ?? (spaces.indices.contains(position) ? spaces[position] : nil) {
                     controller.switchToSpace(space)
                 }
             case "focus":
-                // ?app=Safari (its front window), or ?id= a window ID (from dump).
+                // ?app=Safari (its front window), or ?id= a window ID (from dump). Reaching into a
+                // particular window is for debugging, like place and prefer (see above).
                 let name = (query["app"] ?? "").lowercased()
-                let id = number("id").map { CGWindowID($0) }
+                let id = UserDefaults.standard.bool(forKey: "debugURLCommands") ? windowID("id") : nil
                 if let w = controller.windows.last(where: { id != nil ? $0.id == id : $0.appName.lowercased() == name }) {
                     controller.focus(w)
                 }

@@ -82,7 +82,9 @@ final class SpacesBar: CALayer {
             // A full-screen app: its icon on black, like the Space itself.
             tile.backgroundColor = NSColor(white: 0.05, alpha: 1).cgColor
             let image = CALayer()
-            image.contents = icon.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            // At the size it's drawn, in pixels (the default is a small, blurry version).
+            var rect = CGRect(x: 0, y: 0, width: 36 * scale, height: 36 * scale)
+            image.contents = icon.cgImage(forProposedRect: &rect, context: nil, hints: nil)
             image.contentsGravity = .resizeAspect
             image.frame = CGRect(x: (Self.tile.width - 36) / 2, y: (Self.tile.height - 36) / 2, width: 36, height: 36)
             image.contentsScale = scale

@@ -255,7 +255,7 @@ final class CanvasController: NSObject {
         view.render()
         // Like a glide's last step: input waits while the real windows move in the background.
         gliding = true
-        commitAsync { [weak self] in
+        commitAsync { [weak self] _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 guard let self else { return }
                 self.overlay.level = OverlayWindow.backdropLevel
@@ -270,7 +270,7 @@ final class CanvasController: NSObject {
     /// commit(), with the Accessibility calls off the main thread (see commitAsync): with dozens
     /// of windows, a display change would otherwise freeze Expanse for seconds.
     private func commitInBackground() {
-        commitAsync { [weak self] in
+        commitAsync { [weak self] _ in
             guard let self else { return }
             if !self.isActive { self.updateStreaming() }
             self.view.render()
@@ -501,12 +501,10 @@ final class CanvasController: NSObject {
     /// has started meanwhile, in which case it finishes the job.
     private func finishGlide(_ generation: Int, prep: CFTimeInterval) {
         let c0 = CACurrentMediaTime()
-        commitAsync {
+        commitAsync { moves in
             guard generation == self.glideGeneration else { return }
             logger.info("glide timing: prep \(Int(prep * 1000))ms, \(self.lastAnimationStats, privacy: .public), commit \(Int((CACurrentMediaTime() - c0) * 1000))ms")
-            if let target = self.glideTarget { self.focusWindow(target) }
-            // One frame or so for the window server to show the moved windows, then hand back.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            self.focus(self.glideTarget, after: moves) {
                 guard generation == self.glideGeneration, self.animation == nil else { return }
                 self.overlay.level = OverlayWindow.backdropLevel
                 self.isActive = false
@@ -520,7 +518,8 @@ final class CanvasController: NSObject {
     }
 
     /// Give `w` keyboard focus now, keep system prompts on top, and time the app switch.
-    private func focusWindow(_ w: ManagedWindow, reasserting: Bool = false) {
+    /// `applied`, if given, runs on the main thread once the app has taken focus.
+    private func focusWindow(_ w: ManagedWindow, reasserting: Bool = false, applied: (() -> Void)? = nil) {
         lastFocusRequest = (w.id, w.pid, CACurrentMediaTime(), reasserting)
         activationRequest = (w.pid, CACurrentMediaTime())
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid { activationRequest = nil }
@@ -528,8 +527,87 @@ final class CanvasController: NSObject {
         // Accessibility queue (after any moves still running there), not the main thread.
         let ax = w.ax, pid = w.pid
         focusedWindowByApp[pid] = w.id
-        axQueue.async { AX.focus(ax, pid: pid) }
+        axQueue.async {
+            AX.focus(ax, pid: pid)
+            if let applied { DispatchQueue.main.async(execute: applied) }
+        }
         raiseSystemPrompts()
+    }
+
+    /// Runs `handBack` (dropping the overlay behind the real windows) once the window server shows
+    /// `moves` done and focusing `w` has been applied, plus a frame to draw them. Otherwise, other
+    /// windows visibly blink on top: switching apps can bring the new app's windows forward after
+    /// the overlay drops, and windows not yet moved show the old layout. Never later than a
+    /// quarter of a second, so a slow app can't hold things up.
+    private func focus(_ w: ManagedWindow?, after moves: [Move], thenHandBack handBack: @escaping () -> Void) {
+        let asked = CACurrentMediaTime()
+        let since = { Int((CACurrentMediaTime() - asked) * 1000) }
+        var done = false, focused: Int? = w == nil ? 0 : nil, landed: Int?
+        let once = {
+            guard !done else { return }
+            done = true
+            let waited = since()
+            if waited > 60 {
+                logger.info("hand-back waited \(waited)ms: \(w?.appName ?? "-", privacy: .public) \(focused.map { "focused after \($0)ms" } ?? "not focused yet", privacy: .public), windows \(landed.map { "landed after \($0)ms" } ?? "still moving", privacy: .public)")
+            }
+            handBack()
+        }
+        let ready = {
+            if focused != nil, landed != nil { DispatchQueue.main.asyncAfter(deadline: .now() + 0.02, execute: once) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: once)
+        whenOnScreen(moves, until: asked + 0.25) {
+            landed = since()
+            ready()
+        }
+        if let w {
+            focusWindow(w) {
+                focused = since()
+                ready()
+            }
+        }
+    }
+
+    /// Calls `done` once the window server shows every window in `moves` where it was put (or
+    /// at `deadline`). An app answers the Accessibility move as soon as it has taken it, but a busy
+    /// one (Chromium apps especially) hands it to the window server a frame or more later.
+    private func whenOnScreen(_ moves: [Move], until deadline: CFTimeInterval, done: @escaping () -> Void) {
+        let start = CACurrentMediaTime()
+        var pending = moves
+        func check() {
+            pending = notOnScreenYet(pending)
+            if !pending.isEmpty, CACurrentMediaTime() < deadline {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.008, execute: check)
+                return
+            }
+            let waited = Int((CACurrentMediaTime() - start) * 1000)
+            if waited > 0 {
+                let apps = Set((pending.isEmpty ? moves : pending).map(\.window.appName)).sorted().joined(separator: ", ")
+                logger.info("\(pending.isEmpty ? "windows landed" : "gave up on windows landing", privacy: .public) after \(waited)ms (\(apps, privacy: .public))")
+            }
+            done()
+        }
+        check()
+    }
+
+    /// The moves in `moves` the window server doesn't show yet. A closed window counts as done.
+    private func notOnScreenYet(_ moves: [Move]) -> [Move] {
+        guard !moves.isEmpty else { return [] }
+        var ids = moves.map { UnsafeRawPointer(bitPattern: UInt($0.window.id)) }
+        guard let array = CFArrayCreate(nil, &ids, ids.count, nil),
+              let info = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]] else { return [] }
+        var at: [CGWindowID: CGPoint] = [:]
+        for entry in info {
+            guard let id = entry[kCGWindowNumber as String] as? CGWindowID,
+                  let bounds = entry[kCGWindowBounds as String] as? [String: Double],
+                  let x = bounds["X"], let y = bounds["Y"] else { continue }
+            at[id] = CGPoint(x: x, y: y)
+        }
+        return moves.filter { move in
+            guard let p = at[move.window.id] else { return false }
+            if let to = move.to { return p.distance(to: to) > 2 }
+            return !inParkingCorner(p)
+        }
     }
 
     // MARK: Live tracking
@@ -819,6 +897,15 @@ final class CanvasController: NSObject {
         }
         if let completion { pendingSyncCompletions.append(completion) }
         guard !syncing else { syncAgain = true; return }
+        // On a full-screen app's Space the canvas's windows aren't on screen, so a scan would be
+        // thrown away (see below): skip ScreenCaptureKit and the window server altogether.
+        if Spaces.inFullScreenSpace {
+            refreshSpaces()
+            let completions = pendingSyncCompletions
+            pendingSyncCompletions = []
+            completions.forEach { $0() }
+            return
+        }
         syncing = true
         syncAgain = false
         let input = scanInput()
@@ -834,7 +921,7 @@ final class CanvasController: NSObject {
             // Ask apps about their windows here, off the main thread: slow apps take 100ms+ to
             // answer, which would otherwise stall a glide or a key press.
             var ax = inFullScreenSpace ? AXSnapshot() : Self.axSnapshot(for: found, input: input)
-            if input.live { ax.order = Self.windowServerOrder() }
+            if input.live, !inFullScreenSpace { ax.order = Self.windowServerOrder() }
             let s2 = CACurrentMediaTime()
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -2056,6 +2143,8 @@ final class CanvasController: NSObject {
     /// activation bring an app forward without leaving the Space you're on (see activate).
     func switchToSpace(_ space: Spaces.Space) {
         guard !gliding else { return }
+        // Already on that desktop, at 100%: nothing to switch to (and no reason to move focus).
+        if !isActive, space.isDesktop, space.id == Spaces.list().active { return }
         let target: (pid: pid_t, window: CGWindowID?, element: AXUIElement?)
         if let pid = space.pid {
             target = (pid, space.window, nil)
@@ -2101,7 +2190,9 @@ final class CanvasController: NSObject {
     /// from a full-screen app's Space until it's shown again, and gives the keyboard to an app on
     /// the new Space. (Moving to a full-screen app's Space, the canvas is on its way out.)
     private func canvasFollowsSpace() {
-        guard isActive, Spaces.current?.isDesktop == true else { return }
+        // Not once leaving has got to moving windows (gliding): the window you picked has the
+        // keyboard, or is about to.
+        guard isActive, !gliding, Spaces.current?.isDesktop == true else { return }
         overlay.orderOut(nil)
         overlay.orderFrontRegardless()
         // Once another app is active, ordinary activation is refused; the window server's own
@@ -2173,21 +2264,22 @@ final class CanvasController: NSObject {
             guard let self else { return }
             // Like a glide's last step: input waits while the real windows move in the background.
             self.gliding = true
-            self.commitAsync {
-                if let then {
-                    then()
-                } else if let toFocus = focus ?? self.windows.last(where: { !$0.parked }) {
-                    self.focusWindow(toFocus)
-                }
-                // Give the window server a beat to show the moved windows, then sink the overlay
-                // beneath them so it becomes the desktop.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            self.commitAsync { moves in
+                // Sink the overlay beneath the real windows so it becomes the desktop.
+                let handBack = {
                     self.overlay.level = OverlayWindow.backdropLevel
                     self.isActive = false
                     self.gliding = false
                     self.pathRegion = nil
                     self.view.render()
                     self.updateStreamingLingering()
+                }
+                if let then {
+                    // Off to another Space: that takes over, with a beat for the moved windows.
+                    then()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: handBack)
+                } else {
+                    self.focus(focus ?? self.windows.last(where: { !$0.parked }), after: moves, thenHandBack: handBack)
                 }
             }
         }
@@ -2222,6 +2314,9 @@ final class CanvasController: NSObject {
 
     private let axQueue = DispatchQueue(label: "com.invignation.expanse.ax", qos: .userInteractive)
 
+    /// A window commitAsync moved, and where it landed: nil for parked (anywhere in the corner).
+    private typealias Move = (window: ManagedWindow, to: CGPoint?)
+
     /// The real window is already where `target` would put it: where we last placed it, or, for
     /// a parked window, anywhere in the corner (macOS nudges parked windows, so they never land
     /// exactly on the park point and would otherwise be re-parked on every move).
@@ -2235,13 +2330,14 @@ final class CanvasController: NSObject {
     /// own: apps answer Accessibility calls one at a time, so a slow one (a browser with many
     /// windows) only holds up its own windows. The glide's target moves first. Apps with
     /// Chromium's enhanced-UI mode get it switched off while their windows move, then back on.
-    private func commitAsync(_ completion: @escaping () -> Void) {
+    /// `completion` gets the moves made.
+    private func commitAsync(_ completion: @escaping ([Move]) -> Void) {
         let jobs = commitPlan().compactMap { (w, target, parked) -> (ManagedWindow, AXUIElement, CGPoint, Bool)? in
             if alreadyAt(w, target, parked: parked) { w.parked = parked; return nil }
             guard let ax = w.ax else { return nil }
             return (w, ax, target, parked)
         }
-        guard !jobs.isEmpty else { scheduleSave(); completion(); return }
+        guard !jobs.isEmpty else { scheduleSave(); completion([]); return }
         let first = glideTarget?.id
         var byApp: [pid_t: [Int]] = [:]
         for (i, job) in jobs.enumerated() { byApp[job.0.pid, default: []].append(i) }
@@ -2281,13 +2377,15 @@ final class CanvasController: NSObject {
             DispatchQueue.main.async {
                 let now = CACurrentMediaTime()
                 ManagedWindow.moves += 1
+                var moves: [Move] = []
                 for ((w, _, target, parked), at) in zip(jobs, landed) {
                     w.lastPlaced = at ?? target
                     w.lastPlacedAt = now
                     w.parked = parked
+                    moves.append((w, parked ? nil : at ?? target))
                 }
                 self.scheduleSave()
-                completion()
+                completion(moves)
             }
         }
     }

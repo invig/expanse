@@ -722,7 +722,8 @@ private struct CanvasIllustration: View {
     }
 
     var body: some View {
-        TimelineView(.animation) { timeline in
+        // 60 fps is plenty for this, even on a 120 Hz screen.
+        TimelineView(.animation(minimumInterval: 1.0 / 60)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let cam = camera(t)
             GeometryReader { geo in

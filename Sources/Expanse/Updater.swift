@@ -152,6 +152,8 @@ final class Updater {
                     let candidate = folder.appendingPathComponent("Expanse.app")
                     if unzip.terminationStatus == 0, Self.verify(candidate, version: release.version) { app = candidate }
                 }
+                // Nothing to keep from a download that didn't check out.
+                if app == nil { try? FileManager.default.removeItem(at: folder) }
             } else {
                 logger.info("update download failed: \(error?.localizedDescription ?? "?", privacy: .public)")
             }
@@ -188,8 +190,8 @@ final class Updater {
             NSWorkspace.shared.open(ready.release.page)
             return
         }
+        let staged = folder.appendingPathComponent(".Expanse-update.app")
         do {
-            let staged = folder.appendingPathComponent(".Expanse-update.app")
             try? FileManager.default.removeItem(at: staged)
             try FileManager.default.moveItem(at: ready.app, to: staged)
             try? FileManager.default.removeItem(at: ready.app.deletingLastPathComponent())   // the download's folder
@@ -198,6 +200,11 @@ final class Updater {
             Self.relaunch()
         } catch {
             logger.error("update install failed: \(error.localizedDescription, privacy: .public)")
+            // The download may already have been moved (and its folder removed): start over at
+            // the next check rather than offering a copy that's gone.
+            try? FileManager.default.removeItem(at: staged)
+            try? FileManager.default.removeItem(at: ready.app.deletingLastPathComponent())
+            self.ready = nil
             Self.tell("Couldn't install Expanse \(ready.release.version)", error.localizedDescription)
             NSWorkspace.shared.open(ready.release.page)
         }

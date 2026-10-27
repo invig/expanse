@@ -27,8 +27,7 @@ enum Spaces {
         let desktops = raw.filter { ($0["type"] as? Int) == 0 }.count
         var desktopNumber = 0
         let spaces = raw.compactMap { s -> Space? in
-            guard let id = (s["id64"] as? NSNumber)?.uint64Value ?? (s["ManagedSpaceID"] as? NSNumber)?.uint64Value
-            else { return nil }
+            guard let id = spaceID(s) else { return nil }
             // 0 is a desktop, 4 a full-screen app.
             switch s["type"] as? Int {
             case 0:
@@ -48,19 +47,15 @@ enum Spaces {
                 return nil
             }
         }
-        let current = display["Current Space"] as? [String: Any]
-        let active = (current?["id64"] as? NSNumber)?.uint64Value ?? (current?["ManagedSpaceID"] as? NSNumber)?.uint64Value
-        return (spaces, active)
+        return (spaces, (display["Current Space"] as? [String: Any]).flatMap(spaceID))
     }
 
     /// Every Space on the main display in Mission Control's order (whatever its kind: what a swipe
     /// steps through), and the one showing.
     static func order() -> (ids: [UInt64], active: UInt64?) {
         guard let display = mainDisplay() else { return ([], nil) }
-        let ids = (display["Spaces"] as? [[String: Any]] ?? []).compactMap {
-            ($0["id64"] as? NSNumber)?.uint64Value ?? ($0["ManagedSpaceID"] as? NSNumber)?.uint64Value
-        }
-        return (ids, list().active)
+        let ids = (display["Spaces"] as? [[String: Any]] ?? []).compactMap(spaceID)
+        return (ids, (display["Current Space"] as? [String: Any]).flatMap(spaceID))
     }
 
     /// The Space showing on the main display.
@@ -138,10 +133,18 @@ enum Spaces {
         static let postEventRecord = dlsym(skyLight, "SLPSPostEventRecordTo").map { unsafeBitCast($0, to: PostEventRecord.self) }
     }
 
-    /// Whether the Space showing on the main display is a full-screen app's.
+    /// Whether the Space showing on the main display is a full-screen app's. Asked at every
+    /// window scan, so it reads just that Space's kind (4) rather than building the whole list.
     static var inFullScreenSpace: Bool {
-        let (spaces, active) = list()
-        return spaces.first { $0.id == active }?.isDesktop == false
+        guard let display = mainDisplay(), let current = display["Current Space"] as? [String: Any] else { return false }
+        if let type = current["type"] as? Int { return type == 4 }
+        let id = spaceID(current)
+        return (display["Spaces"] as? [[String: Any]] ?? []).first { spaceID($0) == id }?["type"] as? Int == 4
+    }
+
+    /// A Space's ID, under whichever key this macOS uses.
+    private static func spaceID(_ space: [String: Any]) -> UInt64? {
+        (space["id64"] as? NSNumber)?.uint64Value ?? (space["ManagedSpaceID"] as? NSNumber)?.uint64Value
     }
 
     /// The main display's entry (or the only one, when displays share Spaces).

@@ -123,7 +123,7 @@ tells you which ones are in the way; to change them yourself:
 open "expanse://toggle"            # zoom out / back
 open "expanse://tidy"
 open "expanse://nav?dir=left"      # left | right | up | down
-open "expanse://focus?app=Safari"  # or ?id=<window ID>
+open "expanse://focus?app=Safari"
 open "expanse://space?name=Safari"  # a full-screen app's Space, or "Desktop"
 open "expanse://pause"             # windows back to the macOS layout
 open "expanse://resume"
@@ -131,7 +131,7 @@ open "expanse://resume"
 
 Also `enter`, `exit`, `fit`, `zoom?scale=0.5`, `pan?dx=100&dy=0` and `restore`. Debugging
 commands (`dump`, `screen?w=1512&h=982` to pretend the display is that size, `place`, `prefer`,
-`update?install=1` to update without asking)
+`focus?id=` a window ID, `update?install=1` to update without asking)
 are off unless you run `defaults write com.invignation.expanse debugURLCommands -bool true`, since
 any app or web page can open `expanse://` links.
 

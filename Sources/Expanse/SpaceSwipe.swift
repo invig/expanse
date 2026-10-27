@@ -12,8 +12,10 @@ enum SpaceSwipe {
     /// on another display, or `target` not on the main display); then nothing is posted.
     static func go(to target: UInt64) -> Bool {
         let (ids, current) = Spaces.order()
+        // The pointer's on the main display, edges included (it rests on the top edge in a top hot corner).
+        let p = NSEvent.mouseLocation
         guard let from = ids.firstIndex(where: { $0 == current }), let to = ids.firstIndex(of: target),
-              let screen = NSScreen.screens.first, screen.frame.contains(NSEvent.mouseLocation)
+              let f = NSScreen.screens.first?.frame, p.x >= f.minX, p.x <= f.maxX, p.y >= f.minY, p.y <= f.maxY
         else { return false }
         guard from != to else { return true }
         let right = to > from
