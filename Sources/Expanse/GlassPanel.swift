@@ -43,6 +43,23 @@ final class GlassPanel: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    /// Where the overlay puts its text, as AppKit labels on the glass (in the content layer's
+    /// coordinates), so it's drawn as AppKit draws text and takes the glass's appearance by itself.
+    var textHost: NSView { host }
+
+    /// Headings and values: the glass gives AppKit labels no extra contrast, so secondaryLabelColor
+    /// is too faint on it; 70% of the label colour still reads as secondary.
+    static let secondaryText = NSColor.labelColor.withAlphaComponent(0.7)
+
+    static func label(_ text: String, font: NSFont, color: NSColor, alignment: NSTextAlignment = .left) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = font
+        label.textColor = color
+        label.alignment = alignment
+        label.lineBreakMode = .byTruncatingTail
+        return label
+    }
+
     private final class Host: NSView {
         var content: CALayer?
         var appearanceChanged: ((NSAppearance) -> Void)?

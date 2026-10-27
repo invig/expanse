@@ -3,7 +3,7 @@ import AppKit
 /// Beside the minimap: one tile per Space on the main display. Full-screen apps live in Spaces of
 /// their own, off the canvas; this is how you see them and get to them (and back). Only shown
 /// when there's more than one Space. Drawn on glass (see GlassPanel), in the colours
-/// applyAppearance gives it.
+/// applyAppearance gives it, with its text on the glass itself (textHost).
 final class SpacesBar: CALayer {
     private static let tile = CGSize(width: 100, height: 63)   // the screen's shape, roughly
     /// Between tiles, as at the panel's edges, so the current Space's ring has the same air all round.
@@ -17,8 +17,12 @@ final class SpacesBar: CALayer {
     private var tiles: [CALayer] = []
     /// Around each tile, shown for the current Space (and the one under the pointer).
     private var rings: [CALayer] = []
-    private var labels: [CATextLayer] = []
-    private let heading = CATextLayer()
+    private var labels: [NSTextField] = []
+    private lazy var heading = GlassPanel.label("Spaces", font: .systemFont(ofSize: 11, weight: .semibold),
+                                                color: GlassPanel.secondaryText)
+    weak var textHost: NSView? {
+        didSet { textHost?.addSubview(heading) }
+    }
     private var scale: CGFloat = 2
     private var appearance = NSAppearance(named: .darkAqua)!
     /// The tile under the pointer.
@@ -28,10 +32,6 @@ final class SpacesBar: CALayer {
 
     override init() {
         super.init()
-        heading.string = "Spaces"
-        heading.fontSize = 11
-        heading.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        addSublayer(heading)
         isHidden = true
     }
 
@@ -41,9 +41,7 @@ final class SpacesBar: CALayer {
     func setContentsScale(_ s: CGFloat) {
         scale = s
         contentsScale = s
-        heading.contentsScale = s
         for tile in tiles { tile.sublayers?.forEach { $0.contentsScale = s } }
-        for label in labels { label.contentsScale = s }
     }
 
     /// Dark text on light glass, light text on dark.
@@ -59,11 +57,13 @@ final class SpacesBar: CALayer {
         self.active = active
         self.wallpaper = wallpaper
         isHidden = spaces.count < 2
-        (tiles + rings + labels).forEach { $0.removeFromSuperlayer() }
+        (tiles + rings).forEach { $0.removeFromSuperlayer() }
+        labels.forEach { $0.removeFromSuperview() }
         tiles = spaces.enumerated().map { makeTile($1, at: $0) }
         rings = tiles.map(makeRing)
         labels = spaces.enumerated().map { makeLabel($1, under: tiles[$0]) }
-        (tiles + rings + labels).forEach(addSublayer)
+        (tiles + rings).forEach(addSublayer)
+        labels.forEach { textHost?.addSubview($0) }
         let width = Self.inset * 2 + CGFloat(spaces.count) * (Self.tile.width + Self.gap) - Self.gap
         bounds = CGRect(x: 0, y: 0, width: width, height: Minimap.size.height)
         heading.frame = CGRect(x: Self.inset, y: Minimap.size.height - 25, width: 120, height: 14)
@@ -119,13 +119,8 @@ final class SpacesBar: CALayer {
     }
     private static let ringOutset: CGFloat = 4.5
 
-    private func makeLabel(_ space: Spaces.Space, under tile: CALayer) -> CATextLayer {
-        let label = CATextLayer()
-        label.string = space.name
-        label.fontSize = 11
-        label.alignmentMode = .center
-        label.truncationMode = .end
-        label.contentsScale = scale
+    private func makeLabel(_ space: Spaces.Space, under tile: CALayer) -> NSTextField {
+        let label = GlassPanel.label(space.name, font: .systemFont(ofSize: 11), color: .labelColor, alignment: .center)
         label.frame = CGRect(x: tile.frame.minX - 2, y: 13, width: Self.tile.width + 4, height: 14)
         return label
     }
@@ -133,16 +128,11 @@ final class SpacesBar: CALayer {
     /// The Space you're on is ringed in the accent colour and named in bold; the one under the
     /// pointer gets a quiet ring. (The others aren't dimmed: that would read as disabled.)
     private func styleTiles() {
-        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         appearance.performAsCurrentDrawingAppearance {
-            // Text in a layer gets no vibrancy from the glass, so secondary text is darker than
-            // secondaryLabelColor, or it would be too faint to read.
-            heading.foregroundColor = (dark ? NSColor.labelColor : NSColor.labelColor.withAlphaComponent(0.75)).cgColor
             for (i, tile) in tiles.enumerated() {
                 let current = spaces[i].id == active
-                labels[i].foregroundColor = NSColor.labelColor.cgColor
                 labels[i].font = NSFont.systemFont(ofSize: 11, weight: current ? .semibold : .regular)
                 if !spaces[i].isDesktop {
                     // A quiet well in the glass: black would outweigh the current Space.

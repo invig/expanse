@@ -67,6 +67,8 @@ final class CanvasView: NSView {
         }
         addSubview(spacesGlass)
         addSubview(minimapGlass)
+        spacesBar.textHost = spacesGlass.textHost
+        minimap.textHost = minimapGlass.textHost
         applyAppearance()
     }
 

@@ -1,7 +1,8 @@
 import AppKit
 
 /// Bottom-right overview of the canvas: every window as a block, the viewport as an outline,
-/// the zoom level. Drawn on glass (see GlassPanel), in the colours applyAppearance gives it.
+/// the zoom level. Drawn on glass (see GlassPanel), in the colours applyAppearance gives it, with
+/// its text on the glass itself (textHost).
 final class Minimap: CALayer {
     static let size = CGSize(width: 208, height: 136)
 
@@ -9,12 +10,17 @@ final class Minimap: CALayer {
     /// The viewport's tint, under the windows (its outline, viewportShape, is over them).
     private let viewportFill = CAShapeLayer()
     private let viewportShape = CAShapeLayer()
-    private let title = CATextLayer()
+    private lazy var title = GlassPanel.label("Canvas", font: .systemFont(ofSize: 11, weight: .semibold),
+                                              color: GlassPanel.secondaryText)
+    private lazy var zoomText = GlassPanel.label("", font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular),
+                                                 color: GlassPanel.secondaryText, alignment: .right)
+    weak var textHost: NSView? {
+        didSet { [title, zoomText].forEach { textHost?.addSubview($0) } }
+    }
     /// The viewport's outline: the accent marks where you are; when it frames the whole map there's
     /// nothing to single out, so it's a quiet line instead.
     private var accentRing: CGColor?
     private var quietRing: CGColor?
-    private let zoomText = CATextLayer()
     private let mapArea: CGRect
 
     /// Canvas -> minimap (bottom-left layer coords) mapping from the last update.
@@ -35,16 +41,8 @@ final class Minimap: CALayer {
         viewportShape.fillColor = nil
         addSublayer(viewportShape)
 
-        title.string = "Canvas"
-        title.fontSize = 11
-        title.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         title.frame = CGRect(x: 14, y: Minimap.size.height - 25, width: 120, height: 14)
-        addSublayer(title)
-        zoomText.fontSize = 11
-        zoomText.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        zoomText.alignmentMode = .right
         zoomText.frame = CGRect(x: Minimap.size.width - 74, y: Minimap.size.height - 25, width: 60, height: 14)
-        addSublayer(zoomText)
     }
 
     override init(layer: Any) {
@@ -56,8 +54,6 @@ final class Minimap: CALayer {
 
     func setContentsScale(_ s: CGFloat) {
         contentsScale = s
-        title.contentsScale = s
-        zoomText.contentsScale = s
     }
 
     /// Dark marks on light glass, light ones on dark.
@@ -73,14 +69,11 @@ final class Minimap: CALayer {
                 : NSColor.labelColor.withAlphaComponent(0.24)).cgColor
             windowsShape.lineWidth = dark ? 0.75 : 0.5
             // Where you are, in the accent colour, as the current Space is beside it.
-            viewportFill.fillColor = NSColor.controlAccentColor.withAlphaComponent(dark ? 0.14 : 0.1).cgColor
+            // Enough to tint the windows under it: the area you see, not one more selected window.
+            viewportFill.fillColor = NSColor.controlAccentColor.withAlphaComponent(dark ? 0.3 : 0.22).cgColor
             accentRing = NSColor.controlAccentColor.cgColor
             quietRing = NSColor.labelColor.withAlphaComponent(dark ? 0.35 : 0.28).cgColor
             viewportShape.strokeColor = viewportFill.isHidden ? quietRing : accentRing
-            // (Darker than secondaryLabelColor: text in a layer gets no vibrancy from the glass.)
-            let secondary = dark ? NSColor.labelColor : NSColor.labelColor.withAlphaComponent(0.75)
-            title.foregroundColor = secondary.cgColor
-            zoomText.foregroundColor = secondary.cgColor
         }
         CATransaction.commit()
     }
@@ -114,16 +107,18 @@ final class Minimap: CALayer {
         viewportFill.path = CGPath(roundedRect: shown, cornerWidth: radius, cornerHeight: radius, transform: nil)
         // The ring stands off the windows inside, so it reads as a frame around what you see,
         // not as one more (selected) window.
-        let ring = radius + Self.ringOutset
-        viewportShape.path = CGPath(roundedRect: shown.insetBy(dx: -Self.ringOutset, dy: -Self.ringOutset),
+        // (Small, it hugs the tint instead, or it would frame one window like a selection.)
+        let outset = shown.width < 30 ? 2 : Self.ringOutset
+        let ring = radius + outset
+        viewportShape.path = CGPath(roundedRect: shown.insetBy(dx: -outset, dy: -outset),
                                     cornerWidth: ring, cornerHeight: ring, transform: nil)
         // Seeing everything, the outline says so (lighter); a tint over the whole map would only cloud it.
         let framesAll = shown.width * shown.height > 0.5 * mapArea.width * mapArea.height
         viewportFill.isHidden = framesAll
-        viewportShape.lineWidth = framesAll ? 1 : 2
+        viewportShape.lineWidth = framesAll ? 1 : 1.5
         viewportShape.strokeColor = framesAll ? quietRing : accentRing
         let zoom = "\(Int((scale * 100).rounded()))%"
-        if zoomText.string as? String != zoom { zoomText.string = zoom }
+        if zoomText.stringValue != zoom { zoomText.stringValue = zoom }
     }
 
     private static let ringOutset: CGFloat = 3
