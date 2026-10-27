@@ -1099,10 +1099,16 @@ final class CanvasController: NSObject {
     private func isManageable(_ w: SCWindow, tracked: Bool, regular: (pid_t) -> Bool) -> Bool {
         guard w.windowLayer == 0, w.isOnScreen,
               w.frame.width >= 100, w.frame.height >= 60,
-              let app = w.owningApplication, app.processID != getpid(), regular(app.processID)
+              let app = w.owningApplication, app.processID != getpid(), regular(app.processID),
+              !Self.leftAlone.contains(app.bundleIdentifier)
         else { return false }
         return tracked || screenRectCG.intersects(w.frame)
     }
+
+    /// Calls: a phone or FaceTime call's window stays where its app puts it, in front of you. It
+    /// isn't part of your layout, and taking one on sent the view off to wherever there was room
+    /// for it (and the app kept moving it back).
+    private static let leftAlone: Set<String> = ["com.apple.mobilephone", "com.apple.FaceTime"]
 
     /// Ordinary apps (with a Dock icon), not menu-bar extras or background agents. Asking is a
     /// LaunchServices lookup (around a millisecond), and window scans ask for every app, so the
