@@ -333,7 +333,7 @@ final class CanvasView: NSView {
         if bar.over {
             drag = .none
             if let i = bar.tile {
-                // Hover only updates while zoomed out; don't leave the tile lit after leaving.
+                // Switching Space takes the pointer away; don't leave the tile lit.
                 spacesBar.hovered = nil
                 controller.switchToSpace(spacesBar.spaces[i])
             }
@@ -461,9 +461,10 @@ final class CanvasView: NSView {
     }
 
     override func mouseMoved(with e: NSEvent) {
-        guard controller.isActive else { return }
+        // A Space tile switches Space at 100% too, so it lights up under the pointer there as well.
         let bar = spacesBarHit(e)
         spacesBar.hovered = bar.tile
+        guard controller.isActive else { return }
         let w = minimapPoint(e) == nil && !bar.over ? controller.window(atView: point(e)) : nil
         if w !== hovered {
             hovered?.node.label.string = hovered?.appName
