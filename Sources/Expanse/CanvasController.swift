@@ -376,6 +376,7 @@ final class CanvasController: NSObject {
                                                           object: nil, queue: .main) { [weak self] _ in
             self?.refreshWallpaper()
             self?.refreshSpaces()
+            self?.fullScreenChanging()
             self?.canvasFollowsSpace()
             self?.syncSoon()
         }
@@ -682,13 +683,97 @@ final class CanvasController: NSObject {
     private var changedWindows: [CGWindowID: (element: AXUIElement, mouseDown: Bool)] = [:]
     private var changedWindowsScheduled = false
 
+    /// Windows that moved while a full-screen window came or went. You didn't move them (the
+    /// canvas's windows aren't even on screen then): macOS or their app did. Chromium browsers fit
+    /// their other windows onto the screen when one goes full screen, for instance. So they're
+    /// put back where the canvas has them, rather than followed, as soon as the moves stop: while
+    /// the full-screen window is still up, out of sight, so they're in place when you come back.
+    private var movedAroundFullScreen: Set<CGWindowID> = []
+    /// A full-screen window has just come or gone (or the Space changed): until then, see above.
+    private var fullScreenSettleUntil: CFTimeInterval = 0
+    private var putBackWork: DispatchWorkItem?
+    /// Windows gone full screen. One coming back is what you're looking at (macOS shows it and
+    /// gives it the keyboard), wherever the view has got to meanwhile, so the view goes to it.
+    private var wentFullScreen: Set<CGWindowID> = []
+
+    private func backFromFullScreen(_ w: ManagedWindow) {
+        logger.info("\(w.appName, privacy: .public)[\(w.id)] back from full screen")
+        fullScreenChanging()
+        // Once macOS has finished bringing it back.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak w] in
+            guard let self, let w, self.windows.contains(where: { $0 === w }) else { return }
+            self.glideWhenIdle(to: w)
+        }
+    }
+
+    private func fullScreenChanging() {
+        fullScreenSettleUntil = CACurrentMediaTime() + 1.5
+        if !movedAroundFullScreen.isEmpty { putBackAfterFullScreenSoon() }
+    }
+
+    /// Whether `w` moving now, not by you, is down to a full-screen window coming or going (see
+    /// movedAroundFullScreen). If so it's noted, to be put back.
+    private func movedByFullScreen(_ w: ManagedWindow, inFullScreenSpace: Bool) -> Bool {
+        guard inFullScreenSpace || CACurrentMediaTime() < fullScreenSettleUntil else { return false }
+        if movedAroundFullScreen.insert(w.id).inserted {
+            logger.info("\(w.appName, privacy: .public)[\(w.id)] moved as a full-screen window came or went; putting it back")
+        }
+        putBackAfterFullScreenSoon()
+        return true
+    }
+
+    private func putBackAfterFullScreenSoon() {
+        putBackWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.putBackWork = nil
+            guard !self.isPaused else { return }
+            let ids = self.movedAroundFullScreen
+            self.movedAroundFullScreen = []
+            let moved = self.windows.filter { ids.contains($0.id) }
+            guard !moved.isEmpty else { return }
+            logger.info("putting back \(moved.count) windows moved as a full-screen window came or went")
+            for w in moved {
+                w.lastPlaced = nil
+                // Apps fitting windows onto the screen can shrink them too.
+                if let ax = w.ax, let size = AX.size(ax),
+                   abs(size.width - w.canvasFrame.width) > 1 || abs(size.height - w.canvasFrame.height) > 1 {
+                    _ = self.resizeReal(w, ax, to: w.canvasFrame.size)
+                }
+            }
+            // Zoomed out (or mid-glide), the next commit puts them back.
+            if !self.isActive, !self.gliding { self.commitInBackground() }
+        }
+        putBackWork = work
+        // Half a second after the last such move: an app moves its windows in a burst.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
     /// A real window moved or resized. In live mode, a move we didn't make means the user
     /// dragged it: the canvas follows.
     /// `userDragging`: the mouse button was down when the change was reported.
     private func realWindowChanged(_ w: ManagedWindow, _ element: AXUIElement, userDragging: Bool) {
         guard !isPaused else { return }
-        if let size = AX.size(element) { adoptSize(w, size, fromUser: userDragging) }
-        let pos = isActive ? nil : AX.position(element)
+        let size = AX.size(element)
+        let position = AX.position(element)
+        if !userDragging {
+            // Going full screen: it has a Space of its own now and keeps its spot on the canvas,
+            // and for a moment other windows may move too (see movedAroundFullScreen).
+            if AX.isFullScreen(element) || size == screenSize {
+                wentFullScreen.insert(w.id)
+                fullScreenChanging()
+                return
+            }
+            if !isActive, wentFullScreen.remove(w.id) != nil {
+                backFromFullScreen(w)
+                return
+            }
+            // (Not where Expanse just put it: that's its own move, putting it back included.)
+            let ours = w.lastPlaced.flatMap { last in position.map { last.distance(to: $0) < 2 } } ?? false
+            if !ours, movedByFullScreen(w, inFullScreenSpace: Spaces.inFullScreenSpace) { return }
+        }
+        if let size { adoptSize(w, size, fromUser: userDragging) }
+        let pos = isActive ? nil : position
         // Around a display change macOS keeps shoving windows for a while; only a drag with the
         // mouse button down counts as you moving a window then.
         if suspendTracking, !userDragging, !isActive, settleUntil != .distantFuture, Date() < settleUntil,
@@ -949,6 +1034,8 @@ final class CanvasController: NSObject {
                     let liveNow = !self.isActive && !self.suspendTracking
                     let stale = input.live != liveNow
                         || (liveNow && (input.moves != ManagedWindow.moves || input.camera != self.camera))
+                    // Tracked windows this scan leaves out for being full screen (see wentFullScreen).
+                    self.wentFullScreen.formUnion(fullScreen.filter { id in self.windows.contains { $0.id == id } })
                     self.apply(found, ax: ax, stale: stale)
                     // A window still opening (see axSnapshot) is looked at again shortly too.
                     again = again || stale || ax.pending
@@ -1194,7 +1281,11 @@ final class CanvasController: NSObject {
                     w.lastPlaced = f.origin
                 } else if live {
                     if let last = w.lastPlaced {
-                        if last.distance(to: f.origin) > 2, NSEvent.pressedMouseButtons & 1 == 0, cameBack(w, to: f.origin) {
+                        if last.distance(to: f.origin) > 2, NSEvent.pressedMouseButtons & 1 == 0,
+                           movedByFullScreen(w, inFullScreenSpace: false) {
+                            // Put back later; its size isn't taken either.
+                            continue
+                        } else if last.distance(to: f.origin) > 2, NSEvent.pressedMouseButtons & 1 == 0, cameBack(w, to: f.origin) {
                             replaceAny = true
                         } else if last.distance(to: f.origin) > 2 {
                             // Moved behind our back (by the user or the app): follow it.
@@ -1700,7 +1791,11 @@ final class CanvasController: NSObject {
     /// New windows go to an empty spot next to what you were working on; windows coming back
     /// from minimize / hide go back where they were.
     private func arrive(_ w: ManagedWindow, anchor: ManagedWindow?, live: Bool, returning: Bool) {
-        if returning {
+        if returning, wentFullScreen.remove(w.id) != nil, live {
+            // Back at its old spot (see add()), and the view goes there.
+            backFromFullScreen(w)
+            return
+        } else if returning {
             // add() already put it back at its old spot.
         } else if windowKinds[w.id]?.standard ?? (AX.subrole(w.ax) == kAXStandardWindowSubrole as String),
                   let spot = freeSpot(for: w, near: anchor, onScreenOnly: !autoCentre) {
@@ -2154,8 +2249,13 @@ final class CanvasController: NSObject {
     /// activation bring an app forward without leaving the Space you're on (see activate).
     func switchToSpace(_ space: Spaces.Space) {
         guard !gliding else { return }
-        // Already on that desktop, at 100%: nothing to switch to (and no reason to move focus).
-        if !isActive, space.isDesktop, space.id == Spaces.list().active { return }
+        // Already on that Space. From the canvas opened over a full-screen app, its tile means
+        // back to it, which is what leaving the canvas does; otherwise there's nothing to do
+        // (and no reason to move focus).
+        if space.id == Spaces.list().active {
+            if isActive, !space.isDesktop { exit() }
+            return
+        }
         let target: (pid: pid_t, window: CGWindowID?, element: AXUIElement?)
         if let pid = space.pid {
             target = (pid, space.window, nil)

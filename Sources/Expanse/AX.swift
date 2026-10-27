@@ -57,6 +57,12 @@ enum AX {
         return AXValueGetValue(v as! AXValue, .cgPoint, &p) ? p : nil
     }
 
+    /// In macOS full screen, on a Space of its own.
+    static func isFullScreen(_ element: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &value) == .success && (value as? Bool) == true
+    }
+
     static func size(_ element: AXUIElement) -> CGSize? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &value) == .success,
