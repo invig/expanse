@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds a signed, notarised, universal Expanse.app and publishes it as a GitHub release.
+# Builds a signed, notarised, universal Expanse.app, publishes it as a GitHub release, and points
+# the Homebrew cask at it (scripts/update-cask.sh).
 #
 # One-time setup:
 #   1. A "Developer ID Application" certificate in your keychain
@@ -67,4 +68,8 @@ On first launch a short walkthrough sets up the two permissions Expanse needs (A
 Screen Recording) and shows the shortcuts. See the [README](https://github.com/invig/expanse#readme)
 for everything else.
 NOTES
+
+echo "==> Updating the Homebrew cask (invig/homebrew-tap)"
+scripts/update-cask.sh "$VERSION" "$ZIP" ||
+  echo "The release is out, but the cask isn't updated: run scripts/update-cask.sh $VERSION $ZIP" >&2
 echo "==> Done"

@@ -53,7 +53,11 @@ the canvas glides to it, centred, at 100%, ready to type into.
 
 ## Install
 
-**[Download the latest release](https://github.com/invig/expanse/releases/latest)**, unzip it and
+```bash
+brew install --cask invig/tap/expanse
+```
+
+Or **[download the latest release](https://github.com/invig/expanse/releases/latest)**, unzip it and
 move **Expanse.app** to Applications. It's signed and notarised by Apple and runs on macOS 15 or
 later, on Apple Silicon and Intel Macs.
 
@@ -210,8 +214,9 @@ log stream --level info --predicate 'subsystem == "com.invignation.expanse"'
 ```
 
 To publish a release (signed, notarised, universal): `scripts/release.sh`. See the script's
-header for the one-time setup. Installed copies pick it up from GitHub within a day; development
-builds are signed differently and never update.
+header for the one-time setup. It also points the Homebrew cask in
+[invig/homebrew-tap](https://github.com/invig/homebrew-tap) at the new release. Installed copies
+pick it up from GitHub within a day; development builds are signed differently and never update.
 
 Don't run a copy signed differently from your development build (a release, say) on the same Mac:
 it shares the app ID, and macOS's Accessibility permission for Expanse can come out of it confused.
