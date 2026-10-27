@@ -42,6 +42,8 @@ final class CanvasView: NSView {
         root.masksToBounds = true
         wallpaper.contentsGravity = .resizeAspectFill
         wallpaper.actions = ["contents": NSNull()]
+        // Underneath everything, the minimap and Spaces too when they go under the windows (see render).
+        wallpaper.zPosition = -2
         root.addSublayer(wallpaper)
         for l in [world, labels, guides] {
             l.actions = ["sublayers": NSNull()]
@@ -212,6 +214,11 @@ final class CanvasView: NSView {
             selectionBox.path = nil
         }
         minimap.update(windows: c.windows.map(\.canvasFrame), viewport: c.camera.toCanvas(viewRect), scale: c.camera.scale)
+        // Gliding at 100%, the overlay is over the real windows, showing their pictures for a
+        // moment: the minimap and Spaces stay under the windows, as they are before and after,
+        // rather than jumping in front of them. Zoomed out, they're on top to be clicked.
+        minimap.zPosition = c.gliding ? -1 : 0
+        spacesBar.zPosition = minimap.zPosition
         CATransaction.commit()
     }
 
