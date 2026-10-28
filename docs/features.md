@@ -4,13 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-None open. Fixed, not yet released:
-- Windows dropping off the canvas (seen twice on 28 Oct): when macOS restarted its capture
-  service, Expanse dropped every window it was capturing and stopped scanning, so they never came
-  back and new windows (a VM's) weren't taken on. It now recovers.
-- An app that opens again (UTM, say) gets its windows' spots back, and the view goes to them.
-- VM windows keep their spot when the VM changes resolution, instead of drifting off their line.
-- Clicking a window you can see, after panning the view yourself, no longer recentres it.
+None open.
 
 ## Next up
 
@@ -52,6 +46,10 @@ None open. Fixed, not yet released:
 
 ## Done
 
+- 0.1.25: Recovers when macOS restarts its capture service (windows no longer drop off the canvas,
+  and new ones are still taken on); an app that opens again gets its windows' spots back; VM
+  windows keep their spot when the VM changes resolution; clicking a window you can see keeps a
+  view you placed.
 - 0.1.24: A window back from full screen keeps its spot, instead of staying where macOS set it
   down.
 - 0.1.23: Troubleshooting menu (Detailed Logging, Copy Logs for a Bug Report, Report an Issue);
