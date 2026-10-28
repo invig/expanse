@@ -29,6 +29,16 @@ final class ManagedWindow {
     let addedAt = CACurrentMediaTime()
     /// The size the user chose. On a small screen the real window may be shrunk to fit.
     var preferredSize: CGSize = .zero
+
+    /// Apps whose window follows a display somewhere else (a VM, a remote Mac): they size it to
+    /// match, and resizing it makes them change that display's resolution. Expanse leaves their
+    /// size alone and takes whatever size they choose.
+    private static let sizesOwnWindows: Set<String> = [
+        "com.utmapp.UTM", "com.github.cirruslabs.tart", "com.parallels.desktop.console", "com.vmware.fusion",
+        "org.virtualbox.app.VirtualBoxVM", "com.apple.ScreenSharing", "com.edovia.screens.5", "com.edovia.screens.mac",
+        "com.moonlight-stream.Moonlight", "com.microsoft.rdc.macos", "com.microsoft.rdc.mac",
+    ]
+    var sizesItself: Bool { Self.sizesOwnWindows.contains(bundleID) }
     /// The size we last set, so our own resizes aren't mistaken for the user's.
     var lastSized: CGSize?
     /// Where macOS had the window before Expanse managed it (global CG). Restored on quit / pause.

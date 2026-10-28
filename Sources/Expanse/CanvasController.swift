@@ -1549,7 +1549,7 @@ final class CanvasController: NSObject {
             w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
             if let pw = match.pw, let ph = match.ph { w.preferredSize = CGSize(width: pw, height: ph) }
             if let hx = match.hx, let hy = match.hy { w.home = CGPoint(x: hx, y: hy) }
-            if let sw = match.w, let sh = match.h, let ax = w.ax,
+            if let sw = match.w, let sh = match.h, let ax = w.ax, !w.sizesItself,
                abs(sw - f.width) > 1 || abs(sh - f.height) > 1 {
                 // Quitting put the macOS size back; restore the canvas size.
                 let actual = resizeReal(w, ax, to: CGSize(width: sw, height: sh))
@@ -1571,8 +1571,10 @@ final class CanvasController: NSObject {
             w.canvasFrame.origin = canvasPoint(forGlobal: global)
         }
 
-        // A window opened (or came back) while Expanse is running, not one found at launch.
-        let anchor = windows.last { !$0.parked }
+        // A window opened (or came back) while Expanse is running, not one found at launch. It
+        // goes next to the window it came from: its app's front window in view, else the window
+        // in front.
+        let anchor = windows.last { !$0.parked && $0.pid == w.pid } ?? windows.last { !$0.parked }
         let arriving = !firstSync && !suspendTracking
 
         windows.append(w)
@@ -1791,9 +1793,15 @@ final class CanvasController: NSObject {
     /// True while the canvas is a tightened version of the home layout: some window is smaller
     /// than its chosen size because this screen is smaller.
     var isDerived: Bool {
-        windows.contains { $0.preferredSize.width > 0 &&
-            ($0.canvasFrame.width < $0.preferredSize.width - 1 || $0.canvasFrame.height < $0.preferredSize.height - 1) }
+        windows.contains { !$0.sizesItself && $0.preferredSize.width > 0 &&
+            ($0.canvasFrame.width < $0.preferredSize.width - Self.appRounding
+             || $0.canvasFrame.height < $0.preferredSize.height - Self.appRounding) }
     }
+
+    /// How far short of the size asked for a window can end up because its app rounds sizes
+    /// (Terminal to whole character cells, Chess to its board's proportions): that's still the
+    /// chosen size, not one shrunk for a smaller screen. Shrinking to fit a screen takes far more.
+    static let appRounding: CGFloat = 32
 
     /// You moved a window (dragging on the canvas or for real). On the big screen its new spot is
     /// its home spot, straight away: anything that fits the layout from home spots before the
@@ -1824,21 +1832,29 @@ final class CanvasController: NSObject {
             for (w, h) in zip(windows, home) { w.home = CGPoint(x: h.minX.rounded(), y: h.minY.rounded()) }
         }
         for w in windows {
-            guard let ax = w.ax else { continue }
+            guard let ax = w.ax, !w.sizesItself else { continue }
             let chosen = w.preferredSize.width > 0 ? w.preferredSize : w.canvasFrame.size
             let target = CGSize(width: min(chosen.width, maxSize.width).rounded(),
                                 height: min(chosen.height, maxSize.height).rounded())
             guard abs(target.width - w.canvasFrame.width) > 1 || abs(target.height - w.canvasFrame.height) > 1 else { continue }
             let actual = resizeReal(w, ax, to: target)
             logger.info("fit size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
+            // Asked for the size you chose and the app came as close as it goes (Terminal rounds to
+            // character cells, Preview has a minimum width): that's the chosen size from now on,
+            // rather than asking again at every fit.
+            if chosen.width <= maxSize.width, chosen.height <= maxSize.height,
+               abs(actual.width - target.width) <= Self.appRounding, abs(actual.height - target.height) <= Self.appRounding {
+                w.preferredSize = actual
+            }
             w.canvasFrame.size = actual
             updateCapture(w)
         }
 
-        // A point or two off its home size is an app rounding, not a smaller screen: counted as
-        // home, or the windows beyond it would creep a point every time the screen changes.
+        // A little off its home size is an app rounding, not a smaller screen: counted as home,
+        // or the windows beyond it would creep every time the screen changes.
         let sizes = zip(windows, home).map { w, h in
-            abs(w.canvasFrame.width - h.width) <= 2 && abs(w.canvasFrame.height - h.height) <= 2 ? h.size : w.canvasFrame.size
+            abs(w.canvasFrame.width - h.width) <= Self.appRounding && abs(w.canvasFrame.height - h.height) <= Self.appRounding
+                ? h.size : w.canvasFrame.size
         }
         let origins = Self.derive(home: home, sizes: sizes)
         var frames = zip(origins, windows).map { CGRect(origin: $0, size: $1.canvasFrame.size) }
@@ -2038,9 +2054,14 @@ final class CanvasController: NSObject {
         }
     }
 
-    /// Repair / scripting: put a window at a canvas position; `commit` then moves real windows.
+    /// Repair / scripting: put a window at a canvas position, as if you'd moved it there (its home
+    /// spot follows); `commit` then moves real windows.
     func setCanvasOrigin(_ id: CGWindowID, _ origin: CGPoint, commit commitNow: Bool) {
-        if let w = windows.first(where: { $0.id == id }) { w.canvasFrame.origin = origin }
+        if let w = windows.first(where: { $0.id == id }) {
+            let before = w.canvasFrame.origin
+            w.canvasFrame.origin = origin
+            noteUserMove(w, from: before)
+        }
         guard commitNow else { return }
         if !isActive {
             windows.forEach { $0.lastPlaced = nil }
@@ -2106,8 +2127,10 @@ final class CanvasController: NSObject {
         }
     }
 
-    /// The nearest canvas position for `w` that overlaps nothing: beside, below, left of or above
-    /// existing windows, closest to the anchor. Spots already on screen win.
+    /// A canvas position for `w` that overlaps nothing. First anywhere along an edge of the
+    /// anchor, the window it came from: right, below, left, then above, lined up with the
+    /// anchor's top or left edge, then its bottom or right, then centred. Only when every edge is
+    /// taken, beside the windows nearest the anchor, the closest first. Spots already on screen win.
     private func freeSpot(for w: ManagedWindow, near anchor: ManagedWindow?, onScreenOnly: Bool) -> CGPoint? {
         let others = windows.filter { $0 !== w }.map(\.canvasFrame)
         guard !others.isEmpty else { return nil }
@@ -2116,22 +2139,33 @@ final class CanvasController: NSObject {
         let target = anchor?.canvasFrame.center ?? camera.center(in: viewSize)
         let visible = camera.toCanvas(CGRect(origin: .zero, size: viewSize))
 
-        // Neighbours of the windows nearest the anchor; nudged by direction so ties go right, then down.
+        // (origin, score bias, ranked by distance to the anchor?)
+        var candidates: [(CGPoint, CGFloat, Bool)] = []
+        if let a = anchor?.canvasFrame {
+            let ys = [a.minY, a.maxY - size.height, a.midY - size.height / 2]
+            let xs = [a.minX, a.maxX - size.width, a.midX - size.width / 2]
+            for (i, y) in ys.enumerated() { candidates.append((CGPoint(x: a.maxX + gap, y: y), CGFloat(i) * 10, false)) }
+            for (i, x) in xs.enumerated() { candidates.append((CGPoint(x: x, y: a.maxY + gap), 40 + CGFloat(i) * 10, false)) }
+            for (i, y) in ys.enumerated() { candidates.append((CGPoint(x: a.minX - gap - size.width, y: y), 80 + CGFloat(i) * 10, false)) }
+            for (i, x) in xs.enumerated() { candidates.append((CGPoint(x: x, y: a.minY - gap - size.height), 120 + CGFloat(i) * 10, false)) }
+        }
+        // Further out: beside the windows nearest the anchor, after every spot touching it;
+        // nudged by direction so ties go right, then down.
+        let away: CGFloat = anchor == nil ? 0 : 5000
         let nearest = others.sorted { $0.center.distance(to: target) < $1.center.distance(to: target) }.prefix(12)
-        var candidates: [(CGPoint, CGFloat)] = []
         for o in nearest {
-            candidates.append((CGPoint(x: o.maxX + gap, y: o.minY), 0))
-            candidates.append((CGPoint(x: o.minX, y: o.maxY + gap), 40))
-            candidates.append((CGPoint(x: o.minX - gap - size.width, y: o.minY), 80))
-            candidates.append((CGPoint(x: o.minX, y: o.minY - gap - size.height), 120))
+            candidates.append((CGPoint(x: o.maxX + gap, y: o.minY), away, true))
+            candidates.append((CGPoint(x: o.minX, y: o.maxY + gap), away + 40, true))
+            candidates.append((CGPoint(x: o.minX - gap - size.width, y: o.minY), away + 80, true))
+            candidates.append((CGPoint(x: o.minX, y: o.minY - gap - size.height), away + 120, true))
         }
 
         var best: (CGPoint, CGFloat)?
-        for (origin, bias) in candidates {
+        for (origin, bias, byDistance) in candidates {
             let r = CGRect(origin: origin, size: size)
             if others.contains(where: { $0.insetBy(dx: -gap / 2, dy: -gap / 2).intersects(r) }) { continue }
             if onScreenOnly && !visible.contains(r) { continue }
-            let score = r.center.distance(to: target) + bias + (visible.contains(r) ? 0 : 1500)
+            let score = (byDistance ? r.center.distance(to: target) : 0) + bias + (visible.contains(r) ? 0 : 1500)
             if score < (best?.1 ?? .infinity) { best = (origin, score) }
         }
         return best.map { CGPoint(x: $0.0.x.rounded(), y: $0.0.y.rounded()) }
@@ -2230,8 +2264,9 @@ final class CanvasController: NSObject {
     /// (256, about six a stream) at around 35-50 streams, other apps' included, and a stream
     /// started after that never delivers a frame, without any error. So Expanse streams at most
     /// this many windows, the ones that matter most, leaving room for screen sharing and the
-    /// like; the other windows in view get one-off pictures in turn.
-    private static let streamBudget = 16
+    /// like; the other windows in view get one-off pictures in turn. A VM's replayd gives out
+    /// sooner: `defaults write com.invignation.expanse streamBudget -int 8` lowers it.
+    private static let streamBudget = { let n = UserDefaults.standard.integer(forKey: "streamBudget"); return n > 0 ? n : 16 }()
 
     /// `reconfigure`: also bring running streams to the size they should have now (which restarts
     /// them; see WindowCapture.update). While the camera moves this is left to
@@ -2870,7 +2905,7 @@ final class CanvasController: NSObject {
         let margin: CGFloat = 16
         let target = CGSize(width: min(w.preferredSize.width, viewSize.width - margin * 2).rounded(),
                             height: min(w.preferredSize.height, viewSize.height - margin * 2).rounded())
-        guard let ax = w.ax,
+        guard let ax = w.ax, !w.sizesItself,
               abs(target.width - w.canvasFrame.width) > 1 || abs(target.height - w.canvasFrame.height) > 1 else { return }
         logger.info("resize \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(target), privacy: .public)")
         let actual = resizeReal(w, ax, to: target)
@@ -2884,6 +2919,8 @@ final class CanvasController: NSObject {
     /// where the canvas says.
     @discardableResult
     private func resizeReal(_ w: ManagedWindow, _ ax: AXUIElement, to size: CGSize) -> CGSize {
+        // A VM or remote-screen window: its app sets the size (see ManagedWindow.sizesItself).
+        if w.sizesItself { return AX.size(ax) ?? w.canvasFrame.size }
         if let current = AX.size(ax), size.width > current.width + 1 || size.height > current.height + 1 {
             AX.setPosition(ax, viewport.origin)
             w.lastPlaced = nil
@@ -2898,12 +2935,13 @@ final class CanvasController: NSObject {
     /// window's preferred size.
     /// Only a resize made with the mouse button down (dragging an edge) counts as you choosing a
     /// size. macOS, apps (Chromium animates AX resizes in steps) and Expanse itself resize windows
-    /// too, and none of those should change the size you chose.
+    /// too, and none of those should change the size you chose. The exception: a VM or remote
+    /// screen window, whose app picks its size (see ManagedWindow.sizesItself).
     private func adoptSize(_ w: ManagedWindow, _ size: CGSize, fromUser: Bool = false) {
         guard size != w.canvasFrame.size, size.width > 0, size.height > 0 else { return }
         w.canvasFrame.size = size
         let ours = w.lastSized.map { abs($0.width - size.width) < 2 && abs($0.height - size.height) < 2 } ?? false
-        if fromUser && !ours && !suspendTracking {
+        if (fromUser || w.sizesItself) && !ours && !suspendTracking {
             w.preferredSize = size
             w.lastSized = nil
         }
@@ -2969,8 +3007,13 @@ final class CanvasController: NSObject {
 
     // MARK: Animation
 
+    /// For demo recordings: camera moves take this many times as long, so a recorder that can only
+    /// keep up at 30fps (in a VM) still gets every frame, and the clip is sped up afterwards.
+    /// `defaults write com.invignation.expanse animationSlowdown -float 2`; read at launch.
+    private let animationSlowdown = max(1, UserDefaults.standard.double(forKey: "animationSlowdown"))
+
     func animate(to target: Camera, duration: CFTimeInterval = 0.22, handsBack: Bool = false, completion: (() -> Void)? = nil) {
-        animation = CameraAnimation(from: camera, to: target, start: CACurrentMediaTime(), duration: duration,
+        animation = CameraAnimation(from: camera, to: target, start: CACurrentMediaTime(), duration: duration * animationSlowdown,
                                     completion: completion, handsBack: handsBack)
         // Moving on (a hop during the last one's hand-back, say): nothing's being handed back to.
         handingBackTo = nil
