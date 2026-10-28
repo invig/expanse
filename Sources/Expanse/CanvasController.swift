@@ -1472,6 +1472,12 @@ final class CanvasController: NSObject {
                         }
                     } else {
                         let before = w.canvasFrame.origin
+                        // Just back from full screen (or another window's), it's at the spot it
+                        // had: wherever macOS set it down is put right, not followed.
+                        if before.distance(to: canvasPoint(forGlobal: f.origin)) > 2, NSEvent.pressedMouseButtons & 1 == 0,
+                           movedByFullScreen(w, inFullScreenSpace: false) {
+                            continue
+                        }
                         w.canvasFrame.origin = canvasPoint(forGlobal: f.origin)
                         if before.distance(to: w.canvasFrame.origin) > 2 {
                             logger.info("follow \(w.appName, privacy: .public)[\(w.id)] found at \(NSStringFromPoint(f.origin), privacy: .public) (never placed)")
