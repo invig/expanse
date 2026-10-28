@@ -2440,7 +2440,7 @@ final class CanvasController: NSObject {
         } else if windowKinds[w.id]?.standard ?? (AX.subrole(w.ax) == kAXStandardWindowSubrole as String),
                   let spot = freeSpot(for: w, near: anchor, onScreenOnly: !autoCentre) {
             w.canvasFrame.origin = spot
-            logger.info("placed new window \(w.appName, privacy: .public) at \(NSStringFromPoint(spot), privacy: .public)")
+            logger.info("placed new window \(w.appName, privacy: .public) at \(NSStringFromPoint(spot), privacy: .public)\(anchor.map { " beside \($0.appName)[\($0.id)] at \(NSStringFromRect($0.canvasFrame))" } ?? "", privacy: .public)")
         } else {
             return
         }
@@ -2482,12 +2482,16 @@ final class CanvasController: NSObject {
     /// anchor, the window it came from: right, below, left, then above, lined up with the
     /// anchor's top or left edge, then its bottom or right, then centred. Only when every edge is
     /// taken, beside the windows nearest the anchor, the closest first. Spots already on screen win.
+    /// Upward comes last, near and far: a spot above the anchor only when there's none beside or
+    /// below it within a few thousand points (going by distance alone, a gap in the row above
+    /// often won).
     private func freeSpot(for w: ManagedWindow, near anchor: ManagedWindow?, onScreenOnly: Bool) -> CGPoint? {
         let others = windows.filter { $0 !== w }.map(\.canvasFrame)
         guard !others.isEmpty else { return nil }
         let gap = Self.gap
         let size = w.canvasFrame.size
         let target = anchor?.canvasFrame.center ?? camera.center(in: viewSize)
+        let above = anchor?.canvasFrame.minY ?? target.y
         let visible = camera.toCanvas(CGRect(origin: .zero, size: viewSize))
 
         // (origin, score bias, ranked by distance to the anchor?)
@@ -2517,6 +2521,7 @@ final class CanvasController: NSObject {
             if others.contains(where: { $0.insetBy(dx: -gap / 2, dy: -gap / 2).intersects(r) }) { continue }
             if onScreenOnly && !visible.contains(r) { continue }
             let score = (byDistance ? r.center.distance(to: target) : 0) + bias + (visible.contains(r) ? 0 : 1500)
+                + (r.maxY <= above + 0.5 ? 3000 : 0)
             if score < (best?.1 ?? .infinity) { best = (origin, score) }
         }
         return best.map { CGPoint(x: $0.0.x.rounded(), y: $0.0.y.rounded()) }
