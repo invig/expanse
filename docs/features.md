@@ -4,9 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-None open. Fixed, not yet released:
-- After a display change and back, a window in a column could come back out of line with the
-  window above it, when the smaller screen made the windows beside the column the same width.
+None open.
 
 ## Next up
 
@@ -48,6 +46,10 @@ None open. Fixed, not yet released:
 
 ## Done
 
+- 0.1.26: A stuck capture service (replayd) isn't swamped any more: scans back off, and captures
+  wait for it to answer (overnight on 29 Oct, requests piled up in it until the screen froze); an
+  app's loading box doesn't take its main window's spot; new windows go upward only as a last
+  resort; a window in a column stays lined up after a display change and back.
 - 0.1.25: Recovers when macOS restarts its capture service (windows no longer drop off the canvas,
   and new ones are still taken on); an app that opens again gets its windows' spots back; VM
   windows keep their spot when the VM changes resolution; clicking a window you can see keeps a
