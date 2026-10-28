@@ -23,6 +23,10 @@ final class CanvasController: NSObject {
     private let overlay: OverlayWindow
 
     private var syncTimer: Timer?
+    /// You've put the view where you want it (panned at 100%): a window you can see that you
+    /// click, or dive into, gets focus without the view moving to centre it. Over at the next
+    /// glide (⌃ + arrows, ⌃⌥C, focus going to a window off screen), zoom or display change.
+    private var viewPlaced = false
     private var dialogTimer: Timer?
     private var syncing = false
     /// The scan in flight (see sync): one given up on is told apart from the one after it.
@@ -332,6 +336,7 @@ final class CanvasController: NSObject {
         // (the layout tightens on a smaller screen), so the old middle can be somewhere else now.
         if screenResized, let w = centreAfterResize ?? currentWindow(), windows.contains(where: { $0 === w }) {
             camera = focusCamera(for: w)
+            viewPlaced = false
             logger.info("display change: centred on \(w.appName, privacy: .public)[\(w.id)]")
         }
         screenResized = false
@@ -543,8 +548,14 @@ final class CanvasController: NSObject {
         let r = camera.toView(w.canvasFrame)
         let fullyVisible = !w.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r)
         guard !fullyVisible else { return }
+        if viewPlaced, !w.parked {
+            // Partly on screen, in a view you put there: it's the one you clicked, not one to go to.
+            logger.info("view placed by you: \(w.appName, privacy: .public)[\(w.id)] focused where it is")
+            return
+        }
         if autoCentre {
-            logger.info("focus-settled glide to \(w.appName, privacy: .public)[\(w.id)]")
+            let real = w.ax.flatMap(AX.position).map { NSStringFromPoint($0) } ?? "?"
+            logger.info("focus-settled glide to \(w.appName, privacy: .public)[\(w.id)]: \(w.parked ? "parked" : "on screen at \(NSStringFromRect(r))", privacy: .public) in \(NSStringFromSize(self.viewSize), privacy: .public), real window at \(real, privacy: .public)")
             glide(to: w)
         } else if w.parked, lastHiddenHint != w.id {
             // Off means off: macOS often focuses a hidden window by itself (after a close or
@@ -572,6 +583,7 @@ final class CanvasController: NSObject {
     /// so typing keeps going to the window that was just clicked.
     private func glide(to w: ManagedWindow) {
         logger.info("glide to \(w.appName, privacy: .public)[\(w.id)]")
+        viewPlaced = false
         focusQuery += 1   // a focus answer still on its way is out of date now
         let t0 = CACurrentMediaTime()
         if !gliding {
@@ -1724,6 +1736,7 @@ final class CanvasController: NSObject {
     /// isn't fully on screen); on the zoomed-out canvas the highlight moves and the view follows.
     func navigate(_ direction: Direction) {
         guard !isPaused else { return }
+        viewPlaced = false
         // Mid-glide: re-aim the glide in flight, hopping on from the window it's heading to.
         if gliding {
             // Mid-glide: hop on from the window it's heading to, straight away.
@@ -3004,7 +3017,15 @@ final class CanvasController: NSObject {
         if let focus {
             bringToFront(focus)
             fitToScreen(focus)
-            target = focusCamera(for: focus)
+            if viewPlaced, abs(camera.scale - 1) < 0.001,
+               Self.goesOnScreen(camera.toView(focus.canvasFrame).offsetBy(dx: viewport.minX, dy: viewport.minY), in: viewport) {
+                // You put the view here: the window you picked is on screen, and the view stays.
+                logger.info("view placed by you: diving into \(focus.appName, privacy: .public)[\(focus.id)] where it is")
+                target = Camera(origin: CGPoint(x: camera.origin.x.rounded(), y: camera.origin.y.rounded()), scale: 1)
+            } else {
+                viewPlaced = false
+                target = focusCamera(for: focus)
+            }
         } else {
             // Straight back where you were, unless you've moved around since zooming out.
             target = returnCamera ?? Camera.centered(on: camera.center(in: viewSize), scale: 1, viewSize: viewSize)
@@ -3052,15 +3073,19 @@ final class CanvasController: NSObject {
         let vp = viewport
         return windows.map { w in
             let r = camera.toView(w.canvasFrame).offsetBy(dx: vp.minX, dy: vp.minY)
-            let visible = r.intersection(vp)
-            // macOS won't put a title bar above the menu bar; it would shove the window down.
-            // Such windows stay parked and the backdrop draws them where they belong.
-            let topClipped = r.minY < vp.minY - 1
-            if !topClipped, !visible.isNull, visible.width >= 48, visible.height >= 48 {
+            if Self.goesOnScreen(r, in: vp) {
                 return (w, CGPoint(x: r.minX.rounded(), y: r.minY.rounded()), false)
             }
             return (w, parkPoint, true)
         }
+    }
+
+    /// A window at `r` (global) is put on screen, not parked: enough of it shows. macOS won't put
+    /// a title bar above the menu bar (it would shove the window down), so one whose top is cut
+    /// off stays parked, and the backdrop draws it where it belongs.
+    private static func goesOnScreen(_ r: CGRect, in vp: CGRect) -> Bool {
+        let visible = r.intersection(vp)
+        return r.minY >= vp.minY - 1 && !visible.isNull && visible.width >= 48 && visible.height >= 48
     }
 
     private let axQueue = DispatchQueue(label: "com.invignation.expanse.ax", qos: .userInteractive)
@@ -3265,11 +3290,13 @@ final class CanvasController: NSObject {
         guard isActive else { return }
         cancelAnimation()
         camera.pan(by: d)
+        viewPlaced = abs(camera.scale - 1) < 0.001
         cameraChanged()
     }
 
     func zoom(by factor: CGFloat, at anchor: CGPoint) {
         returnCamera = nil
+        viewPlaced = false
         guard isActive else { return }
         cancelAnimation()
         camera.zoom(to: camera.scale * factor, anchor: anchor)
