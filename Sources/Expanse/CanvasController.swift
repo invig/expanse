@@ -2030,8 +2030,8 @@ final class CanvasController: NSObject {
             let derived = Self.derive(home: home, sizes: sizes)
             let homeFlipped = home.map(\.transposed)
             for i in windows.indices where derived[i].distance(to: here[i].origin) >= 1
-                || Self.anchor(i, in: home) != Self.anchor(i, in: here)
-                || Self.anchor(i, in: homeFlipped) != Self.anchor(i, in: hereFlipped) {
+                || !Self.isNearest(Self.anchor(i, in: home), i, in: here)
+                || !Self.isNearest(Self.anchor(i, in: homeFlipped), i, in: hereFlipped) {
                 strays.insert(i)
             }
             // Left to right and top to bottom, so a stray next to another stray measures from its
@@ -2190,6 +2190,23 @@ final class CanvasController: NSObject {
 
     /// Every anchor as near as the nearest (see anchor), first one first.
     static func anchors(_ i: Int, in frames: [CGRect]) -> [Anchor] {
+        let candidates = anchorCandidates(i, in: frames)
+        guard let best = candidates.min(by: { ($0.cost, $0.edge ? 1 : 0) < ($1.cost, $1.edge ? 1 : 0) }) else { return [] }
+        return candidates.filter { $0.edge == best.edge && $0.cost <= best.cost + 0.5 }.map(\.anchor)
+    }
+
+    /// Whether `anchor` is as near as window `i`'s nearest among `frames`, of either kind (none:
+    /// whether it has none). Shrinking windows to the same width can put a window in a column
+    /// exactly the standard gap from the window beside it: a tie the gap wins (see anchor), though
+    /// the column still explains where it is.
+    static func isNearest(_ anchor: Anchor?, _ i: Int, in frames: [CGRect]) -> Bool {
+        let candidates = anchorCandidates(i, in: frames)
+        guard let anchor, let best = candidates.map(\.cost).min() else { return anchor == nil && candidates.isEmpty }
+        return candidates.contains { $0.anchor == anchor && $0.cost <= best + 0.5 }
+    }
+
+    /// Window `i`'s possible anchors among `frames`, each with how far it is (see anchor).
+    private static func anchorCandidates(_ i: Int, in frames: [CGRect]) -> [(cost: CGFloat, edge: Bool, anchor: Anchor)] {
         func span(_ a0: CGFloat, _ a1: CGFloat, _ b0: CGFloat, _ b1: CGFloat) -> CGFloat {
             max(0, max(a0, b0) - min(a1, b1))   // distance between ranges; 0 when they overlap
         }
@@ -2203,8 +2220,7 @@ final class CanvasController: NSObject {
                 candidates.append((span(o.minY, o.maxY, r.minY, r.maxY) + 2 * abs(r.minX - o.minX), true, .edge(j)))
             }
         }
-        guard let best = candidates.min(by: { ($0.cost, $0.edge ? 1 : 0) < ($1.cost, $1.edge ? 1 : 0) }) else { return [] }
-        return candidates.filter { $0.edge == best.edge && $0.cost <= best.cost + 0.5 }.map(\.anchor)
+        return candidates
     }
 
     /// Push overlapping frames apart in reading order. Only ever moving right or down means it
