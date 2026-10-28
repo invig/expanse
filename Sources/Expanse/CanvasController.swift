@@ -23,6 +23,7 @@ final class CanvasController: NSObject {
     private let overlay: OverlayWindow
 
     private var syncTimer: Timer?
+    private var dialogTimer: Timer?
     private var syncing = false
     /// A scan was asked for while one was running: run another once it's done.
     private var syncAgain = false
@@ -316,7 +317,7 @@ final class CanvasController: NSObject {
     private func restoreSizesAndPlace() {
         isActive = true
         view.render()
-        overlay.level = OverlayWindow.canvasLevel
+        overlay.level = canvasLevel
         overlay.orderFrontRegardless()
         // Same as Tidy Up: sizes back to what you chose (capped at this screen), overlaps pushed
         // apart, clusters pulled back to the standard gap.
@@ -394,6 +395,8 @@ final class CanvasController: NSObject {
         // unhiding. A scan costs ScreenCaptureKit tens of milliseconds of LaunchServices lookups,
         // so the regular one is only a safety net.
         syncTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.sync() }
+        // A dialog can open (or close) any time the canvas is up; nothing tells Expanse.
+        dialogTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.keepDialogsVisible() }
         let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
         for (i, app) in apps.enumerated() {
             // A few at a time: each asks the app to register, and a busy app takes a while.
@@ -570,7 +573,7 @@ final class CanvasController: NSObject {
             gliding = true
             view.render()
             // Cover the screen first, so resizing (which may briefly move the window) isn't seen.
-            overlay.level = OverlayWindow.canvasLevel
+            overlay.level = canvasLevel
             overlay.orderFrontRegardless()
         }
         // A hop during a glide (or while the last one's windows are still moving) starts from
@@ -1730,6 +1733,41 @@ final class CanvasController: NSObject {
 
     // MARK: System prompts
 
+    /// The canvas covers app windows and the Dock, but never another app's dialog (an alert, a
+    /// password or permission prompt, a run-modal Save panel): those float above app windows, and
+    /// covered by the canvas they'd wait unseen until you left it. With one on screen, the canvas
+    /// goes just under it.
+    private var canvasLevel: NSWindow.Level {
+        guard let dialog = Self.lowestDialogLevel() else { return OverlayWindow.canvasLevel }
+        return NSWindow.Level(rawValue: dialog - 1)
+    }
+
+    /// The lowest window level of another app's dialog on screen: a window above app windows and
+    /// floating panels (modal-panel level and up) but under the canvas, other than the Dock's.
+    static func lowestDialogLevel() -> Int? {
+        let modal = Int(CGWindowLevelForKey(.modalPanelWindow)), canvas = OverlayWindow.canvasLevel.rawValue
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return info.compactMap { w -> Int? in
+            guard let layer = w[kCGWindowLayer as String] as? Int, layer >= modal, layer < canvas,
+                  let pid = w[kCGWindowOwnerPID as String] as? pid_t, pid != getpid(),
+                  (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let bounds = w[kCGWindowBounds as String] as? [String: CGFloat],
+                  bounds["Width"] ?? 0 >= 100, bounds["Height"] ?? 0 >= 50,
+                  NSRunningApplication(processIdentifier: pid)?.bundleIdentifier != "com.apple.dock"
+            else { return nil }
+            return layer
+        }.min()
+    }
+
+    /// While the canvas is up (zoomed out, or a glide), keep it under any dialog that opened.
+    private func keepDialogsVisible() {
+        guard overlay.level != OverlayWindow.backdropLevel else { return }
+        let level = canvasLevel
+        guard level != overlay.level else { return }
+        logger.info("canvas level \(self.overlay.level.rawValue) -> \(level.rawValue)\(level == OverlayWindow.canvasLevel ? "" : " (under a dialog)", privacy: .public)")
+        overlay.level = level
+    }
+
     /// On-screen windows of background system processes (permission reminders, password and
     /// security prompts). Expanse doesn't manage them, but must never bury them.
     private var systemPrompts: [(pid: pid_t, id: CGWindowID)] = []
@@ -2736,7 +2774,7 @@ final class CanvasController: NSObject {
         if CACurrentMediaTime() - lastWallpaperRefresh > 30 { refreshWallpaper() }
         refreshSpaces()
         NSApp.activate(ignoringOtherApps: true)
-        overlay.level = OverlayWindow.canvasLevel
+        overlay.level = canvasLevel
         overlay.makeKeyAndOrderFront(nil)
         overlay.makeFirstResponder(view)
         returnCamera = nil
