@@ -871,6 +871,7 @@ final class CanvasController: NSObject {
             let ours = w.lastPlaced.flatMap { last in position.map { last.distance(to: $0) < 2 } } ?? false
             if !ours, movedByFullScreen(w, inFullScreenSpace: Spaces.inFullScreenSpace) { return }
         }
+        let selfResized = !userDragging && resizedItself(w, to: size)
         if let size { adoptSize(w, size, fromUser: userDragging) }
         let pos = isActive ? nil : position
         // Around a display change macOS keeps shoving windows for a while; only a drag with the
@@ -885,6 +886,9 @@ final class CanvasController: NSObject {
             } else if inParkingCorner(pos) {
                 w.parked = true
                 w.lastPlaced = pos
+            } else if selfResized {
+                w.lastPlaced = nil
+                if !gliding { commitInBackground() }
             } else if !userDragging, cameBack(w, to: pos) {
                 if !gliding { commitInBackground() }
             } else {
@@ -898,6 +902,22 @@ final class CanvasController: NSObject {
         }
         view.render()
         scheduleSave()
+    }
+
+    /// A VM or remote-screen window (see ManagedWindow.sizesItself) whose app just changed its
+    /// size, as when the guest's resolution changes: its app moves it too (keeping it centred),
+    /// which isn't you moving it. True while a move should be put back rather than followed, so
+    /// it keeps its spot, growing or shrinking from its top-left like any other window.
+    private func resizedItself(_ w: ManagedWindow, to size: CGSize?) -> Bool {
+        guard w.sizesItself, NSEvent.pressedMouseButtons & 1 == 0 else { return false }
+        let now = CACurrentMediaTime()
+        if let size, abs(size.width - w.canvasFrame.width) > 1 || abs(size.height - w.canvasFrame.height) > 1 {
+            if now - w.resizedItselfAt > 2 {
+                logger.info("\(w.appName, privacy: .public)[\(w.id)] resized itself \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(size), privacy: .public); keeping its spot")
+            }
+            w.resizedItselfAt = now
+        }
+        return now - w.resizedItselfAt < 2
     }
 
     /// The real window moved seconds after Expanse moved it, and not by you: back to where
@@ -1483,6 +1503,7 @@ final class CanvasController: NSObject {
                 // Zoomed out, positions aren't followed, so skip asking each app (slow apps
                 // would stall dragging); ScreenCaptureKit's frame is good enough for sizes.
                 let f = live ? (axFrames[sc.windowID] ?? sc.frame) : sc.frame
+                let selfResized = live && resizedItself(w, to: f.size)
                 w.scWindow = sc
                 if let title = sc.title { w.title = title }
                 if live && inParkingCorner(f.origin) {
@@ -1494,6 +1515,9 @@ final class CanvasController: NSObject {
                            movedByFullScreen(w, inFullScreenSpace: false) {
                             // Put back later; its size isn't taken either.
                             continue
+                        } else if last.distance(to: f.origin) > 2, selfResized {
+                            w.lastPlaced = nil
+                            replaceAny = true
                         } else if last.distance(to: f.origin) > 2, NSEvent.pressedMouseButtons & 1 == 0, cameBack(w, to: f.origin) {
                             replaceAny = true
                         } else if last.distance(to: f.origin) > 2 {
@@ -1509,6 +1533,12 @@ final class CanvasController: NSObject {
                         // had: wherever macOS set it down is put right, not followed.
                         if before.distance(to: canvasPoint(forGlobal: f.origin)) > 2, NSEvent.pressedMouseButtons & 1 == 0,
                            movedByFullScreen(w, inFullScreenSpace: false) {
+                            continue
+                        }
+                        if selfResized {
+                            // Its app recentred it as it resized itself: back to its spot.
+                            replaceAny = true
+                            if !stale { adoptSize(w, f.size) }
                             continue
                         }
                         w.canvasFrame.origin = canvasPoint(forGlobal: f.origin)

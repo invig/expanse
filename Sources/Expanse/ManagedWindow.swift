@@ -27,6 +27,8 @@ final class ManagedWindow {
     var cameBackAt: CFTimeInterval = 0
     /// When Expanse started tracking it.
     let addedAt = CACurrentMediaTime()
+    /// When its app last changed its size (see sizesItself, CanvasController.resizedItself).
+    var resizedItselfAt: CFTimeInterval = 0
     /// The size the user chose. On a small screen the real window may be shrunk to fit.
     var preferredSize: CGSize = .zero
 
