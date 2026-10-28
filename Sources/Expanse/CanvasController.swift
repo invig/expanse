@@ -110,7 +110,16 @@ final class CanvasController: NSObject {
         let home: CGPoint?
         let parked: Bool
         let at: Date
+        /// Closed, not just out of view (see closedWindows): its spot is kept for its app opening
+        /// again (appQuit), but a window that turns up with its ID is a new one (Finder reuses them).
+        var closed = false
     }
+    /// Windows the app has closed (Accessibility says their element is gone), not yet dropped by
+    /// a scan: minimised or hidden windows are told apart from them this way.
+    private var closedWindows = Set<CGWindowID>()
+    /// The app whose window just closed, and when: macOS then gives focus to another of its
+    /// windows, which isn't you picking that one (see focusSettled).
+    private var lastClose: (pid: pid_t, at: CFTimeInterval)?
     private var wallpaperTimer: Timer?
     private var lastWallpaperRefresh: CFTimeInterval = 0
 
@@ -561,6 +570,12 @@ final class CanvasController: NSObject {
         let r = camera.toView(w.canvasFrame)
         let fullyVisible = !w.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r)
         guard !fullyVisible else { return }
+        if let close = lastClose, close.pid == w.pid, CACurrentMediaTime() - close.at < 1.5, !inputSince(close.at) {
+            // You closed a window, and macOS gave focus to another of the app's, wherever that is.
+            // The view stays where you were; going to it looked like a window reopening.
+            logger.info("\(w.appName, privacy: .public)[\(w.id)] got focus after a window of its app closed; the view stays")
+            return
+        }
         if viewPlaced, !w.parked {
             // Partly on screen, in a view you put there: it's the one you clicked, not one to go to.
             logger.info("view placed by you: \(w.appName, privacy: .public)[\(w.id)] focused where it is")
@@ -765,6 +780,10 @@ final class CanvasController: NSObject {
         switch notification {
         case kAXWindowCreatedNotification, kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification,
              kAXWindowDeminiaturizedNotification:
+            if notification == kAXUIElementDestroyedNotification as String, let id, let w = windows.first(where: { $0.id == id }) {
+                closedWindows.insert(id)
+                lastClose = (w.pid, CACurrentMediaTime())
+            }
             syncSoon()
         case kAXFocusedWindowChangedNotification:
             var pid: pid_t = 0
@@ -1652,7 +1671,15 @@ final class CanvasController: NSObject {
         }
 
         var restored = false
+        // A closed window's ID turning up again is a new window (Finder reuses them), not that
+        // one coming back to its spot.
+        if recentlyRemoved[w.id]?.closed == true { recentlyRemoved.removeValue(forKey: w.id) }
         var returning = recentlyRemoved[w.id] != nil
+        // Saved spots are for windows coming back: at launch, or its app's when that app has just
+        // started (opening again after quitting). A window an app opens later is a new one: in a
+        // spot of its own beside where you are, not one of the app's old windows' spots.
+        let mayTakeSavedSpot = firstSync || (NSRunningApplication(processIdentifier: w.pid)?.launchDate
+            .map { Date().timeIntervalSince($0) < 60 } ?? false)
         // An app that quit opening again: its window is back at its spot (see appQuit).
         var reopened = false
         if live, let tab = tabTakingOver(from: w, at: f) {
@@ -1674,8 +1701,8 @@ final class CanvasController: NSObject {
             w.originalFrame = back.originalFrame
             w.preferredSize = back.preferredSize
             w.home = back.home
-        } else if let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid, size: f.size,
-                                                    open: openWindowKeys, from: &savedPool) {
+        } else if mayTakeSavedSpot, let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid,
+                                                                      size: f.size, open: openWindowKeys, from: &savedPool) {
             // A saved spot: at launch, or an app opened later that had windows last time.
             w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
             if let pw = match.pw, let ph = match.ph { w.preferredSize = CGSize(width: pw, height: ph) }
@@ -1693,7 +1720,7 @@ final class CanvasController: NSObject {
                 w.originalFrame = CGRect(x: ox, y: oy, width: ow, height: oh)
             }
             restored = true
-        } else if !firstSync, let spot = LayoutStore.largerSpot(bundleID: w.bundleID, size: f.size, open: openWindowKeys, in: savedPool) {
+        } else if !firstSync, mayTakeSavedSpot, let spot = LayoutStore.largerSpot(bundleID: w.bundleID, size: f.size, open: openWindowKeys, in: savedPool) {
             // An app opening again shows a small box first (an update or loading screen): it goes
             // in the middle of where the app's window was, which the window itself takes when it
             // comes, so the view doesn't go somewhere else in between.
@@ -2536,7 +2563,8 @@ final class CanvasController: NSObject {
         if !isPaused {
             recentlyRemoved[w.id] = Departed(pid: w.pid, bundleID: w.bundleID, appName: w.appName, title: w.title,
                                              canvasFrame: w.canvasFrame, originalFrame: w.originalFrame,
-                                             preferredSize: w.preferredSize, home: w.home, parked: w.parked, at: Date())
+                                             preferredSize: w.preferredSize, home: w.home, parked: w.parked, at: Date(),
+                                             closed: closedWindows.remove(w.id) != nil)
             // Closed windows never come back; don't keep them forever.
             let weekAgo = Date().addingTimeInterval(-7 * 24 * 3600)
             recentlyRemoved = recentlyRemoved.filter { $0.value.at > weekAgo }
