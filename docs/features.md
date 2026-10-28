@@ -8,6 +8,10 @@ What we might build next. New requests go in as they come up, and finished work 
   among them, stopped being managed until Expanse restarted. Cause unknown. Since 0.1.23 the log
   says why a window drops: next time, run `expanse://dump` before restarting.
 
+Fixed, not yet released:
+- A window back from full screen keeps its spot (seen 28 Oct with Calendar), instead of staying
+  where macOS set it down.
+
 ## Next up
 
 1. **Window size snapping** (asked 28 Oct). Resize so grids of windows come out neat. Today
