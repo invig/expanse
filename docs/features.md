@@ -4,7 +4,9 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-None open.
+None open. Fixed, not yet released:
+- After a display change and back, a window in a column could come back out of line with the
+  window above it, when the smaller screen made the windows beside the column the same width.
 
 ## Next up
 
