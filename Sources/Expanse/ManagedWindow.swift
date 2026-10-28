@@ -46,6 +46,8 @@ final class ManagedWindow {
     /// Where the window sits in the home layout: the arrangement at full chosen sizes (the big
     /// screen). On a smaller screen the canvas layout is derived from this, so it comes back exactly.
     var home: CGPoint?
+    /// How far the last fit pushed the window to clear an overlap (see fitLayoutToScreen).
+    var fitPush: CGVector = .zero
     /// Captured once when first seen, even if it's then on screen and not captured any more.
     var needsFirstFrame = true
     /// The last one-off picture asked for (CACurrentMediaTime), and failures in a row since.

@@ -214,6 +214,9 @@ final class CanvasController: NSObject {
     private var focusSettleWork: DispatchWorkItem?
     private var lastHiddenHint: CGWindowID?
     static let settleDuration: TimeInterval = 20
+    /// The gap kept around a window that would otherwise fill the screen. Every fit uses the same one,
+    /// or a window fitted after a display change would shrink (and shift) the first time you focus it.
+    static let screenMargin: CGFloat = 16
 
     private func registerDisplayCallback() {
         CGDisplayRegisterReconfigurationCallback({ _, flags, info in
@@ -289,7 +292,7 @@ final class CanvasController: NSObject {
         } else if final {
             // Zoomed out, the layout still fits the new screen (the real windows follow on the way
             // out), but there's no window to centre.
-            fitLayoutToScreen(margin: 0, tidy: false)
+            fitLayoutToScreen(tidy: false, rederiving: [])
             screenResized = false
             centreAfterResize = nil
         }
@@ -317,7 +320,7 @@ final class CanvasController: NSObject {
         overlay.orderFrontRegardless()
         // Same as Tidy Up: sizes back to what you chose (capped at this screen), overlaps pushed
         // apart, clusters pulled back to the standard gap.
-        fitLayoutToScreen(margin: 0, tidy: false)
+        fitLayoutToScreen(tidy: false, rederiving: [])
         // The screen changed size: the window you were in goes in the middle. Fitting moves windows
         // (the layout tightens on a smaller screen), so the old middle can be somewhere else now.
         if screenResized, let w = centreAfterResize ?? currentWindow(), windows.contains(where: { $0 === w }) {
@@ -966,6 +969,8 @@ final class CanvasController: NSObject {
             cameraX: Double(camera.origin.x), cameraY: Double(camera.origin.y),
             centerX: Double(center.x), centerY: Double(center.y),
             cleanExit: cleanExit,
+            fittedWidth: fittedViewSize == .zero ? nil : Double(fittedViewSize.width),
+            fittedHeight: fittedViewSize == .zero ? nil : Double(fittedViewSize.height),
             windows: windows.map {
                 SavedLayout.Window(bundleID: $0.bundleID, appName: $0.appName, title: LayoutStore.titleKey($0.title),
                                    x: Double($0.canvasFrame.minX), y: Double($0.canvasFrame.minY),
@@ -1021,7 +1026,7 @@ final class CanvasController: NSObject {
             if let pw = e.pw ?? e.w, let ph = e.ph ?? e.h, pw > 0 { w.preferredSize = CGSize(width: pw, height: ph) }
             restored += 1
         }
-        fitLayoutToScreen(margin: 0, tidy: false)
+        fitLayoutToScreen(tidy: false)
         logger.info("restored a layout: \(restored) of \(self.windows.count) windows")
         view.render()
         animate(to: fitCamera())
@@ -1403,9 +1408,13 @@ final class CanvasController: NSObject {
         let liveNow = !isActive && !suspendTracking
         let live = liveNow && !stale
         var seen = Set<CGWindowID>()
-        var restoredAny = false
+        var restored = Set<CGWindowID>()
         var replaceAny = false
         if firstSync, let saved {
+            // Saved windows go back where you last saw them, moved only if this screen differs.
+            if fittedViewSize == .zero, let w = saved.fittedWidth, let h = saved.fittedHeight {
+                fittedViewSize = CGSize(width: w, height: h)
+            }
             // Restore the camera first so windows we don't recognise keep their real position.
             if let cx = saved.centerX, let cy = saved.centerY {
                 camera = Camera.centered(on: CGPoint(x: cx, y: cy), scale: 1, viewSize: viewSize)
@@ -1471,7 +1480,7 @@ final class CanvasController: NSObject {
                 // A new window is where its app put it, which nothing here has moved, so its frame
                 // holds even in an out-of-date scan (opening windows in a burst makes most scans
                 // out of date).
-                restoredAny = add(sc, live: liveNow, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) || restoredAny
+                if add(sc, live: liveNow, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) { restored.insert(sc.windowID) }
             }
         }
 
@@ -1482,7 +1491,9 @@ final class CanvasController: NSObject {
         // Windows put back where the saved layout had them (at launch, after the lock screen, an
         // app that had windows last time opening again) come with the sizes and spots of the
         // screen it was saved on, a laptop's say: fit the layout to this one before anything moves.
-        if restoredAny { fitLayoutToScreen(margin: 0, tidy: false) }
+        // Only those: the windows already here stay where you see them.
+        let restoredAny = !restored.isEmpty
+        if restoredAny { fitLayoutToScreen(tidy: false, rederiving: firstSync ? [] : restored) }
 
         // Windows that opened since the last scan (see arrive), and any that came back from a
         // move (see cameBack), move together, off the main thread; and when several opened at
@@ -1784,7 +1795,7 @@ final class CanvasController: NSObject {
         // Home spots are otherwise brought up to date when the layout is saved, which windows
         // you've only just moved may still be waiting for: Tidy would put them back.
         homeFromCanvas()
-        fitLayoutToScreen(margin: 16, tidy: true)
+        fitLayoutToScreen(tidy: true)
         view.render()
         animate(to: fitCamera())
         scheduleSave()
@@ -1806,27 +1817,119 @@ final class CanvasController: NSObject {
     /// You moved a window (dragging on the canvas or for real). On the big screen its new spot is
     /// its home spot, straight away: anything that fits the layout from home spots before the
     /// next save (Tidy Up, a window coming back) would otherwise put it back. On a smaller
-    /// screen the home layout moves by the same amount, so the move survives going back to the
-    /// big screen.
+    /// screen its home spot keeps the gaps it now has to its neighbours (see homeSpot), so the
+    /// move survives going back to the big screen.
     func noteUserMove(_ w: ManagedWindow, from before: CGPoint) {
+        // Where you put it is where it goes: no push left for the next fit to take back.
+        w.fitPush = .zero
         guard isDerived else {
             if !suspendTracking { w.home = w.canvasFrame.origin }
             return
         }
-        let home = w.home ?? before
-        w.home = CGPoint(x: home.x + w.canvasFrame.minX - before.x, y: home.y + w.canvasFrame.minY - before.y)
+        guard let i = windows.firstIndex(where: { $0 === w }) else { return }
+        w.home = homeSpot(i, here: windows.map(fittedFrame))
+    }
+
+    /// Where the last fit had the window, before pushing it clear of overlaps, at the size that
+    /// fit gave it: macOS squeezing windows during a display change doesn't count.
+    private func fittedFrame(_ w: ManagedWindow) -> CGRect {
+        CGRect(origin: CGPoint(x: w.canvasFrame.minX - w.fitPush.dx, y: w.canvasFrame.minY - w.fitPush.dy),
+               size: fittedViewSize == .zero ? w.canvasFrame.size : fittedSize(w, for: fittedViewSize))
+    }
+
+    /// A home spot for window `i` that puts it back where it is here (`here`, see fittedFrame): it
+    /// keeps what derive keeps (see anchor), measured here and applied to the anchor's home spot.
+    /// The inverse of derive, for a window whose canvas spot came from this screen rather than
+    /// from the home layout.
+    private func homeSpot(_ i: Int, here: [CGRect]) -> CGPoint {
+        let home = windows.indices.map { j in
+            CGRect(origin: windows[j].home ?? here[j].origin, size: homeSize(windows[j]))
+        }
+        // Along x; for y the same, transposed. Of equally near windows (two stacked with their
+        // right edges lined up here, say), the one that puts it furthest along: clear of all of
+        // them at home, where they may differ in size.
+        func along(_ here: [CGRect], _ home: [CGRect]) -> CGFloat {
+            let r = here[i]
+            let spots = Self.anchors(i, in: here).map { anchor -> CGFloat in
+                switch anchor {
+                case .gap(let j): return home[j].maxX + r.minX - here[j].maxX
+                case .edge(let j): return home[j].minX + r.minX - here[j].minX
+                }
+            }
+            return (spots.max() ?? r.minX).rounded()
+        }
+        return CGPoint(x: along(here, home), y: along(here.map(\.transposed), home.map(\.transposed)))
+    }
+
+    /// Windows whose home spot doesn't explain where they are: opened while the screen was smaller
+    /// (no home spot yet), left where they were when a window beside them closed (the layout would
+    /// close up around it), moved before home spots followed neighbours, or overlapping a window
+    /// in the home layout that they're clear of here. A bigger screen would move them by the wrong
+    /// amount, or leave them where they are while their neighbours grow over them. Each gets a home
+    /// spot from its neighbours here instead (see homeSpot), so it moves along with them.
+    private func rehomeStrays() {
+        let here = windows.map(fittedFrame)
+        let hereFlipped = here.map(\.transposed)
+        let sizes = windows.map { fittedViewSize == .zero ? $0.canvasFrame.size : fittedSize($0, for: fittedViewSize) }
+        var rehomed = Set<Int>()
+        // A new home spot can change which windows another one is anchored to, so again until
+        // nothing changes (a few rounds at most).
+        for round in 0..<4 {
+            let home = windows.indices.map { j in
+                CGRect(origin: windows[j].home ?? here[j].origin, size: homeSize(windows[j]))
+            }
+            var strays = round == 0 ? Set(windows.indices.filter { windows[$0].home == nil }) : []
+            for i in windows.indices {
+                for j in windows.indices where j > i {
+                    guard home[i].insetBy(dx: 0.5, dy: 0.5).intersects(home[j]),
+                          !here[i].insetBy(dx: 0.5, dy: 0.5).intersects(here[j]) else { continue }
+                    // The one below (or, side by side, on the right) is the one out of place.
+                    let stacked = here[i].maxY <= here[j].minY + 0.5 || here[j].maxY <= here[i].minY + 0.5
+                    let later = stacked ? (here[j].minY > here[i].minY ? j : i) : (here[j].minX > here[i].minX ? j : i)
+                    strays.insert(later)
+                }
+            }
+            let derived = Self.derive(home: home, sizes: sizes)
+            let homeFlipped = home.map(\.transposed)
+            for i in windows.indices where derived[i].distance(to: here[i].origin) >= 1
+                || Self.anchor(i, in: home) != Self.anchor(i, in: here)
+                || Self.anchor(i, in: homeFlipped) != Self.anchor(i, in: hereFlipped) {
+                strays.insert(i)
+            }
+            // Left to right and top to bottom, so a stray next to another stray measures from its
+            // new spot; twice, for one anchored to a stray further on.
+            let order = strays.sorted { (here[$0].minX, here[$0].minY) < (here[$1].minX, here[$1].minY) }
+            var changed = false
+            for _ in 0..<2 {
+                for i in order {
+                    let spot = homeSpot(i, here: here)
+                    if windows[i].home.map({ $0.distance(to: spot) >= 1 }) ?? true {
+                        windows[i].home = spot
+                        rehomed.insert(i)
+                        changed = true
+                    }
+                }
+            }
+            if !changed { break }
+        }
+        guard !rehomed.isEmpty else { return }
+        logger.info("re-homed \(rehomed.count) windows: \(rehomed.sorted().map { "\(self.windows[$0].appName)[\(self.windows[$0].id)]" }.joined(separator: ", "), privacy: .public)")
     }
 
     /// Fit the layout to this screen. Sizes: what you chose, capped at the screen. Positions: the
     /// home layout, tightened by however much windows shrank, so every gap (inside groups and
     /// between them) keeps its size; on the big screen that's the home layout exactly. With
     /// `tidy`, the home layout itself is tidied up first (see tidyUp).
-    private func fitLayoutToScreen(margin: CGFloat, tidy: Bool) {
+    /// `rederiving`: the windows placed from their home spots; nil for all of them. The rest keep
+    /// where you see them, moved only as far as the screen change since the last fit moves their
+    /// spot in the derived layout. Re-deriving everything would also undo whatever the layout
+    /// picked up since then (windows opening and closing change the derived layout), and every
+    /// window would jump.
+    private func fitLayoutToScreen(tidy: Bool, rederiving: Set<CGWindowID>? = nil) {
+        rehomeStrays()
+        let margin = Self.screenMargin
         let maxSize = CGSize(width: viewSize.width - margin * 2, height: viewSize.height - margin * 2)
-        var home = windows.map {
-            CGRect(origin: $0.home ?? $0.canvasFrame.origin,
-                   size: $0.preferredSize.width > 0 ? $0.preferredSize : $0.canvasFrame.size)
-        }
+        var home = windows.map { CGRect(origin: $0.home ?? $0.canvasFrame.origin, size: homeSize($0)) }
         if tidy {
             Self.tidyUp(&home)
             for (w, h) in zip(windows, home) { w.home = CGPoint(x: h.minX.rounded(), y: h.minY.rounded()) }
@@ -1850,18 +1953,34 @@ final class CanvasController: NSObject {
             updateCapture(w)
         }
 
-        // A little off its home size is an app rounding, not a smaller screen: counted as home,
-        // or the windows beyond it would creep every time the screen changes.
+        // A little off its home size, when that fits the screen, is an app rounding, not a smaller
+        // screen: counted as home, or the windows beyond it would creep every time the screen changes.
         let sizes = zip(windows, home).map { w, h in
-            abs(w.canvasFrame.width - h.width) <= Self.appRounding && abs(w.canvasFrame.height - h.height) <= Self.appRounding
+            h.width <= maxSize.width && h.height <= maxSize.height
+                && abs(w.canvasFrame.width - h.width) <= Self.appRounding && abs(w.canvasFrame.height - h.height) <= Self.appRounding
                 ? h.size : w.canvasFrame.size
         }
-        let origins = Self.derive(home: home, sizes: sizes)
+        var origins = Self.derive(home: home, sizes: sizes)
+        if let rederiving, !tidy, fittedViewSize != .zero {
+            // Worked out from the screen sizes rather than measured, so a round trip between two
+            // screens comes back exactly. Last fit's push apart is taken back first: on this
+            // screen there may be no overlap to push.
+            let before = Self.derive(home: home, sizes: windows.map { fittedSize($0, for: fittedViewSize) })
+            let after = Self.derive(home: home, sizes: windows.map { fittedSize($0, for: viewSize) })
+            for (i, w) in windows.enumerated() where !rederiving.contains(w.id) {
+                origins[i] = CGPoint(x: w.canvasFrame.minX - w.fitPush.dx + after[i].x - before[i].x,
+                                     y: w.canvasFrame.minY - w.fitPush.dy + after[i].y - before[i].y)
+            }
+        }
         var frames = zip(origins, windows).map { CGRect(origin: $0, size: $1.canvasFrame.size) }
         // Only overlaps this screen caused, pushed apart to the standard gap. Windows you have
         // overlapping in the home layout stay that way (pushing them apart would push everything
         // below and to the right too, and the move would stick when you're back on the big screen).
         Self.separate(&frames, gap: Self.gap, onlyOverlaps: true, keep: Self.overlappingPairs(home))
+        for (i, w) in windows.enumerated() {
+            w.fitPush = CGVector(dx: frames[i].minX - origins[i].x, dy: frames[i].minY - origins[i].y)
+        }
+        fittedViewSize = viewSize
         var moved = 0
         for (w, f) in zip(windows, frames) {
             let rounded = CGPoint(x: f.minX.rounded(), y: f.minY.rounded())
@@ -1876,35 +1995,78 @@ final class CanvasController: NSObject {
         logger.info("layout fitted: \(moved) of \(self.windows.count) windows moved, derived=\(self.isDerived)")
     }
 
-    /// Positions for windows of `sizes` that keep the `home` layout's gaps where you see them: each
-    /// window keeps its distance to its nearest window on the left (and above), whether that's a
-    /// snapped neighbour or the next group over, so shrinking windows pull the layout in. With
-    /// home sizes this returns the home positions exactly. Callers push apart any overlap left.
+    /// The screen size the layout was last fitted to (see fitLayoutToScreen).
+    private var fittedViewSize: CGSize = .zero
+
+    /// A window's size in the home layout: the size you chose, or for a VM window (which picks
+    /// its own size, see ManagedWindow.sizesItself) the size it is.
+    private func homeSize(_ w: ManagedWindow) -> CGSize {
+        w.sizesItself || w.preferredSize.width <= 0 ? w.canvasFrame.size : w.preferredSize
+    }
+
+    /// The size fitting gives a window on a screen of `size`: the size you chose, capped at the screen.
+    private func fittedSize(_ w: ManagedWindow, for size: CGSize) -> CGSize {
+        guard !w.sizesItself else { return w.canvasFrame.size }
+        let chosen = w.preferredSize.width > 0 ? w.preferredSize : w.canvasFrame.size
+        return CGSize(width: min(chosen.width, (size.width - Self.screenMargin * 2).rounded()),
+                      height: min(chosen.height, (size.height - Self.screenMargin * 2).rounded()))
+    }
+
+    /// Positions for windows of `sizes` that keep the `home` layout where you see it: each window
+    /// keeps its gap to its nearest window on the left or, nearer still, its left edge's offset
+    /// from a window above or below it (a column stays lined up); the same for top edges. So
+    /// shrinking windows pull the layout in, and a window keeps with its own group rather than
+    /// the next group over. With home sizes this returns the home positions exactly. Callers push
+    /// apart any overlap left.
     static func derive(home: [CGRect], sizes: [CGSize]) -> [CGPoint] {
-        func span(_ a0: CGFloat, _ a1: CGFloat, _ b0: CGFloat, _ b1: CGFloat) -> CGFloat {
-            max(0, max(a0, b0) - min(a1, b1))   // distance between ranges; 0 when they overlap
-        }
         var x = home.map(\.minX), y = home.map(\.minY)
-        for i in home.indices.sorted(by: { home[$0].minX < home[$1].minX }) {
-            let left = home.indices.filter { $0 != i && home[$0].maxX <= home[i].minX + 0.5 }
-            // Nearest: the horizontal gap, with rows that don't line up counting extra.
-            if let j = left.min(by: {
-                (home[i].minX - home[$0].maxX) + 2 * span(home[$0].minY, home[$0].maxY, home[i].minY, home[i].maxY) <
-                (home[i].minX - home[$1].maxX) + 2 * span(home[$1].minY, home[$1].maxY, home[i].minY, home[i].maxY)
-            }) {
-                x[i] = x[j] + sizes[j].width + (home[i].minX - home[j].maxX)
+        for i in home.indices.sorted(by: { (home[$0].minX, home[$0].minY) < (home[$1].minX, home[$1].minY) }) {
+            switch anchor(i, in: home) {
+            case .gap(let j)?: x[i] = x[j] + sizes[j].width + home[i].minX - home[j].maxX
+            case .edge(let j)?: x[i] = x[j] + home[i].minX - home[j].minX
+            case nil: break
             }
         }
-        for i in home.indices.sorted(by: { home[$0].minY < home[$1].minY }) {
-            let above = home.indices.filter { $0 != i && home[$0].maxY <= home[i].minY + 0.5 }
-            if let j = above.min(by: {
-                (home[i].minY - home[$0].maxY) + 2 * span(home[$0].minX, home[$0].maxX, home[i].minX, home[i].maxX) <
-                (home[i].minY - home[$1].maxY) + 2 * span(home[$1].minX, home[$1].maxX, home[i].minX, home[i].maxX)
-            }) {
-                y[i] = y[j] + sizes[j].height + (home[i].minY - home[j].maxY)
+        let flipped = home.map(\.transposed)
+        for i in home.indices.sorted(by: { (home[$0].minY, home[$0].minX) < (home[$1].minY, home[$1].minX) }) {
+            switch anchor(i, in: flipped) {
+            case .gap(let j)?: y[i] = y[j] + sizes[j].height + home[i].minY - home[j].maxY
+            case .edge(let j)?: y[i] = y[j] + home[i].minY - home[j].minY
+            case nil: break
             }
         }
         return zip(x, y).map { CGPoint(x: $0, y: $1) }
+    }
+
+    /// What a window's x keeps from one layout to the next: its gap to another window's right
+    /// edge, or its left edge's offset from another window's.
+    enum Anchor: Equatable { case gap(Int), edge(Int) }
+
+    /// Window `i`'s anchor among `frames` (for y, pass the frames transposed): the nearest window
+    /// on the left, rows that don't line up counting extra; or, when nearer, a window above or
+    /// below, its left edge's offset counting extra (gaps win ties). Only windows before it in
+    /// left-to-right order, which derive has placed already.
+    static func anchor(_ i: Int, in frames: [CGRect]) -> Anchor? {
+        anchors(i, in: frames).first
+    }
+
+    /// Every anchor as near as the nearest (see anchor), first one first.
+    static func anchors(_ i: Int, in frames: [CGRect]) -> [Anchor] {
+        func span(_ a0: CGFloat, _ a1: CGFloat, _ b0: CGFloat, _ b1: CGFloat) -> CGFloat {
+            max(0, max(a0, b0) - min(a1, b1))   // distance between ranges; 0 when they overlap
+        }
+        let r = frames[i]
+        var candidates: [(cost: CGFloat, edge: Bool, anchor: Anchor)] = []
+        for (j, o) in frames.enumerated() where j != i {
+            if o.maxX <= r.minX + 0.5 {
+                candidates.append((r.minX - o.maxX + 2 * span(o.minY, o.maxY, r.minY, r.maxY), false, .gap(j)))
+            } else if (o.minX, o.minY) < (r.minX, r.minY), span(o.minX, o.maxX, r.minX, r.maxX) == 0,
+                      o.maxY <= r.minY + 0.5 || r.maxY <= o.minY + 0.5 {
+                candidates.append((span(o.minY, o.maxY, r.minY, r.maxY) + 2 * abs(r.minX - o.minX), true, .edge(j)))
+            }
+        }
+        guard let best = candidates.min(by: { ($0.cost, $0.edge ? 1 : 0) < ($1.cost, $1.edge ? 1 : 0) }) else { return [] }
+        return candidates.filter { $0.edge == best.edge && $0.cost <= best.cost + 0.5 }.map(\.anchor)
     }
 
     /// Push overlapping frames apart in reading order. Only ever moving right or down means it
@@ -2902,7 +3064,7 @@ final class CanvasController: NSObject {
 
     /// Shrink a window that doesn't fit the screen; grow it back toward the size the user chose.
     private func fitToScreen(_ w: ManagedWindow) {
-        let margin: CGFloat = 16
+        let margin = Self.screenMargin
         let target = CGSize(width: min(w.preferredSize.width, viewSize.width - margin * 2).rounded(),
                             height: min(w.preferredSize.height, viewSize.height - margin * 2).rounded())
         guard let ax = w.ax, !w.sizesItself,

@@ -52,6 +52,8 @@ struct Camera: Equatable {
 
 extension CGRect {
     var center: CGPoint { CGPoint(x: midX, y: midY) }
+    /// x and y swapped, to run a horizontal layout rule vertically.
+    var transposed: CGRect { CGRect(x: minY, y: minX, width: height, height: width) }
 }
 
 extension CGPoint {

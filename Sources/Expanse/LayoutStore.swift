@@ -38,6 +38,10 @@ struct SavedLayout: Codable {
     var centerY: Double?
     /// True when the last run put windows back in their macOS layout before exiting.
     var cleanExit: Bool?
+    /// The screen size the layout was fitted to: at launch, windows only move by however much
+    /// the screen differs (see CanvasController.fitLayoutToScreen).
+    var fittedWidth: Double?
+    var fittedHeight: Double?
     var windows: [Window]
 }
 
