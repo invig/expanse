@@ -397,6 +397,11 @@ final class CanvasController: NSObject {
         // A beachballing app must not freeze Expanse (and its full-screen overlay): every
         // Accessibility call gives up after half a second.
         AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.5)
+        // Streams and pictures held back while replayd wasn't answering (see WindowCapture.overdue).
+        WindowCapture.askAgain = { [weak self] in
+            self?.updateStreamingSoon()
+            self?.pumpSnapshotsSoon()
+        }
         lastViewportSize = viewSize
         // macOS can still shuffle windows while the Mac sits at the lock screen; put everything
         // back once you're in.
@@ -1240,6 +1245,8 @@ final class CanvasController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             guard let self, self.syncing, self.syncToken == token else { return }
             self.unansweredScans += 1
+            // No pictures or new streams either until it answers (see WindowCapture.overdue).
+            WindowCapture.replaydStuck = true
             logger.notice("window scan got no answer in \(Int(wait))s (macOS's capture service stuck or restarting?); the next waits \(Int(Self.scanTimeout * pow(2, Double(min(self.unansweredScans, 5)))))s")
             self.syncing = false
             self.syncSoon()
@@ -1266,6 +1273,7 @@ final class CanvasController: NSObject {
                 guard self.syncToken == token else { return }
                 self.syncing = false
                 self.unansweredScans = 0
+                WindowCapture.replaydStuck = false
                 if !inFullScreenSpace { self.windowKinds = ax.kinds }
                 // Asked for while this scan ran, so it may have missed what that was about.
                 var again = self.syncAgain
@@ -2700,6 +2708,8 @@ final class CanvasController: NSObject {
     /// one is a thumbnail from the canvas, nearest first, four a second (a glide shows them before
     /// their streams catch up). A window whose snapshot fails is tried again later and later.
     private func pumpSnapshots() {
+        // replayd isn't answering: asking for more only piles them up in it.
+        guard WindowCapture.canAsk else { return }
         let now = CACurrentMediaTime()
         func due(_ w: ManagedWindow, every interval: CFTimeInterval) -> Bool {
             now - w.lastSnapshotAt > interval * pow(2, Double(min(w.snapshotFailures, 5)))

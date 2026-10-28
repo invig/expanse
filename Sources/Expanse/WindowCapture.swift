@@ -28,6 +28,27 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// pause(stopped:) callers waiting for every stream to have stopped.
     private var whenStopped: [() -> Void] = []
 
+    // MARK: replayd's backlog
+
+    /// Requests replayd still holds after Expanse stopped waiting for them (see replaydTimeout):
+    /// stream starts and pictures. A stuck replayd keeps every one, and asking again each time
+    /// piled up thousands inside it, until it flushed them all at once and froze the screen (and in
+    /// the days before, crashed). With a few outstanding, or while window scans get no answer,
+    /// nothing new is asked for until it answers. Main thread only.
+    private(set) static var overdue = 0
+    /// Window scans are getting no answer (see CanvasController.sync): replayd is stuck.
+    static var replaydStuck = false {
+        didSet { if oldValue, !replaydStuck, canAsk { askAgain?() } }
+    }
+    static var canAsk: Bool { overdue < 3 && !replaydStuck }
+    /// Starts what was held back, once replayd answers again.
+    static var askAgain: (() -> Void)?
+
+    private static func overdueAnswered() {
+        overdue -= 1
+        if canAsk { askAgain?() }
+    }
+
     var isRunning: Bool { stream != nil || starting }
     /// Nothing running, starting or still stopping.
     var isStopped: Bool { !isRunning && stopping == 0 }
@@ -46,10 +67,15 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     func start(window: SCWindow, pixelSize: CGSize, fps: Int) {
         wanted = true
         guard !isRunning else { return }
+        // Held back while replayd isn't answering: still wanted, so askAgain starts it.
+        guard Self.canAsk else { return }
         starting = true
         startToken += 1
         let token = startToken
+        // Main thread only, like the counter.
+        var answered = false, late = false
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.replaydTimeout) { [weak self] in
+            if !answered { late = true; Self.overdue += 1 }
             guard let self, self.starting, self.startToken == token else { return }
             logger.info("stream start for \(window.windowID) timed out")
             self.starting = false
@@ -72,6 +98,8 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             } catch {
                 logger.error("addStreamOutput failed: \(error.localizedDescription)")
                 DispatchQueue.main.async {
+                    answered = true
+                    if late { Self.overdueAnswered() }
                     self.starting = false
                     if self.isStopped { self.notifyStopped() }
                 }
@@ -79,6 +107,8 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             }
             stream.startCapture { [weak self] error in
                 DispatchQueue.main.async {
+                    answered = true
+                    if late { Self.overdueAnswered() }
                     guard let self else { return }
                     // Given up on meanwhile: not this capture's stream any more.
                     guard self.startToken == token else {
@@ -111,6 +141,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         let config = Self.configuration(pixelSize: pixelSize, fps: 1)
         // Once, on the main thread: when replayd answers, or when it's taken too long.
         var finished = false
+        var answered = false, late = false
         let finish = { (ok: Bool) in
             guard !finished else { return }
             finished = true
@@ -122,10 +153,15 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                 let ok = sample?.imageBuffer != nil
                 if let self, let sample, ok { FramePump.shared.post(sample, for: self, snapshot: true) }
                 if let error { logger.info("snapshot of \(window.windowID) failed: \(error.localizedDescription, privacy: .public)") }
-                DispatchQueue.main.async { finish(ok) }
+                DispatchQueue.main.async {
+                    answered = true
+                    if late { Self.overdueAnswered() }
+                    finish(ok)
+                }
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.replaydTimeout) {
+            if !answered { late = true; Self.overdue += 1 }
             if !finished { logger.info("snapshot of \(window.windowID) timed out") }
             finish(false)
         }
@@ -196,6 +232,9 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         // pool of four covers the two held below plus one in flight to the main thread.
         c.queueDepth = 4
         c.showsCursor = false
+        // Pictures only: no audio (each audio-capturing request also sets up an audio clock).
+        c.capturesAudio = false
+        c.captureMicrophone = false
         c.scalesToFit = true
         c.ignoreShadowsSingleWindow = true
         c.backgroundColor = .clear
