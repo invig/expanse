@@ -920,6 +920,14 @@ final class CanvasController: NSObject {
 
     // MARK: Persistence
 
+    /// While no window is shrunk for a smaller screen, the canvas layout is the home layout.
+    /// Not while the screen is changing: coming back to the big screen, macOS gives windows
+    /// their big sizes back before Expanse has put them back where they were, and the
+    /// tightened layout would become home.
+    private func homeFromCanvas() {
+        if !isDerived, !suspendTracking { windows.forEach { $0.home = $0.canvasFrame.origin } }
+    }
+
     func scheduleSave() {
         saveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.save() }
@@ -933,11 +941,7 @@ final class CanvasController: NSObject {
         // Before the first successful window scan (e.g. no Screen Recording yet) `windows` is
         // empty, and saving would wipe the layout and the crash-recovery originals.
         guard !isPaused, hasSynced else { return }
-        // While no window is shrunk for a smaller screen, the canvas layout is the home layout.
-        // Not while the screen is changing: coming back to the big screen, macOS gives windows
-        // their big sizes back before Expanse has put them back where they were, and the
-        // tightened layout would become home.
-        if !isDerived, !suspendTracking { windows.forEach { $0.home = $0.canvasFrame.origin } }
+        homeFromCanvas()
         // Saved positions are canvas coordinates relative to a scale-1 camera.
         let center = camera.center(in: viewSize)
         // Windows out of view (app hidden, minimised, another Space) are saved too, newest
@@ -1752,14 +1756,17 @@ final class CanvasController: NSObject {
 
     /// The gap between neighbouring windows: edge snapping, new-window placement and Tidy Up.
     static let gap: CGFloat = 20
-    /// Windows closer than this to a neighbour count as one cluster and get pulled together.
+    /// Windows closer than this to a neighbour count as one group (cluster). Tidy Up tidies each
+    /// group where it is, and keeps groups at least this far apart.
     static let clusterReach: CGFloat = 240
+    /// Edges closer than this to lining up get lined up by Tidy Up.
+    static let alignReach: CGFloat = 60
 
     /// Fit the layout to this screen without rebuilding it:
     /// 1. every window takes the size you chose, capped at the screen (shrinks on a laptop,
     ///    grows back on a big display);
-    /// 2. overlaps are pushed apart, right or down, whichever is the smaller move;
-    /// 3. gravity: within a cluster, gaps wider than the standard gap close up to it.
+    /// 2. each group is tidied where it is: overlaps pushed apart, edges that nearly line up
+    ///    lined up, gaps closed to the standard gap (see tidyUp).
     /// Shown zoomed out.
     func tidy() {
         guard !isPaused else { return }
@@ -1772,6 +1779,9 @@ final class CanvasController: NSObject {
             return
         }
         guard !windows.isEmpty else { return }
+        // Home spots are otherwise brought up to date when the layout is saved, which windows
+        // you've only just moved may still be waiting for: Tidy would put them back.
+        homeFromCanvas()
         fitLayoutToScreen(margin: 16, tidy: true)
         view.render()
         animate(to: fitCamera())
@@ -1785,10 +1795,16 @@ final class CanvasController: NSObject {
             ($0.canvasFrame.width < $0.preferredSize.width - 1 || $0.canvasFrame.height < $0.preferredSize.height - 1) }
     }
 
-    /// You moved a window (dragging on the canvas or for real). On a smaller screen the home
-    /// layout moves by the same amount, so the move survives going back to the big screen.
+    /// You moved a window (dragging on the canvas or for real). On the big screen its new spot is
+    /// its home spot, straight away: anything that fits the layout from home spots before the
+    /// next save (Tidy Up, a window coming back) would otherwise put it back. On a smaller
+    /// screen the home layout moves by the same amount, so the move survives going back to the
+    /// big screen.
     func noteUserMove(_ w: ManagedWindow, from before: CGPoint) {
-        guard isDerived else { return }
+        guard isDerived else {
+            if !suspendTracking { w.home = w.canvasFrame.origin }
+            return
+        }
         let home = w.home ?? before
         w.home = CGPoint(x: home.x + w.canvasFrame.minX - before.x, y: home.y + w.canvasFrame.minY - before.y)
     }
@@ -1796,7 +1812,7 @@ final class CanvasController: NSObject {
     /// Fit the layout to this screen. Sizes: what you chose, capped at the screen. Positions: the
     /// home layout, tightened by however much windows shrank, so every gap (inside groups and
     /// between them) keeps its size; on the big screen that's the home layout exactly. With
-    /// `tidy`, the home layout itself is cleaned up first (overlaps apart, clusters to 20pt).
+    /// `tidy`, the home layout itself is tidied up first (see tidyUp).
     private func fitLayoutToScreen(margin: CGFloat, tidy: Bool) {
         let maxSize = CGSize(width: viewSize.width - margin * 2, height: viewSize.height - margin * 2)
         var home = windows.map {
@@ -1804,9 +1820,7 @@ final class CanvasController: NSObject {
                    size: $0.preferredSize.width > 0 ? $0.preferredSize : $0.canvasFrame.size)
         }
         if tidy {
-            Self.separate(&home, gap: Self.gap)
-            Self.gravity(&home, clusters: Self.clusters(home, reach: Self.clusterReach), gap: Self.gap)
-            Self.separate(&home, gap: Self.gap)
+            Self.tidyUp(&home)
             for (w, h) in zip(windows, home) { w.home = CGPoint(x: h.minX.rounded(), y: h.minY.rounded()) }
         }
         for w in windows {
@@ -1835,7 +1849,12 @@ final class CanvasController: NSObject {
         var moved = 0
         for (w, f) in zip(windows, frames) {
             let rounded = CGPoint(x: f.minX.rounded(), y: f.minY.rounded())
-            if rounded.distance(to: w.canvasFrame.origin) >= 1 { moved += 1 }
+            if rounded.distance(to: w.canvasFrame.origin) >= 1 {
+                moved += 1
+                if tidy {
+                    logger.info("tidy moved \(w.appName, privacy: .public)[\(w.id)] by \(Int(rounded.x - w.canvasFrame.minX)), \(Int(rounded.y - w.canvasFrame.minY))")
+                }
+            }
             w.canvasFrame.origin = rounded
         }
         logger.info("layout fitted: \(moved) of \(self.windows.count) windows moved, derived=\(self.isDerived)")
@@ -1925,27 +1944,97 @@ final class CanvasController: NSObject {
         return frames.indices.map(root)
     }
 
-    /// Within each cluster, close gaps: each frame slides left (then up) until it sits `gap` from
-    /// its nearest neighbour on that side in the same cluster. It only slides towards a neighbour
-    /// it shares rows (or columns) with, so it never creates overlaps.
-    static func gravity(_ frames: inout [CGRect], clusters: [Int], gap: CGFloat) {
-        func overlapY(_ a: CGRect, _ b: CGRect) -> Bool { min(a.maxY, b.maxY) - max(a.minY, b.minY) > 0 }
-        func overlapX(_ a: CGRect, _ b: CGRect) -> Bool { min(a.maxX, b.maxX) - max(a.minX, b.minX) > 0 }
+    /// Tidy Up, on the home layout. Each group of windows is tidied where it is: overlaps pushed
+    /// apart, edges that nearly line up lined up, and gaps closed to the standard gap. A group
+    /// only moves (as a whole) when another group has grown into its space.
+    static func tidyUp(_ frames: inout [CGRect]) {
+        let cluster = clusters(frames, reach: clusterReach)
+        let groups = Dictionary(grouping: frames.indices, by: { cluster[$0] }).values.map { $0.sorted() }
+        for g in groups {
+            var f = g.map { frames[$0] }
+            separate(&f, gap: gap)
+            // Twice: closing a gap can undo a line-up, and lining up can open a gap.
+            for _ in 0..<2 {
+                gravity(&f, gap: gap)
+                align(&f, reach: alignReach, gap: gap)
+            }
+            separate(&f, gap: gap)
+            for (k, i) in g.enumerated() { frames[i] = f[k] }
+        }
+        separateGroups(&frames, groups: groups, reach: clusterReach)
+    }
+
+    private static func overlapY(_ a: CGRect, _ b: CGRect) -> Bool { min(a.maxY, b.maxY) - max(a.minY, b.minY) > 0 }
+    private static func overlapX(_ a: CGRect, _ b: CGRect) -> Bool { min(a.maxX, b.maxX) - max(a.minX, b.minX) > 0 }
+
+    /// Close gaps: each frame slides left (then up) until it sits `gap` from its nearest
+    /// neighbour on that side. It only slides towards a neighbour it shares rows (or columns)
+    /// with, so it never creates overlaps.
+    static func gravity(_ frames: inout [CGRect], gap: CGFloat) {
         for _ in 0..<3 {
             for i in frames.indices.sorted(by: { frames[$0].minX < frames[$1].minX }) {
                 let r = frames[i]
                 let edges = frames.indices.filter {
-                    $0 != i && clusters[$0] == clusters[i] && frames[$0].maxX <= r.minX + 0.5 && overlapY(frames[$0], r)
+                    $0 != i && frames[$0].maxX <= r.minX + 0.5 && overlapY(frames[$0], r)
                 }.map { frames[$0].maxX }
                 if let nearest = edges.max(), r.minX - nearest > gap { frames[i].origin.x = nearest + gap }
             }
             for i in frames.indices.sorted(by: { frames[$0].minY < frames[$1].minY }) {
                 let r = frames[i]
                 let edges = frames.indices.filter {
-                    $0 != i && clusters[$0] == clusters[i] && frames[$0].maxY <= r.minY + 0.5 && overlapX(frames[$0], r)
+                    $0 != i && frames[$0].maxY <= r.minY + 0.5 && overlapX(frames[$0], r)
                 }.map { frames[$0].maxY }
                 if let nearest = edges.max(), r.minY - nearest > gap { frames[i].origin.y = nearest + gap }
             }
+        }
+    }
+
+    /// Line up edges that nearly line up (within `reach`): a frame's top with its neighbour on the
+    /// left, then its left edge with its neighbour above. Skipped where the move would bring it
+    /// closer than `gap` to another frame (windows of different widths can't line up both sides).
+    static func align(_ frames: inout [CGRect], reach: CGFloat, gap: CGFloat) {
+        func clear(_ r: CGRect, except i: Int) -> Bool {
+            !frames.indices.contains { $0 != i && frames[$0].insetBy(dx: -gap + 0.5, dy: -gap + 0.5).intersects(r) }
+        }
+        for i in frames.indices.sorted(by: { frames[$0].minX < frames[$1].minX }) {
+            let r = frames[i]
+            let beside = frames.indices.filter {
+                $0 != i && frames[$0].maxX <= r.minX + 0.5 && overlapY(frames[$0], r) && abs(frames[$0].minY - r.minY) <= reach
+            }
+            guard let j = beside.max(by: { frames[$0].maxX < frames[$1].maxX }), frames[j].minY != r.minY else { continue }
+            let lined = CGRect(origin: CGPoint(x: r.minX, y: frames[j].minY), size: r.size)
+            if clear(lined, except: i) { frames[i] = lined }
+        }
+        for i in frames.indices.sorted(by: { frames[$0].minY < frames[$1].minY }) {
+            let r = frames[i]
+            let above = frames.indices.filter {
+                $0 != i && frames[$0].maxY <= r.minY + 0.5 && overlapX(frames[$0], r) && abs(frames[$0].minX - r.minX) <= reach
+            }
+            guard let j = above.max(by: { frames[$0].maxY < frames[$1].maxY }), frames[j].minX != r.minX else { continue }
+            let lined = CGRect(origin: CGPoint(x: frames[j].minX, y: r.minY), size: r.size)
+            if clear(lined, except: i) { frames[i] = lined }
+        }
+    }
+
+    /// Keep groups `reach` apart, so they stay separate groups: a group that another has grown
+    /// into is pushed away as a whole, right or down, in reading order.
+    static func separateGroups(_ frames: inout [CGRect], groups: [[Int]], reach: CGFloat) {
+        func bounds(_ g: [Int]) -> CGRect { g.dropFirst().reduce(frames[g[0]]) { $0.union(frames[$1]) } }
+        let order = groups.sorted { (bounds($0).minY, bounds($0).minX) < (bounds($1).minY, bounds($1).minX) }
+        var settled: [CGRect] = []
+        for g in order {
+            for _ in 0..<200 {
+                var push: CGVector?
+                for r in g.map({ frames[$0] }) {
+                    guard let hit = settled.first(where: { $0.insetBy(dx: -reach + 0.5, dy: -reach + 0.5).intersects(r) }) else { continue }
+                    let right = hit.maxX + reach - r.minX, down = hit.maxY + reach - r.minY
+                    push = right <= down ? CGVector(dx: right, dy: 0) : CGVector(dx: 0, dy: down)
+                    break
+                }
+                guard let push else { break }
+                for i in g { frames[i] = frames[i].offsetBy(dx: push.dx, dy: push.dy) }
+            }
+            settled += g.map { frames[$0] }
         }
     }
 

@@ -62,7 +62,7 @@ A short walkthrough gets you set up in about a minute:
 | <kbd>⌃</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> | Hop to the next window in that direction |
 | Pinch, or scroll with two fingers | Zoom and move around the canvas |
 | Drag a window while zoomed out | Move it; it snaps into place |
-| <kbd>T</kbd> | Tidy up: overlaps pushed apart, gaps evened out |
+| <kbd>T</kbd> | Tidy up: each group of windows lined up and evenly spaced, where it is |
 | <kbd>Esc</kbd> | Back to 100% |
 
 <details>

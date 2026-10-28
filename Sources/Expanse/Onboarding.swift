@@ -727,7 +727,7 @@ private struct ReadyPage: View {
         (["Space", "Drag"], "Hold Space and drag to move around"),
         (["Drag"], "Move windows; they snap into place"),
         (["⇧", "Click"], "Select several, then drag or close them together"),
-        (["T"], "Tidy up: fit to this screen, even the gaps"),
+        (["T"], "Tidy up: line up each group, where it is"),
     ]
 
     var body: some View {
