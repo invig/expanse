@@ -25,6 +25,12 @@ final class CanvasController: NSObject {
     private var syncTimer: Timer?
     private var dialogTimer: Timer?
     private var syncing = false
+    /// The scan in flight (see sync): one given up on is told apart from the one after it.
+    private var syncToken = 0
+    /// How long a scan may wait for ScreenCaptureKit. When macOS restarts its capture service
+    /// (replayd), a request already sent never gets an answer, and without a limit no scan would
+    /// ever run again: no new windows, and none of the dropped ones back.
+    private static let scanTimeout: TimeInterval = 10
     /// A scan was asked for while one was running: run another once it's done.
     private var syncAgain = false
     private var syncRetryScheduled = false
@@ -1169,6 +1175,14 @@ final class CanvasController: NSObject {
         }
         syncing = true
         syncAgain = false
+        syncToken += 1
+        let token = syncToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.scanTimeout) { [weak self] in
+            guard let self, self.syncing, self.syncToken == token else { return }
+            logger.notice("window scan got no answer in \(Int(Self.scanTimeout))s (macOS's capture service restarting?); starting another")
+            self.syncing = false
+            self.syncSoon()
+        }
         let input = scanInput()
         let s0 = CACurrentMediaTime()
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
@@ -1185,7 +1199,8 @@ final class CanvasController: NSObject {
             if input.live, !inFullScreenSpace { ax.order = Self.windowServerOrder() }
             let s2 = CACurrentMediaTime()
             DispatchQueue.main.async {
-                guard let self else { return }
+                // Given up on (see scanTimeout): the one after it counts.
+                guard let self, self.syncToken == token else { return }
                 self.syncing = false
                 if !inFullScreenSpace { self.windowKinds = ax.kinds }
                 // Asked for while this scan ran, so it may have missed what that was about.
@@ -1209,7 +1224,7 @@ final class CanvasController: NSObject {
                         logger.info("slow: window scan took \(ms)ms (ScreenCaptureKit \(Int((s1 - s0) * 1000))ms, \(ax.calls) Accessibility calls and window order \(Int((s2 - s1) * 1000))ms, main thread \(Int((CACurrentMediaTime() - s3) * 1000))ms)")
                     }
                 } else if let error {
-                    logger.error("SCShareableContent failed: \(error.localizedDescription)")
+                    logger.error("SCShareableContent failed: \(error.localizedDescription, privacy: .public)")
                 }
                 if again { self.syncSoon() }
                 let completions = self.pendingSyncCompletions
@@ -1625,7 +1640,11 @@ final class CanvasController: NSObject {
         }
         w.capture.onStop = { [weak self, weak w] in
             guard let self, let w else { return }
-            self.remove(w)
+            // Usually the window closed, which a scan confirms (it drops windows no longer in the
+            // window list). But every stream stops when macOS restarts its capture service, with
+            // all the windows still open: dropping them here dropped them all, silently.
+            logger.notice("\(w.appName, privacy: .public)[\(w.id)]: its capture stopped; checking it's still open")
+            self.syncSoon()
         }
         // Its first picture comes from a one-off snapshot (see pumpSnapshots), not a stream.
         pumpSnapshotsSoon()
