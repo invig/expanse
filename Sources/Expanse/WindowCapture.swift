@@ -2,8 +2,6 @@ import AppKit
 import ScreenCaptureKit
 import os
 
-let logger = Logger(subsystem: "com.invignation.expanse", category: "canvas")
-
 /// One ScreenCaptureKit stream per window. Desktop-independent window capture keeps
 /// delivering content while the window is covered by the overlay or parked off-screen.
 final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {

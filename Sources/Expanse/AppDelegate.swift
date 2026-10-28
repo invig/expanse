@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let installUpdateItem = NSMenuItem(title: "", action: #selector(installUpdate), keyEquivalent: "")
     private let autoUpdateItem = NSMenuItem(title: "Check for Updates Automatically", action: #selector(toggleAutoUpdate), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
+    private let detailedLoggingItem = NSMenuItem(title: "Detailed Logging", action: #selector(toggleDetailedLogging), keyEquivalent: "")
+    private let showLogItem = NSMenuItem(title: "Show Log File in Finder", action: #selector(showLogFile), keyEquivalent: "")
     private let restoreLayoutItem = NSMenuItem(title: "Restore Layout", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -117,6 +119,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleLoginItem() { LoginItem.toggle() }
 
+    @objc private func toggleDetailedLogging() {
+        LogFile.shared.isEnabled.toggle()
+        Toast.show(LogFile.shared.isEnabled ? "Detailed logging on" : "Detailed logging off")
+    }
+
+    @objc private func copyLogs() {
+        let c = controller
+        BugReport.copy(settings: [
+            "Canvas: \(c.windows.count) windows, \(c.isPaused ? "paused" : "running"), auto-centre \(c.autoCentre ? "on" : "off"), hot corner \(c.hotCorner.corner.title)",
+            "Desktop picture background \(Wallpaper.enabled ? "on" : "off"), window names \(CanvasView.showsNames ? "shown" : "hidden"), detailed logging \(LogFile.shared.isEnabled ? "on" : "off")",
+        ])
+    }
+
+    @objc private func showLogFile() {
+        NSWorkspace.shared.activateFileViewerSelecting([LogFile.shared.url])
+    }
+
+    @objc private func reportIssue() { NSWorkspace.shared.open(BugReport.issuesURL) }
+
     /// expanse://toggle | enter | exit | fit | restore | zoom?scale=0.5 | pan?dx=100&dy=0 | focus?app=Safari
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
@@ -132,7 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Any app or web page can open expanse:// links. Commands that reach into individual
             // windows or fake the display are for debugging only and stay off unless enabled with
             // `defaults write com.invignation.expanse debugURLCommands -bool true`.
-            let debugCommands: Set<String> = ["place", "prefer", "dump", "screen", "update", "appearance"]
+            let debugCommands: Set<String> = ["place", "prefer", "dump", "screen", "update", "appearance", "logging", "copylogs"]
             if debugCommands.contains(command), !UserDefaults.standard.bool(forKey: "debugURLCommands") {
                 logger.info("ignored debug URL command \(command, privacy: .public) (debugURLCommands is off)")
                 continue
@@ -187,6 +208,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "pause": controller.pause()
             case "resume": controller.resume()
             case "dump": controller.dump()
+            // What Troubleshooting › Detailed Logging and Copy Logs do, for testing them.
+            case "logging": LogFile.shared.isEnabled = query["on"] == "1"
+            case "copylogs": copyLogs()
             case "appearance":
                 // Light or dark for Expanse alone, to check its look in both (anything else: the Mac's).
                 let names: [String: NSAppearance.Name] = ["light": .aqua, "dark": .darkAqua]
@@ -266,6 +290,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(autoUpdateItem)
         menu.addItem(loginItem)
+        let troubleshooting = NSMenuItem(title: "Troubleshooting", action: nil, keyEquivalent: "")
+        let troubleshootingMenu = NSMenu()
+        troubleshootingMenu.addItem(detailedLoggingItem)
+        troubleshootingMenu.addItem(NSMenuItem(title: "Copy Logs for a Bug Report", action: #selector(copyLogs), keyEquivalent: ""))
+        troubleshootingMenu.addItem(showLogItem)
+        troubleshootingMenu.addItem(.separator())
+        troubleshootingMenu.addItem(NSMenuItem(title: "Report an Issue on GitHub…", action: #selector(reportIssue), keyEquivalent: ""))
+        troubleshootingMenu.items.forEach { $0.target = self }
+        troubleshooting.submenu = troubleshootingMenu
+        menu.addItem(troubleshooting)
         menu.addItem(.separator())
         menu.addItem(accessibilityItem)
         menu.addItem(screenRecordingItem)
@@ -293,6 +327,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         autoUpdateItem.isHidden = !Updater.shared.isRelease
         loginItem.state = LoginItem.enabled ? .on : .off
         loginItem.isHidden = !Updater.shared.isRelease
+        detailedLoggingItem.state = LogFile.shared.isEnabled ? .on : .off
+        showLogItem.isEnabled = FileManager.default.fileExists(atPath: LogFile.shared.url.path)
         screenRecordingItem.title = sr ? "Screen Recording: granted" : "Grant Screen Recording…"
         fillRestoreLayoutMenu()
     }

@@ -88,7 +88,7 @@ A short walkthrough gets you set up in about a minute:
 **Spaces** panel next to the minimap at the bottom of the screen.
 
 **The menu bar icon** has the rest: which corner to use, Pause, Tidy Up, Restore Layout,
-Restore All Windows, the walkthrough again, and updates.
+Restore All Windows, the walkthrough again, updates, and Troubleshooting (logs for a bug report).
 
 ## Questions
 
@@ -123,6 +123,19 @@ Open System Settings › Privacy & Security › Accessibility, then turn Expanse
 </details>
 
 <details>
+<summary><strong>Something went wrong. How do I report it?</strong></summary>
+
+1. Menu bar icon › Troubleshooting › turn on **Detailed Logging**.
+2. Make it happen again.
+3. Troubleshooting › **Copy Logs for a Bug Report**, then **Report an Issue on GitHub…** and paste
+   them in, with a line about what you did and what you expected.
+
+The copy says which Mac, macOS and Expanse version, your displays and settings, then the log.
+Window titles are left out. Turn Detailed Logging off again once it's reported.
+
+</details>
+
+<details>
 <summary><strong>Why is there a purple dot in the menu bar?</strong></summary>
 
 macOS shows it whenever an app captures the screen. Expanse captures window pictures only while
@@ -137,7 +150,10 @@ Window pictures exist only in memory, to draw the canvas. Nothing is recorded or
 The one network request is a daily update check to GitHub, which you can turn off in the menu.
 The only files Expanse writes are its layouts in `~/Library/Application Support/Expanse/`:
 window positions and sizes, app names, and a scrambled fingerprint (a hash) of each window's
-title, which recognises the window without storing the title.
+title, which recognises the window without storing the title. If you turn on **Detailed Logging**
+(menu bar icon › Troubleshooting), it also keeps a log in `~/Library/Logs/Expanse/`: what it did
+with which app's windows, never their titles. It stays on your Mac unless you copy it into a bug
+report yourself.
 
 </details>
 
