@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Any app or web page can open expanse:// links. Commands that reach into individual
             // windows or fake the display are for debugging only and stay off unless enabled with
             // `defaults write com.invignation.expanse debugURLCommands -bool true`.
-            let debugCommands: Set<String> = ["place", "prefer", "dump", "screen", "update"]
+            let debugCommands: Set<String> = ["place", "prefer", "dump", "screen", "update", "appearance"]
             if debugCommands.contains(command), !UserDefaults.standard.bool(forKey: "debugURLCommands") {
                 logger.info("ignored debug URL command \(command, privacy: .public) (debugURLCommands is off)")
                 continue

@@ -3,55 +3,35 @@
 </p>
 
 <p align="center">
-  <img src="docs/icon.png" alt="Expanse app icon" width="128">
+  <strong>Every window gets its own place on one endless desktop.</strong><br>
+  Zoom out to see them all. Click one to glide straight to it.
 </p>
 
-<h1 align="center">Expanse</h1>
-
 <p align="center">
-  <strong>Your Mac, on an infinite canvas.</strong><br>
-  Every window gets a place on one endless, zoomable desktop. Zoom out to see everything.<br>
-  Dive into a window to use it. No SIP changes, no hacks, and quitting puts everything back.
+  <a href="https://github.com/invig/expanse/releases/latest"><strong>Download</strong></a> ·
+  <a href="#install">Install</a> ·
+  <a href="#the-basics">How to use it</a> ·
+  <a href="#questions">Questions</a>
 </p>
 
 <p align="center">
   <img alt="macOS 15+" src="https://img.shields.io/badge/macOS-15%2B-black?logo=apple">
-  <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white">
-  <img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-blue">
+  <img alt="Free and open source, MIT" src="https://img.shields.io/badge/free-MIT-blue">
 </p>
 
 ---
 
-Your screen is a window onto something much bigger. Expanse treats the desktop as a camera over
-an infinite canvas: windows live at fixed places on it, and you move the camera, not the
-windows. Pinch out and your whole working world is laid out in front of you. Click a window and
-the canvas glides to it, centred, at 100%, ready to type into.
+Expanse treats your screen as a view onto a much bigger canvas. Your windows stay where you put
+them on it; you move the view instead of the windows. Rest the pointer in a corner of the screen
+to see everything at once, then click a window to fly to it, ready to use.
 
-## Highlights
-
-- **Zoom out to everything, dive into anything.** Rest the pointer in a screen corner (or press
-  <kbd>⌥</kbd><kbd>`</kbd>) to see every window at once. Click one to fly to it.
-- **Silky.** Panning, zooming and gliding run at 120 fps: the camera is a single GPU
-  transform, and real windows are only moved once the motion stops.
-- **Spatial navigation.** <kbd>⌃</kbd> + arrow keys hop to the nearest window in that direction.
-  Press quickly and the hops chain into one continuous move.
-- **Arrange like a design tool.** Drag windows around the canvas; they snap to edges, centres
-  and an even 20pt gap. Box-select or <kbd>⇧</kbd>-click to move groups together, or close
-  them all with one click.
-- **Follows you between screens.** Expanse keeps a *home* layout at full size. On a laptop the
-  layout tightens up (each window keeps its gap to its neighbours); plug back into the big
-  display and everything returns exactly.
-- **Tidy Up** (<kbd>T</kbd>): fit windows to the current screen, push overlaps apart and pull each
-  group back to even gaps, without rebuilding your layout.
-- **Restore Layout**: Expanse keeps the last three layouts, taken 15 minutes or more apart, and can
-  put your windows back the way one had them (from the menu bar). Restoring is undoable too.
-- **New windows open in free space**, next to what you were working on, instead of on top of it.
-- **Switch in and out cleanly.** Pause or quit and every window goes back to exactly where macOS
-  had it. Launch again and the canvas comes back. Even after a crash, the next quit restores
-  your original layout.
-- **Your desktop picture** as the canvas, live from what macOS is drawing (dynamic wallpapers
-  included).
-- **Scriptable** through `expanse://` URLs.
+- **See everything at once.** Every window, live, laid out the way you arranged it.
+- **Move around by direction.** <kbd>⌃</kbd> + arrow keys hop to the next window to the left,
+  right, above or below.
+- **Arrange like a design tool.** Drag windows around; they snap into neat, even gaps.
+- **At home on a laptop or a big display.** On a smaller screen the layout tightens up, and plugging
+  back in puts it back exactly.
+- **Easy to leave.** Pause or quit and every window goes straight back to where macOS had it.
 
 ## Install
 
@@ -59,18 +39,157 @@ the canvas glides to it, centred, at 100%, ready to type into.
 brew install --cask invig/tap/expanse
 ```
 
-Or **[download the latest release](https://github.com/invig/expanse/releases/latest)**, unzip it and
-move **Expanse.app** to Applications. It's signed and notarised by Apple and runs on macOS 15 or
-later, on Apple Silicon and Intel Macs.
+Or [download the latest version](https://github.com/invig/expanse/releases/latest), unzip it,
+and drag **Expanse** to Applications. It runs on macOS 15 or later, on any Mac, and keeps
+itself up to date.
 
-From then on Expanse keeps itself up to date, straight from this repository's GitHub releases:
-once a day it checks for a newer one, downloads it, and asks before installing (it relaunches,
-and your windows stay put). It installs only a copy Apple's code signing says is from the same
-developer and notarised. Menu bar icon › Check for Updates… checks now; untick Check for Updates
-Automatically to stop the daily check. (Versions before 0.1.7 don't have this: download 0.1.7 or
-later once.)
+## First launch
 
-Or build it from source with the Swift 6 toolchain (Xcode 16+ or the Command Line Tools):
+A short walkthrough gets you set up in about a minute:
+
+1. **Accessibility**, so Expanse can move and focus your windows.
+2. **Screen Recording**, so it can show live pictures of your windows when you zoom out.
+   Nothing is recorded or saved.
+3. **A free screen corner and the <kbd>⌃</kbd> + arrow keys.** macOS uses these too, and the
+   walkthrough shows you which of its settings to switch off.
+
+## The basics
+
+| Do this | To |
+|---|---|
+| Rest the pointer in a screen corner, or press <kbd>⌥</kbd> <kbd>`</kbd> | Zoom out to every window (do it again to go back) |
+| Click a window | Glide to it and start using it |
+| <kbd>⌃</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> | Hop to the next window in that direction |
+| Pinch, or scroll with two fingers | Zoom and move around the canvas |
+| Drag a window while zoomed out | Move it; it snaps into place |
+| <kbd>T</kbd> | Tidy up: overlaps pushed apart, gaps evened out |
+| <kbd>Esc</kbd> | Back to 100% |
+
+<details>
+<summary><strong>All shortcuts</strong></summary>
+
+| Do this | To |
+|---|---|
+| <kbd>⌃</kbd> <kbd>⌥</kbd> <kbd>C</kbd> | Centre the window you're in |
+| <kbd>⌘</kbd> + scroll | Zoom around the pointer |
+| <kbd>Space</kbd> + drag | Move around the canvas |
+| Click empty desktop | Zoom out to every window |
+| Scroll or pinch on empty desktop | Start moving around the canvas from 100% |
+| Drag on empty canvas, <kbd>⇧</kbd>-click, or <kbd>⌘</kbd> <kbd>A</kbd> | Select windows, then drag any of them to move the group |
+| Hold <kbd>⌘</kbd> while dragging | Move without snapping |
+| <kbd>0</kbd> · <kbd>1</kbd> · <kbd>-</kbd> · <kbd>=</kbd> | Fit everything · 100% · zoom out · zoom in |
+| <kbd>Return</kbd> | Dive into the highlighted window |
+| Hover <kbd>×</kbd>, or <kbd>⌘</kbd> <kbd>W</kbd> | Close the window, or every selected window |
+| <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>`</kbd> | Turn auto-centring on or off (off suits side-by-side work) |
+
+</details>
+
+**Full-screen apps** keep their own Spaces, as usual. Jump to them, and back, from the
+**Spaces** panel next to the minimap at the bottom of the screen.
+
+**The menu bar icon** has the rest: which corner to use, Pause, Tidy Up, Restore Layout,
+Restore All Windows, the walkthrough again, and updates.
+
+## Questions
+
+<details>
+<summary><strong>The corner or <kbd>⌃</kbd> + arrows do nothing</strong></summary>
+
+macOS got there first. Run the walkthrough again (menu bar icon › Welcome & Shortcuts), or change
+the settings yourself:
+
+- **Corners:** System Settings › Desktop & Dock › Hot Corners. Set the corners you want for Expanse
+  to “–”, or pick a different corner from Expanse's menu bar icon.
+- **<kbd>⌃</kbd> + arrows:** System Settings › Keyboard › Keyboard Shortcuts › Mission Control.
+  Turn off *Mission Control*, *Application windows* and *Move left/right a space*.
+
+</details>
+
+<details>
+<summary><strong>My windows ended up somewhere odd</strong></summary>
+
+Menu bar icon › **Restore Layout** puts them back the way they were earlier. Expanse keeps your
+last three layouts, saved at least 15 minutes apart, and a restore can be undone too. **Tidy Up**
+neatens things where they are. As a last resort, **Restore All Windows** brings every window
+into view, stacked in the middle of the screen.
+
+</details>
+
+<details>
+<summary><strong>Expanse doesn't see any of my windows</strong></summary>
+
+Open System Settings › Privacy & Security › Accessibility, then turn Expanse off and on again.
+
+</details>
+
+<details>
+<summary><strong>Why is there a purple dot in the menu bar?</strong></summary>
+
+macOS shows it whenever an app captures the screen. Expanse captures window pictures only while
+you're zoomed out or gliding between windows, and only in memory.
+
+</details>
+
+<details>
+<summary><strong>What does it keep, and what does it send?</strong></summary>
+
+Window pictures exist only in memory, to draw the canvas. Nothing is recorded or sent anywhere.
+The one network request is a daily update check to GitHub, which you can turn off in the menu.
+The only files Expanse writes are its layouts in `~/Library/Application Support/Expanse/`:
+window positions and sizes, app names, and a scrambled fingerprint (a hash) of each window's
+title, which recognises the window without storing the title.
+
+</details>
+
+<details>
+<summary><strong>What can't it do?</strong></summary>
+
+- **One display.** Expanse uses your main display for now.
+- **No typing while zoomed out.** That would need changes to macOS that turn off its system
+  protection (SIP), and Expanse deliberately doesn't go there.
+- **A few apps fight being moved.** Please [open an issue](https://github.com/invig/expanse/issues)
+  if you find one.
+
+</details>
+
+<details>
+<summary><strong>How do I uninstall it?</strong></summary>
+
+Quit Expanse first. Your windows go back where macOS had them. Then:
+
+```bash
+brew uninstall --zap --cask expanse
+```
+
+Or drag Expanse from Applications to the Bin, and delete `~/Library/Application Support/Expanse`.
+
+</details>
+
+## For tinkerers
+
+<details>
+<summary><strong>Scripting with <code>expanse://</code> links</strong></summary>
+
+```bash
+open "expanse://toggle"             # zoom out / back
+open "expanse://tidy"
+open "expanse://nav?dir=left"       # left | right | up | down
+open "expanse://centre"             # the window you're in, to the middle
+open "expanse://focus?app=Safari"
+open "expanse://space?name=Safari"  # a full-screen app's Space, "Desktop", or "Expanse"
+open "expanse://layout?snapshot=0"  # back to the newest saved layout (1, 2: older ones)
+open "expanse://pause"              # windows back to the macOS layout
+open "expanse://resume"
+```
+
+Also `enter`, `exit`, `fit`, `zoom?scale=0.5`, `pan?dx=100&dy=0` and `restore`.
+
+</details>
+
+<details>
+<summary><strong>Building from source</strong></summary>
+
+You'll need the Swift 6 toolchain (Xcode 16 or later, or the Command Line Tools).
 
 ```bash
 git clone https://github.com/invig/expanse.git
@@ -79,168 +198,18 @@ cd expanse
 open build/Expanse.app
 ```
 
-On first launch a short walkthrough takes you through four steps, opens the right System
-Settings page for each and ticks it off as soon as it's done:
+</details>
 
-| Step | Why |
-|---|---|
-| **Accessibility** | macOS only lets an app move, resize and focus other apps' windows with this on. |
-| **Screen Recording** | Zoomed out, every window is a live picture. Nothing is recorded, saved or sent. |
-| **A free screen corner** | Rest the pointer in a corner to zoom out. macOS's own hot corners get there first. |
-| **Free ⌃ + arrow keys** | Hop between windows. macOS uses them for Spaces and Mission Control, and gets them first. |
-
-> **Building it yourself?** `build.sh` signs with your *Apple Development* certificate if you have one, so
-> the permissions survive rebuilds. Without one it signs ad hoc, which works, but macOS will
-> ask for the permissions again after every rebuild.
-
-### Freeing up the hot corners and ⌃ + arrows
-
-macOS uses screen corners and <kbd>⌃</kbd> + arrows too, and it gets them first. The walkthrough
-tells you which ones are in the way; to change them yourself:
-
-- **Hot corners:** System Settings › Desktop & Dock › Hot Corners, set the corners Expanse uses
-  to “–” (or pick a different corner from the menu bar icon › Hot Corner).
-- **⌃ + arrows:** System Settings › Keyboard › Keyboard Shortcuts › Mission Control, turn off
-  *Mission Control*, *Application windows* and *Move left/right a space*.
-
-## Using Expanse
-
-| Input | What it does |
-|---|---|
-| <kbd>⌥</kbd><kbd>`</kbd>, or rest the pointer in a screen corner | Zoom out to every window, and back to where you were |
-| Click a window | Fly to it, centred at 100%, and use it |
-| <kbd>⌃</kbd> + <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> | Jump to the nearest window in that direction |
-| <kbd>⌃</kbd><kbd>⌥</kbd><kbd>C</kbd> | Centre the window you're in |
-| Pinch, or <kbd>⌘</kbd> + scroll | Zoom the canvas around the pointer |
-| Two-finger scroll, or <kbd>Space</kbd> + drag | Pan |
-| Scroll or pinch on empty desktop | Start moving around the canvas from 100% |
-| Click empty desktop | Zoom out to every window |
-| Drag a window | Move it; snaps to edges, a 20pt gap and the middle of the screen (hold <kbd>⌘</kbd> to turn snapping off) |
-| Drag on empty canvas, <kbd>⇧</kbd>-click, <kbd>⌘</kbd><kbd>A</kbd> | Select windows; drag any selected one to move the group |
-| <kbd>T</kbd> | Tidy up |
-| <kbd>0</kbd> · <kbd>1</kbd> · <kbd>-</kbd> · <kbd>=</kbd> | Fit everything · 100% · zoom out · zoom in |
-| <kbd>Return</kbd> · <kbd>Esc</kbd> | Dive into the highlighted window · clear selection, then back to 100% |
-| Hover <kbd>×</kbd>, or <kbd>⌘</kbd><kbd>W</kbd> | Close the hovered window, or every selected window at once |
-| <kbd>⌥</kbd><kbd>⇧</kbd><kbd>`</kbd> | Auto-centre on or off. Off: clicking a window that's partly on screen leaves the canvas where it is, for side-by-side work |
-| Spaces, beside the minimap | Jump to a full-screen app (they live in Spaces of their own), or back to the canvas |
-| Menu bar icon | Hot corner choice, desktop picture, Pause, Tidy Up, Restore Layout, Restore All Windows, Welcome & Shortcuts |
-
-### Scripting
-
-```bash
-open "expanse://toggle"            # zoom out / back
-open "expanse://tidy"
-open "expanse://nav?dir=left"      # left | right | up | down
-open "expanse://centre"            # the window you're in, to the middle
-open "expanse://focus?app=Safari"
-open "expanse://space?name=Safari"  # a full-screen app's Space, "Desktop", or "Expanse"
-open "expanse://layout?snapshot=0"  # back to the newest saved layout (1, 2: older ones)
-open "expanse://pause"             # windows back to the macOS layout
-open "expanse://resume"
-```
-
-Also `enter`, `exit`, `fit`, `zoom?scale=0.5`, `pan?dx=100&dy=0` and `restore`. Debugging
-commands (`dump`, `screen?w=1512&h=982` to pretend the display is that size, `place`, `prefer`,
-`focus?id=` a window ID, `update?install=1` to update without asking)
-are off unless you run `defaults write com.invignation.expanse debugURLCommands -bool true`, since
-any app or web page can open `expanse://` links.
-
-## How it works
-
-Expanse runs on a stock, SIP-enabled Mac. That shapes everything:
-
-- **Camera.** Every window has a frame in canvas space; a camera (origin + scale) maps the
-  canvas to the screen. The layout is saved to `~/Library/Application Support/Expanse/`.
-- **At 100%, windows are real.** They sit exactly where the camera says, moved with the
-  Accessibility API. Windows outside the view are *parked* in the bottom-right corner of the
-  screen, with one pixel showing (the trick [AeroSpace](https://github.com/nikitabobko/AeroSpace)
-  uses). A full-screen backdrop sits beneath all windows, drawing the desktop picture and
-  parked windows where they belong on the canvas.
-- **Zoomed out, windows are pictures.** The backdrop rises above everything and draws each
-  window from its own ScreenCaptureKit stream. Desktop-independent window capture keeps working
-  for covered and parked windows, so the whole canvas stays live. Panning and zooming only touch
-  one Core Animation transform, so nothing reflows and it stays at 120 fps.
-- **Gliding** between windows at 100% uses the same trick for a moment: the backdrop rises with
-  pictures exactly over the real windows, the camera animates, and the real windows move once,
-  hidden, on a background thread.
-- **Capture only what can be seen.** Every stream costs the window server work, and macOS marks
-  every captured window with a purple indicator. Expanse streams the windows in view while zoomed
-  out or gliding (when the backdrop covers them anyway); at 100% nothing streams, and the slivers
-  of parked windows showing at the screen's edges are refreshed with snapshots. Pictures are
-  captured at the size they're drawn.
-- **Sixteen streams at most.** The system service behind every screen capture on the Mac runs
-  out of file descriptors at a few dozen streams (other apps' included), after which new streams
-  silently get no frames. So the sixteen most visible windows stream; every other window in view
-  is refreshed with one-off snapshots in turn, and new windows get their first picture the same
-  way.
-- **Full-screen apps** get a Space of their own from macOS, so they aren't on the canvas: Expanse
-  leaves their windows alone, and lists the Spaces (read from the window server, the list
-  Mission Control shows) beside the minimap. Switching is instant: Expanse posts a synthetic
-  trackpad swipe faster than the Dock animates (InstantSpaceSwitcher's trick), under the canvas,
-  which is on every Space and stays put. Then it makes the window key through the window
-  server and raises it, the way AltTab reaches windows on other Spaces (and the way there if
-  the swipe can't be made, say with the pointer on another display). Opened over a full-screen
-  app, the canvas switches back to its desktop as you pick a window; leaving without picking
-  one goes back to the app.
-- **Display changes.** While macOS reshuffles windows after a display change, Expanse ignores
-  their moves, then restores sizes and derives the layout for the new screen from the home
-  layout.
-- **Focus** switches through the Accessibility API, which lands in milliseconds instead of
-  waiting on macOS's cooperative app activation.
-- **Nothing waits on other apps.** Every Accessibility call that has to wait for an app's reply
-  (moving, focusing, asking where a window is) runs off the main thread, each app's windows on a
-  thread of their own, so one busy app can't stall the canvas. Window scans only ask apps about
-  windows that aren't where Expanse expects them. It stays smooth with 50+ windows open.
-
-## Privacy
-
-Window pictures exist only in memory, on your Mac, to draw the canvas. Nothing is recorded,
-written to disk or sent anywhere. The only network request Expanse makes is the daily update check:
-it asks GitHub (`api.github.com`) for this repository's latest release, and downloads it from
-GitHub when it's newer. You can turn the check off in the menu bar. The only file it writes
-is its layout in `~/Library/Application Support/Expanse/layout.json`: window positions and sizes,
-app names, and a hash of each window's title (enough to recognise the window next time, not to
-read the title). Window titles are redacted in the system log.
-
-## Limitations
-
-- **One display.** Expanse manages the main display; multi-monitor support is on the list.
-- **You can't type into a window while zoomed out.** Real window scaling needs code injected into
-  the Dock, which needs SIP disabled. Expanse deliberately doesn't go there.
-- **Window titles can't sit above the menu bar.** A window whose top would be above the screen
-  stays parked, and the backdrop shows it in place; click it to bring it in.
-- Some apps fight being moved (they snap themselves back, or animate). Expanse copes with the
-  common cases; please open an issue for ones it doesn't.
-
-## Developing
-
-```bash
-./scripts/build.sh && open build/Expanse.app
-log stream --level info --predicate 'subsystem == "com.invignation.expanse"'
-```
-
-To publish a release (signed, notarised, universal): `scripts/release.sh`. See the script's
-header for the one-time setup. It also points the Homebrew cask in
-[invig/homebrew-tap](https://github.com/invig/homebrew-tap) at the new release. Installed copies
-pick it up from GitHub within a day; development builds are signed differently and never update.
-
-Don't run a copy signed differently from your development build (a release, say) on the same Mac:
-it shares the app ID, and macOS's Accessibility permission for Expanse can come out of it confused.
-Expanse still reports itself trusted but sees no windows; turning Expanse off and on again in
-System Settings › Privacy & Security › Accessibility fixes it.
-
-The log shows every window Expanse moves, resizes or follows, glide timings, and anything slow.
-With `debugURLCommands` on, `open "expanse://dump"` writes the full layout to it.
+Curious how it works without turning off System Integrity Protection? See
+[How Expanse works](docs/how-it-works.md).
 
 ## Thanks
 
-- [Sunlight](https://x.com/deezel/status/2114386503312839087) by Darin Dimitroff, which
-  inspired this. Sunlight's full mode goes further with SIP disabled; Expanse explores how far a
-  stock Mac can go.
-- [InstantSpaceSwitcher](https://github.com/jurplel/InstantSpaceSwitcher) (and
-  [Space Rabbit](https://github.com/Tahul/space-rabbit)) for working out instant Space switching
-  on stock macOS, macOS 27 included, and [AltTab](https://github.com/lwouis/alt-tab-macos) for
-  reaching windows on other Spaces.
+- [Sunlight](https://x.com/deezel/status/2114386503312839087) by Darin Dimitroff, which inspired
+  Expanse. Sunlight goes further with SIP disabled; Expanse explores how far a stock Mac can go.
+- [InstantSpaceSwitcher](https://github.com/jurplel/InstantSpaceSwitcher) and
+  [Space Rabbit](https://github.com/Tahul/space-rabbit) for instant Space switching, and
+  [AltTab](https://github.com/lwouis/alt-tab-macos) for reaching windows on other Spaces.
 - [AeroSpace](https://github.com/nikitabobko/AeroSpace) for the corner-parking idea, and
   [Rectangle](https://github.com/rxhanson/Rectangle) and [yabai](https://github.com/koekeishiya/yabai)
   for years of public knowledge about macOS window management.
