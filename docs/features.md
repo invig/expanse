@@ -4,9 +4,13 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-- **Windows sometimes drop off the canvas** (seen 28 Oct). Five windows, the main Claude window
-  among them, stopped being managed until Expanse restarted. Cause unknown. Since 0.1.23 the log
-  says why a window drops: next time, run `expanse://dump` before restarting.
+None open. Fixed, not yet released:
+- Windows dropping off the canvas (seen twice on 28 Oct): when macOS restarted its capture
+  service, Expanse dropped every window it was capturing and stopped scanning, so they never came
+  back and new windows (a VM's) weren't taken on. It now recovers.
+- An app that opens again (UTM, say) gets its windows' spots back, and the view goes to them.
+- VM windows keep their spot when the VM changes resolution, instead of drifting off their line.
+- Clicking a window you can see, after panning the view yourself, no longer recentres it.
 
 ## Next up
 
