@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let screenRecordingItem = NSMenuItem(title: "", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
     private let installUpdateItem = NSMenuItem(title: "", action: #selector(installUpdate), keyEquivalent: "")
     private let autoUpdateItem = NSMenuItem(title: "Check for Updates Automatically", action: #selector(toggleAutoUpdate), keyEquivalent: "")
+    private let loginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
     private let restoreLayoutItem = NSMenuItem(title: "Restore Layout", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -76,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.controller.centreCurrentWindow()
         }
         controller.start()
+        LoginItem.setUpOnce()
     }
 
     /// An update has downloaded and checked out: say so, once per version unless you asked.
@@ -112,6 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func installUpdate() { Updater.shared.install() }
 
     @objc private func toggleAutoUpdate() { Updater.shared.automatic.toggle() }
+
+    @objc private func toggleLoginItem() { LoginItem.toggle() }
 
     /// expanse://toggle | enter | exit | fit | restore | zoom?scale=0.5 | pan?dx=100&dy=0 | focus?app=Safari
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -261,6 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(installUpdateItem)
         menu.addItem(NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(autoUpdateItem)
+        menu.addItem(loginItem)
         menu.addItem(.separator())
         menu.addItem(accessibilityItem)
         menu.addItem(screenRecordingItem)
@@ -286,6 +291,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         installUpdateItem.isHidden = update == nil
         autoUpdateItem.state = Updater.shared.automatic ? .on : .off
         autoUpdateItem.isHidden = !Updater.shared.isRelease
+        loginItem.state = LoginItem.enabled ? .on : .off
+        loginItem.isHidden = !Updater.shared.isRelease
         screenRecordingItem.title = sr ? "Screen Recording: granted" : "Grant Screen Recording…"
         fillRestoreLayoutMenu()
     }
