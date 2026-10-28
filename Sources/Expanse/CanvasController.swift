@@ -1487,7 +1487,19 @@ final class CanvasController: NSObject {
             }
         }
 
+        let scanned = Dictionary(scWindows.map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
         for w in windows where !seen.contains(w.id) {
+            // Kept on disk (notice, not info), so a window that drops off the canvas can be
+            // explained afterwards.
+            let reason: String
+            if let sc = scanned[w.id] {
+                reason = isManageable(sc, tracked: true, regular: regular)
+                    ? "Accessibility says it isn't a standard window"
+                    : "layer \(sc.windowLayer), on screen \(sc.isOnScreen), \(Int(sc.frame.width))x\(Int(sc.frame.height))"
+            } else {
+                reason = "not in the window list"
+            }
+            logger.notice("dropped \(w.appName, privacy: .public)[\(w.id)]: \(reason, privacy: .public)\(stale ? " (out-of-date scan)" : "", privacy: .public)")
             remove(w)
         }
 
@@ -1612,7 +1624,7 @@ final class CanvasController: NSObject {
         // Its first picture comes from a one-off snapshot (see pumpSnapshots), not a stream.
         pumpSnapshotsSoon()
         observe(w)
-        logger.info("tracking \(w.appName, privacy: .public) [\(w.id)] \(w.title, privacy: .private)")
+        logger.notice("tracking \(w.appName, privacy: .public) [\(w.id)] \(w.title, privacy: .private)")
         if arriving { arrive(w, anchor: anchor, live: live, returning: returning) }
         return restored
     }
@@ -3083,6 +3095,18 @@ final class CanvasController: NSObject {
         for w in windows {
             let axPos = w.ax.flatMap(AX.position).map { NSStringFromPoint($0) } ?? "nil"
             logger.info("dump \(w.appName, privacy: .public)[\(w.id)] sc=\(NSStringFromRect(w.scWindow.frame), privacy: .public) ax=\(axPos, privacy: .public) canvas=\(NSStringFromRect(w.canvasFrame), privacy: .public) layer=\(NSStringFromRect(w.node.container.frame), privacy: .public) parked=\(w.parked) capturing=\(w.capture.isRunning) first=\(w.needsFirstFrame) pic=\(w.pictureWidth) lastPlaced=\(w.lastPlaced.map { NSStringFromPoint($0) } ?? "nil", privacy: .public)")
+        }
+        // App windows on screen that aren't on the canvas, and why not.
+        let managed = Set(windows.map(\.id))
+        let fullScreen = Spaces.fullScreenWindows()
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        for w in info where (w[kCGWindowLayer as String] as? Int) == 0 {
+            guard let id = w[kCGWindowNumber as String] as? CGWindowID, !managed.contains(id),
+                  let pid = w[kCGWindowOwnerPID as String] as? pid_t, pid != getpid(),
+                  let bounds = w[kCGWindowBounds as String] as? [String: CGFloat], bounds["Width"] ?? 0 >= 100 else { continue }
+            let kind = windowKinds[id].map { "standard=\($0.standard) pending=\($0.pending) age=\(Int(CACurrentMediaTime() - $0.at))s" } ?? "never asked"
+            let owner = w[kCGWindowOwnerName as String] as? String ?? "?"
+            logger.info("dump unmanaged \(owner, privacy: .public)[\(id)] \(kind, privacy: .public) scanned=\(self.scannedIDs.contains(id)) fullScreen=\(fullScreen.contains(id)) regular=\(Self.isRegularApp(pid)) recentlyRemoved=\(self.recentlyRemoved[id] != nil)")
         }
     }
 
