@@ -435,6 +435,7 @@ final class CanvasController: NSObject {
             if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
                 self?.observers[app.processIdentifier] = nil
                 self?.focusedWindowByApp[app.processIdentifier] = nil
+                if self?.isPaused == false { self?.appQuit(app) }
             }
         }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appActivated(_:)),
@@ -947,6 +948,33 @@ final class CanvasController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
     }
 
+    /// A window gone from screen, as a saved layout keeps it.
+    private func savedEntry(_ id: CGWindowID, _ gone: Departed) -> SavedLayout.Window {
+        SavedLayout.Window(bundleID: gone.bundleID, appName: gone.appName, title: LayoutStore.titleKey(gone.title),
+                           x: Double(gone.canvasFrame.minX), y: Double(gone.canvasFrame.minY),
+                           w: Double(gone.canvasFrame.width), h: Double(gone.canvasFrame.height),
+                           hx: Double((gone.home ?? gone.canvasFrame.origin).x),
+                           hy: Double((gone.home ?? gone.canvasFrame.origin).y),
+                           pw: Double(gone.preferredSize.width), ph: Double(gone.preferredSize.height),
+                           ox: Double(gone.originalFrame.minX), oy: Double(gone.originalFrame.minY),
+                           ow: Double(gone.originalFrame.width), oh: Double(gone.originalFrame.height),
+                           id: id, pid: gone.pid)
+    }
+
+    /// An app quit. Its windows come back with new IDs when it opens again, so their spots go
+    /// where a saved layout's do: the app's next windows take them, matched by title as at
+    /// launch (see add), instead of opening wherever there's room.
+    private func appQuit(_ app: NSRunningApplication) {
+        let pid = app.processIdentifier
+        for w in windows where w.pid == pid { remove(w) }
+        let gone = recentlyRemoved.filter { $0.value.pid == pid }.sorted { $0.value.at > $1.value.at }
+        guard !gone.isEmpty else { return }
+        for (id, _) in gone { recentlyRemoved.removeValue(forKey: id) }
+        savedPool.insert(contentsOf: gone.map { savedEntry($0.key, $0.value) }, at: 0)
+        logger.notice("\(app.localizedName ?? "?", privacy: .public) quit: keeping \(gone.count) window spots for when it opens again")
+        scheduleSave()
+    }
+
     /// `cleanExit` is true only when windows have just been put back in their original
     /// macOS layout (quit / pause). Otherwise the saved originals are what a crash recovery needs.
     func save(cleanExit: Bool = false) {
@@ -963,17 +991,7 @@ final class CanvasController: NSObject {
             .filter { NSRunningApplication(processIdentifier: $0.value.pid) != nil }
             .sorted { $0.value.at > $1.value.at }
             .prefix(60)
-            .map { id, gone in
-                SavedLayout.Window(bundleID: gone.bundleID, appName: gone.appName, title: LayoutStore.titleKey(gone.title),
-                                   x: Double(gone.canvasFrame.minX), y: Double(gone.canvasFrame.minY),
-                                   w: Double(gone.canvasFrame.width), h: Double(gone.canvasFrame.height),
-                                   hx: Double((gone.home ?? gone.canvasFrame.origin).x),
-                                   hy: Double((gone.home ?? gone.canvasFrame.origin).y),
-                                   pw: Double(gone.preferredSize.width), ph: Double(gone.preferredSize.height),
-                                   ox: Double(gone.originalFrame.minX), oy: Double(gone.originalFrame.minY),
-                                   ow: Double(gone.originalFrame.width), oh: Double(gone.originalFrame.height),
-                                   id: id, pid: gone.pid)
-            }
+            .map { savedEntry($0.key, $0.value) }
         let layout = SavedLayout(
             cameraX: Double(camera.origin.x), cameraY: Double(camera.origin.y),
             centerX: Double(center.x), centerY: Double(center.y),
@@ -1571,6 +1589,8 @@ final class CanvasController: NSObject {
 
         var restored = false
         var returning = recentlyRemoved[w.id] != nil
+        // An app that quit opening again: its window is back at its spot (see appQuit).
+        var reopened = false
         if live, let tab = tabTakingOver(from: w, at: f) {
             // A new tab, or another tab brought to the front: it takes the group's spot (where
             // it already is), instead of being placed as a new window, which would move the group.
@@ -1603,7 +1623,7 @@ final class CanvasController: NSObject {
                 w.canvasFrame.size = actual
                 logger.info("restore size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(f.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
             }
-            if !firstSync { returning = true }
+            if !firstSync { returning = true; reopened = true }
             if saved?.cleanExit != true, let ox = match.ox, let oy = match.oy, let ow = match.ow, let oh = match.oh {
                 // Last run didn't put windows back; its record of the macOS layout is the real one.
                 w.originalFrame = CGRect(x: ox, y: oy, width: ow, height: oh)
@@ -1650,7 +1670,7 @@ final class CanvasController: NSObject {
         pumpSnapshotsSoon()
         observe(w)
         logger.notice("tracking \(w.appName, privacy: .public) [\(w.id)] \(w.title, privacy: .private)")
-        if arriving { arrive(w, anchor: anchor, live: live, returning: returning) }
+        if arriving { arrive(w, anchor: anchor, live: live, returning: returning, reopened: reopened) }
         return restored
     }
 
@@ -2319,7 +2339,7 @@ final class CanvasController: NSObject {
 
     /// New windows go to an empty spot next to what you were working on; windows coming back
     /// from minimize / hide go back where they were.
-    private func arrive(_ w: ManagedWindow, anchor: ManagedWindow?, live: Bool, returning: Bool) {
+    private func arrive(_ w: ManagedWindow, anchor: ManagedWindow?, live: Bool, returning: Bool, reopened: Bool = false) {
         if returning, wentFullScreen.remove(w.id) != nil, live {
             // Back at its old spot (see add()), and the view goes there.
             backFromFullScreen(w)
@@ -2335,7 +2355,10 @@ final class CanvasController: NSObject {
         }
         guard live else { view.render(); return }
         let r = camera.toView(w.canvasFrame)
-        if CGRect(origin: .zero, size: viewSize).contains(r) || returning {
+        // You opened the app again, and it's in front: the view goes to its window, as to a new
+        // one. (Its focus came before the window did, so focus can't decide.)
+        let opened = reopened && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid
+        if CGRect(origin: .zero, size: viewSize).contains(r) || (returning && !opened) {
             // On screen, or back from minimize / hide (quietly to its spot; focus decides whether
             // to glide): moved with the other new windows once the scan is applied. Until then,
             // its own move's echo isn't you moving it.
