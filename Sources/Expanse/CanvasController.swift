@@ -48,6 +48,36 @@ final class CanvasController: NSObject {
     /// are never reused, so a returning ID means the same window coming back.
     private var recentlyRemoved: [CGWindowID: Departed] = [:]
 
+    /// The windows in the scan being applied (see tabTakingOver).
+    private var scannedIDs = Set<CGWindowID>()
+
+    /// The tab `w` takes over from. macOS shows each tab as a window of its own, at the tab
+    /// group's frame, and only the front tab's is on screen: so a window that appears exactly where
+    /// a window of the same app has just gone is that app's next tab, not a new window.
+    /// `real`: the new window's frame on screen.
+    private func tabTakingOver(from w: ManagedWindow, at real: CGRect) -> (id: CGWindowID, canvasFrame: CGRect, originalFrame: CGRect,
+                                                                         preferredSize: CGSize, home: CGPoint?, lastPlaced: CGPoint?, parked: Bool)? {
+        func near(_ a: CGPoint, _ b: CGPoint) -> Bool { abs(a.x - b.x) <= 2 && abs(a.y - b.y) <= 2 }
+        func sameSize(_ s: CGSize) -> Bool { abs(s.width - real.width) <= 2 && abs(s.height - real.height) <= 2 }
+        // Where the other tab was: on screen at its canvas spot, or parked (with the group).
+        func wasHere(canvas: CGRect, placed: CGPoint?, parked: Bool) -> Bool {
+            guard sameSize(canvas.size) else { return false }
+            if parked { return inParkingCorner(real.origin) }
+            return near(canvas.origin, w.canvasFrame.origin) || placed.map { near($0, real.origin) } == true
+        }
+        if let tab = windows.first(where: { $0.pid == w.pid && $0.id != w.id && !scannedIDs.contains($0.id)
+                                            && wasHere(canvas: $0.canvasFrame, placed: $0.lastPlaced, parked: $0.parked) }) {
+            return (tab.id, tab.canvasFrame, tab.originalFrame, tab.preferredSize, tab.home, tab.lastPlaced, tab.parked)
+        }
+        // Gone a moment before (the scan that saw it go came first).
+        if let (id, tab) = recentlyRemoved.first(where: { $0.key != w.id && $0.value.pid == w.pid
+                                                            && Date().timeIntervalSince($0.value.at) < 2
+                                                            && wasHere(canvas: $0.value.canvasFrame, placed: nil, parked: $0.value.parked) }) {
+            return (id, tab.canvasFrame, tab.originalFrame, tab.preferredSize, tab.home, nil, tab.parked)
+        }
+        return nil
+    }
+
     /// Everything Expanse knew about a window that went out of view (app hidden, minimised, on
     /// another Space) or closed, so it comes back exactly as it was and is still restored on quit.
     private struct Departed {
@@ -1392,6 +1422,7 @@ final class CanvasController: NSObject {
             regularApps[pid] = r
             return r
         }
+        scannedIDs = Set(scWindows.map(\.windowID))
         for sc in scWindows where isManageable(sc, tracked: byID[sc.windowID] != nil, regular: regular) {
             // Only ordinary document windows live on the canvas. Sheets (like Xcode's Manage
             // Certificates), dialogs and floating panels belong to their parent window and stay
@@ -1489,7 +1520,19 @@ final class CanvasController: NSObject {
 
         var restored = false
         var returning = recentlyRemoved[w.id] != nil
-        if let back = recentlyRemoved.removeValue(forKey: w.id) {
+        if live, let tab = tabTakingOver(from: w, at: f) {
+            // A new tab, or another tab brought to the front: it takes the group's spot (where
+            // it already is), instead of being placed as a new window, which would move the group.
+            recentlyRemoved.removeValue(forKey: w.id)
+            w.canvasFrame = tab.canvasFrame
+            w.originalFrame = tab.originalFrame
+            w.preferredSize = tab.preferredSize
+            w.home = tab.home
+            w.lastPlaced = tab.lastPlaced
+            w.parked = tab.parked
+            returning = true
+            logger.info("tab \(w.appName, privacy: .public)[\(w.id)] takes over from [\(tab.id)]")
+        } else if let back = recentlyRemoved.removeValue(forKey: w.id) {
             // Came back (minimised, hidden, another Space, briefly missing during a display
             // change): same spot, same macOS original and chosen size.
             w.canvasFrame.origin = back.canvasFrame.origin
