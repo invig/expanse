@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let accessibilityItem = NSMenuItem(title: "", action: #selector(openAccessibilitySettings), keyEquivalent: "")
     private let cornerMenu = NSMenu()
     private let wallpaperItem = NSMenuItem(title: "Desktop Picture Background", action: #selector(toggleWallpaper), keyEquivalent: "")
+    private let namesItem = NSMenuItem(title: "Show Window Names", action: #selector(toggleNames), keyEquivalent: "")
     private let pauseItem = NSMenuItem(title: "Pause Expanse", action: #selector(togglePause), keyEquivalent: "")
     private let screenRecordingItem = NSMenuItem(title: "", action: #selector(openScreenRecordingSettings), keyEquivalent: "")
     private let installUpdateItem = NSMenuItem(title: "", action: #selector(installUpdate), keyEquivalent: "")
@@ -250,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         centreItem.target = self
         menu.addItem(centreItem)
         menu.addItem(wallpaperItem)
+        menu.addItem(namesItem)
         menu.addItem(NSMenuItem(title: "Tidy Up Windows", action: #selector(tidy), keyEquivalent: ""))
         restoreLayoutItem.submenu = NSMenu()
         menu.addItem(restoreLayoutItem)
@@ -275,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.state = (item.representedObject as? String) == controller.hotCorner.corner.rawValue ? .on : .off
         }
         wallpaperItem.state = Wallpaper.enabled ? .on : .off
+        namesItem.state = CanvasView.showsNames ? .on : .off
         centreItem.state = controller.autoCentre ? .on : .off
         pauseItem.title = controller.isPaused ? "Resume Expanse" : "Pause Expanse (back to macOS layout)"
         accessibilityItem.title = ax ? "Accessibility: granted" : "Grant Accessibility…"
@@ -342,6 +345,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleWallpaper() {
         Wallpaper.enabled.toggle()
         controller.refreshWallpaper()
+    }
+
+    @objc private func toggleNames() {
+        CanvasView.showsNames.toggle()
+        controller.view.render()
     }
 
     @objc private func togglePause() {

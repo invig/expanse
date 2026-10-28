@@ -9,6 +9,12 @@ final class CanvasView: NSView {
     private let wallpaper = CALayer()
     private let world = CALayer()
     private let labels = CALayer()
+
+    /// App names (and the hovered window's title) above the windows. Off unless chosen in the menu.
+    static var showsNames: Bool {
+        get { UserDefaults.standard.bool(forKey: "showWindowNames") }
+        set { UserDefaults.standard.set(newValue, forKey: "showWindowNames") }
+    }
     /// Height of the menu bar strip the wallpaper extends under, so it lines up with the real desktop.
     var menuBarHeight: CGFloat = 0 { didSet { needsLayout = true } }
     private let guides = CAShapeLayer()
@@ -190,6 +196,7 @@ final class CanvasView: NSView {
         guard let c = controller else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        labels.isHidden = !Self.showsNames
         let viewRect = CGRect(origin: .zero, size: bounds.size)
         selected.formIntersection(c.windows.map(\.id))
         if !c.isActive { selected.removeAll() }
