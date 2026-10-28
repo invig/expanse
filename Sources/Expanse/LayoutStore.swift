@@ -131,8 +131,10 @@ enum LayoutStore {
     /// Picks the saved entry for a window: the same window (same ID in the same app process),
     /// then same app and title, then same app. Matched entries are removed so two windows never
     /// claim the same slot, and `open` (keys of windows open now) keeps the fallbacks from taking
-    /// an entry that belongs to another open window.
-    static func takeMatch(bundleID: String, title: String, id: CGWindowID, pid: pid_t, open: Set<String>,
+    /// an entry that belongs to another open window. A window of `size` far smaller than an
+    /// entry's (an update or loading box, a small dialog) doesn't take it either: the app's main
+    /// window, a moment later, does (see largerSpot).
+    static func takeMatch(bundleID: String, title: String, id: CGWindowID, pid: pid_t, size: CGSize? = nil, open: Set<String>,
                           from pool: inout [SavedLayout.Window]) -> SavedLayout.Window? {
         if let i = pool.firstIndex(where: { $0.id == id && $0.pid == pid && $0.bundleID == bundleID }) {
             return pool.remove(at: i)
@@ -144,13 +146,31 @@ enum LayoutStore {
             return !open.contains(windowKey(pid: epid, id: eid)) && !exists(id: eid, pid: epid)
         }
         let key = titleKey(title)
+        func fits(_ e: SavedLayout.Window) -> Bool { size.map { !tooSmall($0, for: e) } ?? true }
         // Older layout files stored the title itself.
-        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && ($0.title == key || $0.title == title) && free($0) }) {
+        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && ($0.title == key || $0.title == title) && free($0) && fits($0) }) {
             return pool.remove(at: i)
         }
-        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && free($0) }) {
+        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && free($0) && fits($0) }) {
             return pool.remove(at: i)
         }
         return nil
+    }
+
+    /// A free entry of the app's that a window of `size` is too small to take (see takeMatch):
+    /// the window it's standing in for, while the app starts up. Left in the pool.
+    static func largerSpot(bundleID: String, size: CGSize, open: Set<String>,
+                           in pool: [SavedLayout.Window]) -> SavedLayout.Window? {
+        pool.first { e in
+            guard e.bundleID == bundleID, tooSmall(size, for: e) else { return false }
+            guard let eid = e.id, let epid = e.pid else { return true }
+            return !open.contains(windowKey(pid: epid, id: eid)) && !exists(id: eid, pid: epid)
+        }
+    }
+
+    /// Under a quarter of the entry's area: not the same window coming back.
+    private static func tooSmall(_ size: CGSize, for e: SavedLayout.Window) -> Bool {
+        guard let w = e.pw ?? e.w, let h = e.ph ?? e.h, w > 0, h > 0 else { return false }
+        return Double(size.width * size.height) < 0.25 * w * h
     }
 }

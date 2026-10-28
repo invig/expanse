@@ -1091,7 +1091,7 @@ final class CanvasController: NSObject {
         var restored = 0
         for w in windows {
             guard let e = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid,
-                                                open: open, from: &pool) else { continue }
+                                                size: w.canvasFrame.size, open: open, from: &pool) else { continue }
             // Its home spot and chosen size; fitting (below) works out where it goes on this screen.
             w.home = CGPoint(x: e.hx ?? e.x, y: e.hy ?? e.y)
             w.canvasFrame.origin = w.home ?? w.canvasFrame.origin
@@ -1674,7 +1674,7 @@ final class CanvasController: NSObject {
             w.originalFrame = back.originalFrame
             w.preferredSize = back.preferredSize
             w.home = back.home
-        } else if let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid,
+        } else if let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid, size: f.size,
                                                     open: openWindowKeys, from: &savedPool) {
             // A saved spot: at launch, or an app opened later that had windows last time.
             w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
@@ -1693,6 +1693,16 @@ final class CanvasController: NSObject {
                 w.originalFrame = CGRect(x: ox, y: oy, width: ow, height: oh)
             }
             restored = true
+        } else if !firstSync, let spot = LayoutStore.largerSpot(bundleID: w.bundleID, size: f.size, open: openWindowKeys, in: savedPool) {
+            // An app opening again shows a small box first (an update or loading screen): it goes
+            // in the middle of where the app's window was, which the window itself takes when it
+            // comes, so the view doesn't go somewhere else in between.
+            let x = spot.x + (spot.pw ?? spot.w ?? Double(f.width)) / 2 - Double(f.width) / 2
+            let y = spot.y + (spot.ph ?? spot.h ?? Double(f.height)) / 2 - Double(f.height) / 2
+            w.canvasFrame.origin = CGPoint(x: x.rounded(), y: y.rounded())
+            returning = true
+            reopened = true
+            logger.info("\(w.appName, privacy: .public)[\(w.id)] is a small window of an app opening again: centred on its window's spot")
         } else if inParkingCorner(f.origin) {
             // In the parking corner with no record of where it belongs (a previous run that
             // didn't exit cleanly, or a lost record): bring it out where it can be seen.
