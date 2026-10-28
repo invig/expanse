@@ -36,7 +36,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// the days before, crashed). With a few outstanding, or while window scans get no answer,
     /// nothing new is asked for until it answers. Main thread only.
     private(set) static var overdue = 0
-    /// Window scans are getting no answer (see CanvasController.sync): replayd is stuck.
+    /// Window scans are getting no answer, or macOS refuses them (see CanvasController.sync).
     static var replaydStuck = false {
         didSet { if oldValue, !replaydStuck, canAsk { askAgain?() } }
     }

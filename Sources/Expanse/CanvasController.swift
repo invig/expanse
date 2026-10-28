@@ -43,6 +43,8 @@ final class CanvasController: NSObject {
     /// new request every ten seconds.
     private static let scanTimeout: TimeInterval = 10
     private var unansweredScans = 0
+    /// No scan before this (CACurrentMediaTime): macOS refused the last one (see sync).
+    private var scanRetryAt: CFTimeInterval = 0
     /// A scan was asked for while one was running: run another once it's done.
     private var syncAgain = false
     private var syncRetryScheduled = false
@@ -1246,6 +1248,13 @@ final class CanvasController: NSObject {
         }
         if let completion { pendingSyncCompletions.append(completion) }
         guard !syncing else { syncAgain = true; return }
+        guard CACurrentMediaTime() >= scanRetryAt else {
+            // Backing off (see below): whoever's waiting gets what the last scan found.
+            let completions = pendingSyncCompletions
+            pendingSyncCompletions = []
+            completions.forEach { $0() }
+            return
+        }
         // On a full-screen app's Space the canvas's windows aren't on screen, so a scan would be
         // thrown away (see below): skip ScreenCaptureKit and the window server altogether.
         if Spaces.inFullScreenSpace {
@@ -1291,8 +1300,10 @@ final class CanvasController: NSObject {
                 // Given up on (see scanTimeout): the one after it counts.
                 guard self.syncToken == token else { return }
                 self.syncing = false
-                self.unansweredScans = 0
-                WindowCapture.replaydStuck = false
+                if content != nil {
+                    self.unansweredScans = 0
+                    WindowCapture.replaydStuck = false
+                }
                 if !inFullScreenSpace { self.windowKinds = ax.kinds }
                 // Asked for while this scan ran, so it may have missed what that was about.
                 var again = self.syncAgain
@@ -1316,6 +1327,12 @@ final class CanvasController: NSObject {
                     }
                 } else if let error {
                     logger.error("SCShareableContent failed: \(error.localizedDescription, privacy: .public)")
+                    // Refused (Screen Recording not allowed, or its approval waiting on you): asking
+                    // again at once only asks again. Back off as for a scan with no answer, and
+                    // capture nothing meanwhile.
+                    self.scanRetryAt = CACurrentMediaTime() + Self.scanTimeout * pow(2, Double(min(self.unansweredScans, 5)))
+                    self.unansweredScans += 1
+                    WindowCapture.replaydStuck = true
                 }
                 if again { self.syncSoon() }
                 let completions = self.pendingSyncCompletions
