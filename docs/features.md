@@ -46,6 +46,8 @@ None open.
 
 ## Done
 
+- 0.1.27: New Finder windows open beside you instead of at an old Finder window's spot, and closing
+  one keeps the view where it is; refused window scans back off instead of asking every 5s.
 - 0.1.26: A stuck capture service (replayd) isn't swamped any more: scans back off, and captures
   wait for it to answer (overnight on 29 Oct, requests piled up in it until the screen froze); an
   app's loading box doesn't take its main window's spot; new windows go upward only as a last
