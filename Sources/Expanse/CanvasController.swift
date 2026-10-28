@@ -1,6 +1,7 @@
 import AppKit
 import QuartzCore
 import ScreenCaptureKit
+import os
 
 /// Owns the canvas: which windows are on it, the camera, and the two modes.
 ///
@@ -31,10 +32,17 @@ final class CanvasController: NSObject {
     private var syncing = false
     /// The scan in flight (see sync): one given up on is told apart from the one after it.
     private var syncToken = 0
+    /// The latest scan's token, for ScreenCaptureKit's answer to check on its own thread: an
+    /// answer to a scan since given up on stops there, before asking every app about its windows.
+    /// (A capture service that stops answering for hours can answer a thousand requests at once.)
+    private let latestScan = OSAllocatedUnfairLock(initialState: 0)
     /// How long a scan may wait for ScreenCaptureKit. When macOS restarts its capture service
     /// (replayd), a request already sent never gets an answer, and without a limit no scan would
-    /// ever run again: no new windows, and none of the dropped ones back.
+    /// ever run again: no new windows, and none of the dropped ones back. Doubled for each scan in
+    /// a row that got none (to about five minutes), so a capture service that's stuck isn't sent a
+    /// new request every ten seconds.
     private static let scanTimeout: TimeInterval = 10
+    private var unansweredScans = 0
     /// A scan was asked for while one was running: run another once it's done.
     private var syncAgain = false
     private var syncRetryScheduled = false
@@ -1227,15 +1235,20 @@ final class CanvasController: NSObject {
         syncAgain = false
         syncToken += 1
         let token = syncToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.scanTimeout) { [weak self] in
+        latestScan.withLock { $0 = token }
+        let wait = Self.scanTimeout * pow(2, Double(min(unansweredScans, 5)))
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             guard let self, self.syncing, self.syncToken == token else { return }
-            logger.notice("window scan got no answer in \(Int(Self.scanTimeout))s (macOS's capture service restarting?); starting another")
+            self.unansweredScans += 1
+            logger.notice("window scan got no answer in \(Int(wait))s (macOS's capture service stuck or restarting?); the next waits \(Int(Self.scanTimeout * pow(2, Double(min(self.unansweredScans, 5)))))s")
             self.syncing = false
             self.syncSoon()
         }
         let input = scanInput()
         let s0 = CACurrentMediaTime()
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
+            // An answer to a scan given up on: a later one is in flight, or has been answered.
+            guard let self, self.latestScan.withLock({ $0 }) == token else { return }
             let s1 = CACurrentMediaTime()
             // Full-screen windows have Spaces of their own and stay off the canvas. On a full-screen
             // app's Space, the canvas's windows aren't on screen at all: the scan can't say anything
@@ -1250,8 +1263,9 @@ final class CanvasController: NSObject {
             let s2 = CACurrentMediaTime()
             DispatchQueue.main.async {
                 // Given up on (see scanTimeout): the one after it counts.
-                guard let self, self.syncToken == token else { return }
+                guard self.syncToken == token else { return }
                 self.syncing = false
+                self.unansweredScans = 0
                 if !inFullScreenSpace { self.windowKinds = ax.kinds }
                 // Asked for while this scan ran, so it may have missed what that was about.
                 var again = self.syncAgain
