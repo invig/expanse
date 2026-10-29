@@ -4,9 +4,16 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-- **The background went dark after using macOS's Fill** (another Mac, 29 Oct). Not reproduced.
-  Probably Expanse's backdrop holding a copy of the desktop picture taken while macOS had it
-  dimmed. Next time: Troubleshooting › Copy Logs for a Bug Report on that Mac.
+- **The canvas can show a dimmed desktop picture** (another Mac, 29 Oct). macOS dims the desktop
+  behind a window that fills the screen, and the canvas captures its copy of the desktop picture
+  from the screen, so a copy taken then stays dark. Fix: load the picture from its file instead.
+- **Windows peeking in at the screen's edges** cover the minimap and Spaces panels (29 Oct), which
+  sit on the backdrop under every window. Park a window that only shows a sliver, or float the
+  panels above windows?
+
+Fixed, not yet released:
+- At 100% the real desktop shows through: macOS's own shade under the menu bar and its dimming
+  behind a filled window, instead of a copy of the desktop picture that missed both.
 
 ## Next up
 
