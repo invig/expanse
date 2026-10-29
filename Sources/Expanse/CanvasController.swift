@@ -241,6 +241,8 @@ final class CanvasController: NSObject {
     /// True while displays are changing: macOS shoves windows around and we must not
     /// mistake that for the user moving them.
     private var suspendTracking = false
+    /// At the lock screen: tracking stays suspended until you're back (see start).
+    private var screenLocked = false
     private var relayoutWork: [DispatchWorkItem] = []
     /// After a display change macOS keeps moving windows for a while (it restores each window's
     /// remembered spot for that display). Until then, moves are reverted instead of adopted.
@@ -335,7 +337,7 @@ final class CanvasController: NSObject {
         if final {
             settleUntil = Date().addingTimeInterval(Self.settleDuration)
             let end = DispatchWorkItem { [weak self] in
-                guard let self, Date() >= self.settleUntil else { return }
+                guard let self, Date() >= self.settleUntil, !self.screenLocked else { return }
                 self.suspendTracking = false
                 logger.info("display change settled")
             }
@@ -419,13 +421,35 @@ final class CanvasController: NSObject {
             self?.pumpSnapshotsSoon()
         }
         lastViewportSize = viewSize
-        // macOS can still shuffle windows while the Mac sits at the lock screen; put everything
-        // back once you're in.
-        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"),
-                                                            object: nil, queue: .main) { [weak self] _ in
-            guard let self, !self.isPaused else { return }
+        // macOS can shuffle windows while the Mac sits at the lock screen or its displays sleep
+        // (once it pulled every parked window onto a smaller screen, all at one spot, and that
+        // was followed as if you'd moved them): none of it is you, so nothing is followed until
+        // you're back, then everything goes back where it was.
+        let distributed = DistributedNotificationCenter.default()
+        distributed.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.screenLocked = true
+            guard !self.isPaused else { return }
+            logger.info("locked: window moves not followed until unlocked")
+            self.displaysWillChange()
+        }
+        distributed.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.screenLocked = false
+            guard !self.isPaused else { return }
             logger.info("unlocked: re-placing windows")
             self.displaysWillChange()
+            self.scheduleRelayout()
+        }
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, !self.isPaused else { return }
+            logger.info("displays asleep: window moves not followed until they wake")
+            self.displaysWillChange()
+        }
+        workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self, !self.isPaused else { return }
+            logger.info("displays awake: re-placing windows")
             self.scheduleRelayout()
         }
         registerDisplayCallback()
