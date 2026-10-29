@@ -1756,6 +1756,7 @@ final class CanvasController: NSObject {
         let live = liveNow && !stale
         var seen = Set<CGWindowID>()
         var restored = Set<CGWindowID>()
+        var unrecognised: [CGWindowID] = []
         var replaceAny = false
         if firstSync, let saved {
             // Saved windows go back where you last saw them, moved only if this screen differs.
@@ -1848,7 +1849,11 @@ final class CanvasController: NSObject {
                 // A new window is where its app put it, which nothing here has moved, so its frame
                 // holds even in an out-of-date scan (opening windows in a burst makes most scans
                 // out of date).
-                if add(sc, live: liveNow, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) { restored.insert(sc.windowID) }
+                if add(sc, live: liveNow, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) {
+                    restored.insert(sc.windowID)
+                } else {
+                    unrecognised.append(sc.windowID)
+                }
             }
         }
 
@@ -1874,6 +1879,10 @@ final class CanvasController: NSObject {
         // Only those: the windows already here stay where you see them.
         let restoredAny = !restored.isEmpty
         if restoredAny { fitLayoutToScreen(tidy: false, rederiving: firstSync ? [] : restored) }
+        // At launch, windows the saved layout has no spot for (opened since, or closed before a
+        // restart and opened again at login) go beside what's in view, as a window opened later
+        // would: not where macOS put them, on top of the layout coming back.
+        if firstSync, restoredAny { placeUnrecognised(windows.filter { unrecognised.contains($0.id) }) }
 
         // Windows that opened since the last scan (see arrive), and any that came back from a
         // move (see cameBack), move together, off the main thread; and when several opened at
@@ -2759,6 +2768,26 @@ final class CanvasController: NSObject {
 
     /// Windows that opened during the window scan being applied (see apply).
     private var arrivals: (glide: [ManagedWindow], place: Bool) = ([], false)
+
+    /// Windows found at launch that the saved layout has no spot for: each in a free spot beside the
+    /// restored window most in view. They're moved out of the way first, so that where macOS had
+    /// them doesn't take up the spots.
+    private func placeUnrecognised(_ strangers: [ManagedWindow]) {
+        guard !strangers.isEmpty else { return }
+        let visible = camera.toCanvas(CGRect(origin: .zero, size: viewSize))
+        func shown(_ w: ManagedWindow) -> CGFloat {
+            let r = w.canvasFrame.intersection(visible)
+            return r.isNull ? 0 : r.width * r.height
+        }
+        let anchor = windows.filter { w in !strangers.contains { $0 === w } }.max { shown($0) < shown($1) }
+        for w in strangers { w.canvasFrame.origin = CGPoint(x: -1e7, y: -1e7) }
+        for w in strangers {
+            guard let spot = freeSpot(for: w, near: anchor, onScreenOnly: false) else { continue }
+            w.canvasFrame.origin = spot
+            w.home = nil
+            logger.info("placed \(w.appName, privacy: .public)[\(w.id)] at \(NSStringFromPoint(spot), privacy: .public)\(anchor.map { " beside \($0.appName)[\($0.id)]" } ?? "", privacy: .public): the saved layout has no spot for it")
+        }
+    }
 
     /// Opening a window usually activates its app, which may already be gliding somewhere;
     /// wait for that to finish rather than dropping this glide.

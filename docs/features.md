@@ -75,9 +75,10 @@ None open. If a new window doesn't make it onto the canvas, the log now says why
   - Restarts keep the layout: when the Mac logs out or restarts, Expanse puts windows back where
     macOS had them before apps quit (they used to quit parked in the corner) and saves the
     layout, and apps quitting on the way out keep their spots. A development build can open at
-    login now if you turn it on in Settings. Checked with a simulated restart (an app quitting
-    first, the logout signal, Expanse quitting, the app reopening as a new process): the window
-    went back to its spot. Not yet tried with a real reboot.
+    login now if you turn it on in Settings. Checked with a simulated restart, then a real one
+    (30 Oct): the layout came back. Windows the layout had no spot for (apps that open at login
+    with a window closed before the restart) landed on top of it; at launch they now go in a free
+    spot beside what's in view, as a window opened later does.
 - 0.1.30: Locking the Mac or sleeping its displays no longer moves windows (on 29 Oct macOS piled
   every parked window at one spot while the Mac was locked, and Expanse kept the pile as your
   layout); Restore Layout puts windows exactly where the snapshot had them.
