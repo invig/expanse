@@ -8,18 +8,6 @@ What we might build next. New requests go in as they come up, and finished work 
   sit on the backdrop under every window. Park a window that only shows a sliver, or float the
   panels above windows?
 
-Fixed, not yet released:
-- At 100% the real desktop shows through: macOS's own shade under the menu bar and its dimming
-  behind a filled window, instead of a copy of the desktop picture that missed both.
-- The canvas's desktop is a fresh picture of the real one, taken each time it opens: icons, the
-  shade under the menu bar and any dimming, so opening it changes nothing under the windows (and
-  no dimmed copy is left behind, as on another Mac on 29 Oct).
-- Desktop icons can be clicked at 100% (the minimap zooms out instead), and scrolling or pinching
-  on the bare desktop still opens the canvas.
-- A scroll at 100% snaps when it stops, so windows aren't left cut off by the screen's edges.
-- Hiding an app, then ⌘-Tab to it, glides to its window.
-- Clicking Expanse's own Space tile on the canvas goes back to 100%.
-
 ## Next up
 
 1. **Window size snapping** (asked 28 Oct). Resize so grids of windows come out neat. Today
@@ -63,6 +51,11 @@ Fixed, not yet released:
 
 ## Done
 
+- 0.1.29: At 100% the real desktop shows through, with clickable icons, macOS's shade under the
+  menu bar and its dimming behind a filled window; the canvas opens onto a fresh picture of that
+  same desktop (no dimmed copy left behind); a scroll at 100% snaps so windows aren't left cut
+  off; hiding an app, then ⌘-Tab to it, glides to its window; Expanse's own Space tile goes back
+  to 100%.
 - 0.1.28: Sizes set with macOS's Fill, Moom or a keyboard shortcut stick, and a window that fills
   the screen keeps filling it.
 - 0.1.27: New Finder windows open beside you instead of at an old Finder window's spot, and closing
