@@ -10,6 +10,9 @@ What we might build next. New requests go in as they come up, and finished work 
 - **New windows not always picked up** (29 Oct): a window that's just opened sometimes doesn't
   make it onto the canvas. Which apps, and does it turn up later on its own? Catch one with
   Detailed Logging on.
+- **Steam's window isn't recognised** (29 Oct): Expanse doesn't take it onto the canvas.
+- **Window spots lost after a restart** (29 Oct): after rebooting the Mac, windows don't go back
+  to where they were, so the layout isn't carried across a restart.
 
 ## Next up
 
@@ -30,7 +33,14 @@ What we might build next. New requests go in as they come up, and finished work 
 5. **Low-motion mode** (asked 28 Oct): animated screen moves turned off, so glides, zooms and
    centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
    is on (Accessibility › Display), which Expanse doesn't follow yet.
-6. **Regression tests** (asked 29 Oct). A unit test for each problem we fix, so a later change
+6. **Menu bar panel** (asked 29 Oct). The menu bar icon opens a glass panel instead of a menu, built
+   30 Oct to design A on the Expanse Menu Redesign canvas, plus a Take snapshot button. Updates
+   and Open at Login moved into a new Settings window. Not released yet: click through it first, then release.
+7. **Fewer kept window spots** (asked 30 Oct). Built, not released. A closed window's spot goes,
+   and an app you quit and open later opens beside what you're working on, not at an old spot.
+   Saved spots are only for a restart: windows coming back at launch, and apps reopened in its
+   first 3 minutes. Windows still out of view (hidden, minimised, another Space) keep theirs.
+8. **Regression tests** (asked 29 Oct). A unit test for each problem we fix, so a later change
    can't quietly bring it back. There are no tests yet: the layout maths would move into its own
    target that tests can reach. Start with the recent fixes (the lock pile-up, Restore Layout,
    display changes and back).
