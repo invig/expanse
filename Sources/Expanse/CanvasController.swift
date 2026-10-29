@@ -1054,6 +1054,18 @@ final class CanvasController: NSObject {
 
     /// A window scan shortly. Asking again while one is due doesn't push it back, so a stream of
     /// events (a burst of new windows) is scanned as it happens, not only once it stops.
+    /// A scan in a couple of seconds, for a window that isn't takeable yet (see WindowKind.unlistedSince).
+    private func recheckSoon() {
+        guard recheckWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.recheckWork = nil
+            self?.sync()
+        }
+        recheckWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+    }
+    private var recheckWork: DispatchWorkItem?
+
     private func syncSoon() {
         guard syncSoonWork == nil else { return }
         let work = DispatchWorkItem { [weak self] in
@@ -1478,7 +1490,7 @@ final class CanvasController: NSObject {
                     self.unansweredScans += 1
                     WindowCapture.replaydStuck = true
                 }
-                if again { self.syncSoon() }
+                if again { self.syncSoon() } else if ax.recheck { self.recheckSoon() }
                 let completions = self.pendingSyncCompletions
                 self.pendingSyncCompletions = []
                 completions.forEach { $0() }
@@ -1510,12 +1522,13 @@ final class CanvasController: NSObject {
     /// whose bundle it's a helper in, for one that draws the app's windows (Steam's main window
     /// is drawn by its built-in browser, Steam Helper, a background process). Nil for anything
     /// else. Asking is a LaunchServices lookup (around a millisecond), and window scans ask for
-    /// every app, so the answer is kept for half a minute. Thread-safe.
+    /// every app, so the answer is kept for half a minute; "not an app" for 3s, as an app can get
+    /// its Dock icon as it opens a window. Thread-safe.
     static func appPID(owning pid: pid_t) -> pid_t? {
         appPolicyLock.lock()
         defer { appPolicyLock.unlock() }
         let now = CACurrentMediaTime()
-        if let cached = appOwners[pid], now - cached.at < 30 { return cached.app }
+        if let cached = appOwners[pid], now - cached.at < (cached.app == nil ? 3 : 30) { return cached.app }
         let app = findAppPID(owning: pid)
         appOwners[pid] = (app, now)
         return app
@@ -1570,6 +1583,15 @@ final class CanvasController: NSObject {
         /// Still opening: the app doesn't list it yet, or it has no subrole yet. Asked again at
         /// every scan (and scans follow quickly) for a few seconds from `at`, when it was first seen.
         var pending = false
+        /// Not takeable yet since this time: its app doesn't list it (a slow app, still opening
+        /// it), or the app has no Dock icon (some get one as they open a window). Asked again
+        /// every 2s for its first minute, with a scan to do it (see AXSnapshot.recheck).
+        var unlistedSince: CFTimeInterval?
+
+        /// How long after `at` it's asked about again.
+        func askAgainAfter(_ now: CFTimeInterval) -> CFTimeInterval {
+            unlistedSince.map { now - $0 < 60 } == true ? 2 : 10
+        }
     }
     /// Window kinds don't change, so each window is asked once. "Not standard" is asked again
     /// after a while, in case it was wrong.
@@ -1606,6 +1628,8 @@ final class CanvasController: NSObject {
         var kinds: [CGWindowID: WindowKind] = [:]
         /// Some window is still opening (see WindowKind.pending): scan again soon.
         var pending = false
+        /// Some window isn't takeable yet (see WindowKind.unlistedSince): scan again in a moment.
+        var recheck = false
         /// Windows on screen that aren't taken on, and why (see noteSkipped).
         var skipped: [CGWindowID: String] = [:]
         var calls = 0
@@ -1643,10 +1667,14 @@ final class CanvasController: NSObject {
                 if sc.title?.isEmpty == false {
                     let name = sc.owningApplication?.applicationName ?? "pid \(pid)"
                     snapshot.skipped[id] = "\(name) isn't an app in the Dock (a menu-bar extra or background process)"
+                    // Its app may be getting a Dock icon as it opens it: looked at again shortly.
+                    let since = kinds[id]?.unlistedSince ?? now
+                    kinds[id] = WindowKind(standard: false, at: since, unlistedSince: since)
+                    snapshot.recheck = snapshot.recheck || now - since < 60
                 }
                 continue
             }
-            if let kind = kinds[id], !kind.standard, !kind.pending, now - kind.at < 10 {
+            if let kind = kinds[id], !kind.standard, !kind.pending, now - kind.at < kind.askAgainAfter(now) {
                 snapshot.known.insert(id)
                 continue
             }
@@ -1683,11 +1711,13 @@ final class CanvasController: NSObject {
                 // (Only a window seen for the first time starts out pending.)
                 let firstSeen = kinds[id].map { $0.pending ? $0.at : -.infinity } ?? now
                 let pending = now - firstSeen < 5
+                let since = kinds[id]?.unlistedSince ?? now
                 if !pending {
-                    snapshot.skipped[id] = "its app doesn't list it as one of its windows (Accessibility); asked again every 10s"
+                    snapshot.skipped[id] = "its app doesn't list it as one of its windows (Accessibility) yet; asked again every 2s for a minute, then every 10s"
                 }
-                kinds[id] = WindowKind(standard: false, at: pending ? firstSeen : now, pending: pending)
+                kinds[id] = WindowKind(standard: false, at: pending ? firstSeen : now, pending: pending, unlistedSince: since)
                 snapshot.pending = snapshot.pending || pending
+                snapshot.recheck = snapshot.recheck || now - since < 60
                 snapshot.known.insert(id)
             }
         }

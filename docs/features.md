@@ -64,8 +64,11 @@ None open. If a new window doesn't make it onto the canvas, the log now says why
 - Not released yet (30 Oct), the four bugs from 29 Oct:
   - Steam's window is taken on. It's drawn by a helper process (Steam Helper) without a Dock icon,
     which Expanse skipped; a helper inside an app's bundle now counts as that app.
-  - New windows not picked up: Steam's was one case, and any helper-drawn window like it is
-    fixed the same way. No other case was caught, so a window left off the canvas now logs why.
+  - New windows not picked up, three causes. Helper-drawn windows like Steam's were never taken
+    on. A window whose app gets its Dock icon as it opens it waited up to 30s (measured 24s, now
+    3.5s), and one its app was slow to list waited up to 15s (measured 11s, now under 1s): both
+    are asked about again every 2s for their first minute. A window still left off the canvas
+    logs why ("not on the canvas" in Copy Logs).
   - A window peeking in at the screen's edge, only a sliver of it showing, no longer covers the
     minimap or Spaces panels: it stays parked and the backdrop draws it under them. (Checked:
     a 120pt sliver over the minimap stays parked; 300pt showing, or a sliver elsewhere, is placed.)
