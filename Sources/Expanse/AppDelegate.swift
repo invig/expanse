@@ -186,8 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "copylogs": copyLogs()
             // What Take snapshot in the menu bar panel does.
             case "snapshot": controller.takeSnapshot()
-            // What a logout or restart starting does (see willPowerOff).
-            case "poweroff": controller.willPowerOff()
+            // A logout or restart starting: the notification macOS posts for one (see willPowerOff).
+            case "poweroff": NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.willPowerOffNotification, object: NSWorkspace.shared)
             case "appearance":
                 // Light or dark for Expanse alone, to check its look in both (anything else: the Mac's).
                 let names: [String: NSAppearance.Name] = ["light": .aqua, "dark": .darkAqua]

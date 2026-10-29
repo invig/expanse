@@ -1177,7 +1177,9 @@ final class CanvasController: NSObject {
         guard let data = try? JSONEncoder().encode(layout), data != lastSavedLayout else { return }
         lastSavedLayout = data
         LayoutStore.save(layout)
-        if Date().timeIntervalSince(lastSnapshotAt) >= LayoutStore.snapshotSpacing { snapshot(layout) }
+        // Not with nothing on the canvas (windows not takeable at the lock screen, say): an empty
+        // picture would push out an earlier layout worth going back to.
+        if Date().timeIntervalSince(lastSnapshotAt) >= LayoutStore.snapshotSpacing, !windows.isEmpty { snapshot(layout) }
         lastLayout = layout
     }
 
@@ -1194,7 +1196,7 @@ final class CanvasController: NSObject {
     /// A snapshot now, because you asked (the menu bar panel), however recent the last one.
     func takeSnapshot() {
         save()
-        if let lastLayout { snapshot(lastLayout) }
+        if let lastLayout, !windows.isEmpty { snapshot(lastLayout) }
     }
 
     /// Puts every window back where `layout` (a snapshot) had it, fitted to this screen (it may
