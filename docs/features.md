@@ -30,8 +30,11 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## In progress elsewhere
 
-- **Windows version.** The plan is in [windows-port.md](windows-port.md), built in its own session
-  on a UTM VM.
+- **Windows version.** Released: 0.1.0 on 29 Oct 2026, at
+  [github.com/invig/expanse-windows](https://github.com/invig/expanse-windows). It does what the Mac
+  app does, apart from the gaps noted in that repo's
+  [docs/spikes.md](https://github.com/invig/expanse-windows/blob/main/docs/spikes.md). The plan
+  was [windows-port.md](windows-port.md).
 - **Omarchy / Hyprland plugin** (`~/Code/ACTIVE/expanse-hypr`): catching up with the Mac
   features, plus a deep dive on jank.
 
