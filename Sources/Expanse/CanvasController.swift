@@ -1157,17 +1157,25 @@ final class CanvasController: NSObject {
         if let lastLayout { snapshot(lastLayout) }
         var pool = layout.windows
         let open = Set(windows.map { LayoutStore.windowKey(pid: $0.pid, id: $0.id) })
+        // Taken on this screen: every window where you saw it then. On another, from home spots,
+        // fitted to this one.
+        let sameScreen = layout.fittedWidth.map { CGFloat($0) } == viewSize.width
+            && layout.fittedHeight.map { CGFloat($0) } == viewSize.height
         var restored = 0
         for w in windows {
             guard let e = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid,
                                                 size: w.canvasFrame.size, open: open, from: &pool) else { continue }
             // Its home spot and chosen size; fitting (below) works out where it goes on this screen.
             w.home = CGPoint(x: e.hx ?? e.x, y: e.hy ?? e.y)
-            w.canvasFrame.origin = w.home ?? w.canvasFrame.origin
+            w.canvasFrame.origin = sameScreen ? CGPoint(x: e.x, y: e.y) : w.home ?? w.canvasFrame.origin
+            w.fitPush = .zero
             if let pw = e.pw ?? e.w, let ph = e.ph ?? e.h, pw > 0 { w.preferredSize = CGSize(width: pw, height: ph) }
             restored += 1
         }
-        fitLayoutToScreen(tidy: false)
+        if sameScreen { fittedViewSize = viewSize }
+        // The snapshot's home spots as they are: re-homing works them out from where windows
+        // are now, which is what the restore is replacing.
+        fitLayoutToScreen(tidy: false, rederiving: sameScreen ? [] : nil, rehoming: false)
         logger.info("restored a layout: \(restored) of \(self.windows.count) windows")
         view.render()
         animate(to: fitCamera())
@@ -2213,8 +2221,10 @@ final class CanvasController: NSObject {
     /// spot in the derived layout. Re-deriving everything would also undo whatever the layout
     /// picked up since then (windows opening and closing change the derived layout), and every
     /// window would jump.
-    private func fitLayoutToScreen(tidy: Bool, rederiving: Set<CGWindowID>? = nil) {
-        rehomeStrays()
+    /// `rehoming`: false when the home spots were just set (see restoreLayout), so rehomeStrays
+    /// doesn't rework them.
+    private func fitLayoutToScreen(tidy: Bool, rederiving: Set<CGWindowID>? = nil, rehoming: Bool = true) {
+        if rehoming { rehomeStrays() }
         var home = windows.map { CGRect(origin: $0.home ?? $0.canvasFrame.origin, size: homeSize($0)) }
         if tidy {
             Self.tidyUp(&home)
