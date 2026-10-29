@@ -51,6 +51,9 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Done
 
+- 0.1.30: Locking the Mac or sleeping its displays no longer moves windows (on 29 Oct macOS piled
+  every parked window at one spot while the Mac was locked, and Expanse kept the pile as your
+  layout); Restore Layout puts windows exactly where the snapshot had them.
 - 0.1.29: At 100% the real desktop shows through, with clickable icons, macOS's shade under the
   menu bar and its dimming behind a filled window; the canvas opens onto a fresh picture of that
   same desktop (no dimmed copy left behind); a scroll at 100% snaps so windows aren't left cut
