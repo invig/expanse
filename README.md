@@ -15,6 +15,11 @@
 </p>
 
 <p align="center">
+  On a Windows PC? There's <a href="https://github.com/invig/expanse-windows">Expanse for Windows</a>
+  too (<a href="https://github.com/invig/expanse-windows/releases/latest">download</a>).
+</p>
+
+<p align="center">
   <img alt="macOS 15+" src="https://img.shields.io/badge/macOS-15%2B-black?logo=apple">
   <img alt="Free and open source, MIT" src="https://img.shields.io/badge/free-MIT-blue">
 </p>
