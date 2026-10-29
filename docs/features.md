@@ -4,15 +4,8 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-- **Windows peeking in at the screen's edges** cover the minimap and Spaces panels (29 Oct), which
-  sit on the backdrop under every window. Park a window that only shows a sliver, or float the
-  panels above windows?
-- **New windows not always picked up** (29 Oct): a window that's just opened sometimes doesn't
-  make it onto the canvas. Which apps, and does it turn up later on its own? Catch one with
-  Detailed Logging on.
-- **Steam's window isn't recognised** (29 Oct): Expanse doesn't take it onto the canvas.
-- **Window spots lost after a restart** (29 Oct): after rebooting the Mac, windows don't go back
-  to where they were, so the layout isn't carried across a restart.
+None open. If a new window doesn't make it onto the canvas, the log now says why (look for
+"not on the canvas" in Copy Logs for a Bug Report).
 
 ## Next up
 
@@ -68,6 +61,20 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Done
 
+- Not released yet (30 Oct), the four bugs from 29 Oct:
+  - Steam's window is taken on. It's drawn by a helper process (Steam Helper) without a Dock icon,
+    which Expanse skipped; a helper inside an app's bundle now counts as that app.
+  - New windows not picked up: Steam's was one case, and any helper-drawn window like it is
+    fixed the same way. No other case was caught, so a window left off the canvas now logs why.
+  - A window peeking in at the screen's edge, only a sliver of it showing, no longer covers the
+    minimap or Spaces panels: it stays parked and the backdrop draws it under them. (Checked:
+    a 120pt sliver over the minimap stays parked; 300pt showing, or a sliver elsewhere, is placed.)
+  - Restarts keep the layout: when the Mac logs out or restarts, Expanse puts windows back where
+    macOS had them before apps quit (they used to quit parked in the corner) and saves the
+    layout, and apps quitting on the way out keep their spots. A development build can open at
+    login now if you turn it on in Settings. Checked with a simulated restart (an app quitting
+    first, the logout signal, Expanse quitting, the app reopening as a new process): the window
+    went back to its spot. Not yet tried with a real reboot.
 - 0.1.30: Locking the Mac or sleeping its displays no longer moves windows (on 29 Oct macOS piled
   every parked window at one spot while the Mac was locked, and Expanse kept the pile as your
   layout); Restore Layout puts windows exactly where the snapshot had them.
