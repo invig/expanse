@@ -4,7 +4,9 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-None open.
+- **The background went dark after using macOS's Fill** (another Mac, 29 Oct). Not reproduced.
+  Probably Expanse's backdrop holding a copy of the desktop picture taken while macOS had it
+  dimmed. Next time: Troubleshooting › Copy Logs for a Bug Report on that Mac.
 
 ## Next up
 
@@ -46,6 +48,8 @@ None open.
 
 ## Done
 
+- 0.1.28: Sizes set with macOS's Fill, Moom or a keyboard shortcut stick, and a window that fills
+  the screen keeps filling it.
 - 0.1.27: New Finder windows open beside you instead of at an old Finder window's spot, and closing
   one keeps the view where it is; refused window scans back off instead of asking every 5s.
 - 0.1.26: A stuck capture service (replayd) isn't swamped any more: scans back off, and captures
