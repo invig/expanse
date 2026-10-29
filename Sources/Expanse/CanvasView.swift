@@ -10,7 +10,7 @@ final class CanvasView: NSView {
     private let world = CALayer()
     private let labels = CALayer()
 
-    /// App names (and the hovered window's title) above the windows. Off unless chosen in the menu.
+    /// App names (and the hovered window's title) above the windows. Off unless chosen in the menu bar panel.
     static var showsNames: Bool {
         get { UserDefaults.standard.bool(forKey: "showWindowNames") }
         set { UserDefaults.standard.set(newValue, forKey: "showWindowNames") }

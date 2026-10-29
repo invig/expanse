@@ -24,7 +24,7 @@ final class Updater {
     private var timer: Timer?
     private var checking = false
 
-    /// Checks once a day (and a minute after launch). On unless you turn it off in the menu.
+    /// Checks once a day (and a minute after launch). On unless you turn it off in Settings.
     var automatic: Bool {
         get { UserDefaults.standard.object(forKey: Self.automaticKey) as? Bool ?? true }
         set {
@@ -64,7 +64,7 @@ final class Updater {
         }
     }
 
-    /// `interactive`: you asked (the menu), so say if you're up to date or it didn't work.
+    /// `interactive`: you asked (Settings), so say if you're up to date or it didn't work.
     /// `install`: install as soon as it's ready, without asking (expanse://update?install=1).
     func check(interactive: Bool, install: Bool = false) {
         guard isRelease else {

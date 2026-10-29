@@ -92,8 +92,9 @@ A short walkthrough gets you set up in about a minute:
 **Full-screen apps** keep their own Spaces, as usual. Jump to them, and back, from the
 **Spaces** panel next to the minimap at the bottom of the screen.
 
-**The menu bar icon** has the rest: which corner to use, Pause, Tidy Up, Restore Layout,
-Restore All Windows, the walkthrough again, updates, and Troubleshooting (logs for a bug report).
+**The menu bar icon** opens a panel with the rest: a live minimap that opens the canvas, Pause,
+Centre and Tidy Up, which corner to use, earlier layouts to go back to, the walkthrough again,
+Troubleshooting (logs for a bug report), and Settings (updates, opening at login).
 
 ## Questions
 
@@ -152,7 +153,7 @@ you're zoomed out or gliding between windows, and only in memory.
 <summary><strong>What does it keep, and what does it send?</strong></summary>
 
 Window pictures exist only in memory, to draw the canvas. Nothing is recorded or sent anywhere.
-The one network request is a daily update check to GitHub, which you can turn off in the menu.
+The one network request is a daily update check to GitHub, which you can turn off in Settings.
 The only files Expanse writes are its layouts in `~/Library/Application Support/Expanse/`:
 window positions and sizes, app names, and a scrambled fingerprint (a hash) of each window's
 title, which recognises the window without storing the title. If you turn on **Detailed Logging**

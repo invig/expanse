@@ -2,7 +2,7 @@ import ServiceManagement
 
 /// Opening Expanse at login, for release builds only: a development build would sign its build
 /// folder in as the login item. On by default: the first start of a release turns it on, once.
-/// After that it's yours to switch, from the menu or System Settings › General › Login Items.
+/// After that it's yours to switch, from Settings or System Settings › General › Login Items.
 enum LoginItem {
     private static let setUpKey = "loginItemSetUp"
 

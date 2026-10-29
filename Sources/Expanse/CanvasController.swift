@@ -191,6 +191,9 @@ final class CanvasController: NSObject {
 
     private var screenRectCG: CGRect { CGRect(origin: .zero, size: screenSize) }
 
+    /// The part of the canvas the screen shows (canvas space), as the minimap outlines it.
+    var visibleCanvas: CGRect { camera.toCanvas(CGRect(origin: .zero, size: viewSize)) }
+
     /// Where parked windows go: only their top-left pixel stays on screen.
     private var parkPoint: CGPoint { CGPoint(x: screenRectCG.maxX - 1, y: screenRectCG.maxY - 1) }
 
@@ -1072,7 +1075,7 @@ final class CanvasController: NSObject {
                            pw: Double(gone.preferredSize.width), ph: Double(gone.preferredSize.height),
                            ox: Double(gone.originalFrame.minX), oy: Double(gone.originalFrame.minY),
                            ow: Double(gone.originalFrame.width), oh: Double(gone.originalFrame.height),
-                           id: id, pid: gone.pid)
+                           id: id, pid: gone.pid, away: true)
     }
 
     /// An app quit. Its windows come back with new IDs when it opens again, so their spots go
@@ -1106,6 +1109,8 @@ final class CanvasController: NSObject {
             .sorted { $0.value.at > $1.value.at }
             .prefix(60)
             .map { savedEntry($0.key, $0.value) }
+        // Spots kept from a saved layout for windows not open right now.
+        let kept = savedPool.prefix(60).map { var e = $0; e.away = true; return e }
         let layout = SavedLayout(
             cameraX: Double(camera.origin.x), cameraY: Double(camera.origin.y),
             centerX: Double(center.x), centerY: Double(center.y),
@@ -1122,7 +1127,7 @@ final class CanvasController: NSObject {
                                    ox: Double($0.originalFrame.minX), oy: Double($0.originalFrame.minY),
                                    ow: Double($0.originalFrame.width), oh: Double($0.originalFrame.height),
                                    id: $0.id, pid: $0.pid)
-            } + away + savedPool.prefix(60))   // windows not open right now keep their saved spots
+            } + away + kept)
         guard let data = try? JSONEncoder().encode(layout), data != lastSavedLayout else { return }
         lastSavedLayout = data
         LayoutStore.save(layout)
@@ -1138,6 +1143,12 @@ final class CanvasController: NSObject {
     private func snapshot(_ layout: SavedLayout) {
         LayoutStore.saveSnapshot(layout)
         lastSnapshotAt = Date()
+    }
+
+    /// A snapshot now, because you asked (the menu bar panel), however recent the last one.
+    func takeSnapshot() {
+        save()
+        if let lastLayout { snapshot(lastLayout) }
     }
 
     /// Puts every window back where `layout` (a snapshot) had it, fitted to this screen (it may
@@ -3360,7 +3371,7 @@ final class CanvasController: NSObject {
         }
     }
 
-    /// Bring every parked window back on screen. Called on quit and from the menu.
+    /// Bring every parked window back on screen. Called on quit and from the menu bar panel.
     func restoreAll() {
         var i = 0
         let vp = viewport

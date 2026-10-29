@@ -4,7 +4,7 @@ Expanse runs on a stock Mac with System Integrity Protection on. Everything belo
 
 - **Camera.** Every window has a frame in canvas space, and a camera (an origin and a scale) maps the
   canvas to the screen. The layout is saved to `~/Library/Application Support/Expanse/`, along
-  with a few snapshots taken 15 or more minutes apart for Restore Layout.
+  with a few snapshots taken 15 or more minutes apart for Earlier layouts in the menu bar panel.
 - **At 100%, windows are real.** They sit exactly where the camera says, moved with the
   Accessibility API. Windows outside the view are *parked* in the bottom-right corner of the
   screen, with one pixel showing (the trick [AeroSpace](https://github.com/nikitabobko/AeroSpace)

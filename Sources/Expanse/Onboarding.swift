@@ -3,7 +3,7 @@ import ApplicationServices
 import SwiftUI
 
 /// The first-launch walkthrough: four short steps, each saying what you get and why macOS needs
-/// the change, with a live tick once it's done; then a cheat sheet. Also reachable from the menu.
+/// the change, with a live tick once it's done; then a cheat sheet. Also reachable from the menu bar panel.
 enum Onboarding {
     static let doneKey = "onboardingDone"
     /// Expanse's hot corner, which the walkthrough lets you pick. Set at launch.
@@ -58,7 +58,7 @@ enum Onboarding {
         w.isReleasedWhenClosed = false
         // An ordinary window, so System Settings (and macOS's prompts) open in front of it. The
         // canvas is never up meanwhile: Expanse starts once the walkthrough is done, and opening
-        // it from the menu leaves the canvas first.
+        // it from the menu bar panel leaves the canvas first.
         // The page runs up under the see-through title bar, so the window is the page's size
         // exactly. (Left to size the window itself, the hosting view adds the title bar's height,
         // which showed as a strip along the bottom.)

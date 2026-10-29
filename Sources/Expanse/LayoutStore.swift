@@ -29,6 +29,10 @@ struct SavedLayout: Codable {
         /// say), they identify the window exactly, even among windows with the same title.
         var id: UInt32?
         var pid: Int32?
+        /// Out of view when saved (its app hidden or quit, the window minimised, closed or on
+        /// another Space): its spot is kept for when it's back, but it wasn't on the canvas. Nil
+        /// in layouts saved before this was recorded.
+        var away: Bool?
     }
     var cameraX: Double
     var cameraY: Double
@@ -73,9 +77,9 @@ enum LayoutStore {
 
     // MARK: Snapshots
 
-    /// Earlier layouts to go back to (Restore Layout in the menu), newest first. One is taken when
+    /// Earlier layouts to go back to (in the menu bar panel), newest first. One is taken when
     /// the layout has changed and the newest is `snapshotSpacing` old, so they're minutes apart,
-    /// not one per window move; only the newest `snapshotsKept` stay.
+    /// not one per window move, or when you take one; only the newest `snapshotsKept` stay.
     struct Snapshot {
         let date: Date
         let url: URL
