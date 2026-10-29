@@ -58,6 +58,11 @@ final class CanvasController: NSObject {
     private var syncSoonWork: DispatchWorkItem?
     private var saved: SavedLayout?
     private var savedPool: [SavedLayout.Window] = []
+    /// Saved spots are for windows coming back after a restart: at launch, and from apps that
+    /// start in the minutes after (macOS reopening them at login). Then the spots of windows
+    /// that haven't come back are let go, except ones still out of view (see letGoOfSavedSpots).
+    private var restartSpotsUntil = Date.distantFuture
+    private static let restartSpotsFor: TimeInterval = 3 * 60
     private var lastSavedLayout: Data?
     let hotCorner = HotCorner()
 
@@ -113,8 +118,9 @@ final class CanvasController: NSObject {
         let home: CGPoint?
         let parked: Bool
         let at: Date
-        /// Closed, not just out of view (see closedWindows): its spot is kept for its app opening
-        /// again (appQuit), but a window that turns up with its ID is a new one (Finder reuses them).
+        /// Closed, not just out of view (see closedWindows): its spot is only for a tab taking
+        /// over (see tabTakingOver), and a window that turns up with its ID is a new one (Finder
+        /// reuses them).
         var closed = false
     }
     /// Windows the app has closed (Accessibility says their element is gone), not yet dropped by
@@ -1078,17 +1084,24 @@ final class CanvasController: NSObject {
                            id: id, pid: gone.pid, away: true)
     }
 
-    /// An app quit. Its windows come back with new IDs when it opens again, so their spots go
-    /// where a saved layout's do: the app's next windows take them, matched by title as at
-    /// launch (see add), instead of opening wherever there's room.
+    /// An app quit. Its windows' spots go with them: opened again later, its windows are new
+    /// ones, beside what you're working on now, not where they were before you moved things on.
     private func appQuit(_ app: NSRunningApplication) {
         let pid = app.processIdentifier
         for w in windows where w.pid == pid { remove(w) }
-        let gone = recentlyRemoved.filter { $0.value.pid == pid }.sorted { $0.value.at > $1.value.at }
-        guard !gone.isEmpty else { return }
-        for (id, _) in gone { recentlyRemoved.removeValue(forKey: id) }
-        savedPool.insert(contentsOf: gone.map { savedEntry($0.key, $0.value) }, at: 0)
-        logger.notice("\(app.localizedName ?? "?", privacy: .public) quit: keeping \(gone.count) window spots for when it opens again")
+        recentlyRemoved = recentlyRemoved.filter { $0.value.pid != pid }
+        logger.info("\(app.localizedName ?? "?", privacy: .public) quit")
+        scheduleSave()
+    }
+
+    /// The restart is over (see restartSpotsUntil): saved spots of windows that haven't come back
+    /// go, so a window opened later is placed beside you. Windows still out of view keep theirs.
+    private func letGoOfSavedSpots() {
+        guard Date() >= restartSpotsUntil else { return }   // resumed since, which starts again
+        let before = savedPool.count
+        savedPool.removeAll { !LayoutStore.isOpen($0) }
+        guard savedPool.count != before else { return }
+        logger.info("let go of \(before - savedPool.count) saved window spots; \(savedPool.count) still out of view")
         scheduleSave()
     }
 
@@ -1102,14 +1115,13 @@ final class CanvasController: NSObject {
         // Saved positions are canvas coordinates relative to a scale-1 camera.
         let center = camera.center(in: viewSize)
         // Windows out of view (app hidden, minimised, another Space) are saved too, newest
-        // first, so a restart while they're away doesn't lose their spots. (Closed windows of
-        // apps still running are among them; their spots go to the app's next window, as at launch.)
+        // first, so a restart while they're away doesn't lose their spots. Closed ones aren't.
         let away = recentlyRemoved
-            .filter { NSRunningApplication(processIdentifier: $0.value.pid) != nil }
+            .filter { !$0.value.closed && NSRunningApplication(processIdentifier: $0.value.pid) != nil }
             .sorted { $0.value.at > $1.value.at }
             .prefix(60)
             .map { savedEntry($0.key, $0.value) }
-        // Spots kept from a saved layout for windows not open right now.
+        // Spots kept from a saved layout for windows not back yet (see restartSpotsUntil).
         let kept = savedPool.prefix(60).map { var e = $0; e.away = true; return e }
         let layout = SavedLayout(
             cameraX: Double(camera.origin.x), cameraY: Double(camera.origin.y),
@@ -1758,6 +1770,10 @@ final class CanvasController: NSObject {
             commitInBackground()
             view.render()
         }
+        if firstSync {
+            restartSpotsUntil = Date().addingTimeInterval(Self.restartSpotsFor)
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.restartSpotsFor + 1) { [weak self] in self?.letGoOfSavedSpots() }
+        }
         firstSync = false
         hasSynced = true
         if isActive { view.render() }
@@ -1785,11 +1801,14 @@ final class CanvasController: NSObject {
         // one coming back to its spot.
         if recentlyRemoved[w.id]?.closed == true { recentlyRemoved.removeValue(forKey: w.id) }
         var returning = recentlyRemoved[w.id] != nil
-        // Saved spots are for windows coming back: at launch, or its app's when that app has just
-        // started (opening again after quitting). A window an app opens later is a new one: in a
-        // spot of its own beside where you are, not one of the app's old windows' spots.
-        let mayTakeSavedSpot = firstSync || (NSRunningApplication(processIdentifier: w.pid)?.launchDate
-            .map { Date().timeIntervalSince($0) < 60 } ?? false)
+        // Saved spots are for windows coming back after a restart (see restartSpotsUntil): at
+        // launch, or its app's when that app has just started then. A window an app opens later,
+        // or an app you quit and open again, is new: in a spot of its own beside where you are.
+        // The same window back from out of view (unhidden, say) always has its own.
+        let mayTakeSavedSpot = firstSync
+            || Date() < restartSpotsUntil && (NSRunningApplication(processIdentifier: w.pid)?.launchDate
+                .map { Date().timeIntervalSince($0) < 60 } ?? false)
+            || savedPool.contains { $0.id == w.id && $0.pid == w.pid && $0.bundleID == w.bundleID }
         // An app that quit opening again: its window is back at its spot (see appQuit).
         var reopened = false
         if live, let tab = tabTakingOver(from: w, at: f) {
@@ -2686,9 +2705,9 @@ final class CanvasController: NSObject {
                                              canvasFrame: w.canvasFrame, originalFrame: w.originalFrame,
                                              preferredSize: w.preferredSize, home: w.home, parked: w.parked, at: Date(),
                                              closed: closedWindows.remove(w.id) != nil)
-            // Closed windows never come back; don't keep them forever.
-            let weekAgo = Date().addingTimeInterval(-7 * 24 * 3600)
-            recentlyRemoved = recentlyRemoved.filter { $0.value.at > weekAgo }
+            // Closed windows never come back: theirs are kept a moment, for a tab taking over.
+            let weekAgo = Date().addingTimeInterval(-7 * 24 * 3600), momentAgo = Date().addingTimeInterval(-10)
+            recentlyRemoved = recentlyRemoved.filter { $0.value.at > ($0.value.closed ? momentAgo : weekAgo) }
             if recentlyRemoved.count > 300, let oldest = recentlyRemoved.min(by: { $0.value.at < $1.value.at })?.key {
                 recentlyRemoved.removeValue(forKey: oldest)
             }

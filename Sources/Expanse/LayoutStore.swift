@@ -124,6 +124,12 @@ enum LayoutStore {
     /// Identifies a window for as long as its app keeps running.
     static func windowKey(pid: pid_t, id: CGWindowID) -> String { "\(pid):\(id)" }
 
+    /// The saved window is still open (out of view, say), in the same run of its app.
+    static func isOpen(_ e: SavedLayout.Window) -> Bool {
+        guard let id = e.id, let pid = e.pid else { return false }
+        return exists(id: id, pid: pid)
+    }
+
     /// Whether the window server still has this window, on screen or not.
     private static func exists(id: CGWindowID, pid: pid_t) -> Bool {
         var ids = [UnsafeRawPointer(bitPattern: UInt(id))]
