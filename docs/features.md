@@ -7,6 +7,9 @@ What we might build next. New requests go in as they come up, and finished work 
 - **Windows peeking in at the screen's edges** cover the minimap and Spaces panels (29 Oct), which
   sit on the backdrop under every window. Park a window that only shows a sliver, or float the
   panels above windows?
+- **New windows not always picked up** (29 Oct): a window that's just opened sometimes doesn't
+  make it onto the canvas. Which apps, and does it turn up later on its own? Catch one with
+  Detailed Logging on.
 
 ## Next up
 
@@ -27,6 +30,10 @@ What we might build next. New requests go in as they come up, and finished work 
 5. **Low-motion mode** (asked 28 Oct): animated screen moves turned off, so glides, zooms and
    centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
    is on (Accessibility › Display), which Expanse doesn't follow yet.
+6. **Regression tests** (asked 29 Oct). A unit test for each problem we fix, so a later change
+   can't quietly bring it back. There are no tests yet: the layout maths would move into its own
+   target that tests can reach. Start with the recent fixes (the lock pile-up, Restore Layout,
+   display changes and back).
 
 ## In progress elsewhere
 
