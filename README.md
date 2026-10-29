@@ -78,7 +78,7 @@ A short walkthrough gets you set up in about a minute:
 | <kbd>⌃</kbd> <kbd>⌥</kbd> <kbd>C</kbd> | Centre the window you're in |
 | <kbd>⌘</kbd> + scroll | Zoom around the pointer |
 | <kbd>Space</kbd> + drag | Move around the canvas |
-| Click empty desktop | Zoom out to every window |
+| Click the minimap | Zoom out to every window |
 | Scroll or pinch on empty desktop | Start moving around the canvas from 100% |
 | Drag on empty canvas, <kbd>⇧</kbd>-click, or <kbd>⌘</kbd> <kbd>A</kbd> | Select windows, then drag any of them to move the group |
 | Hold <kbd>⌘</kbd> while dragging | Move without snapping |

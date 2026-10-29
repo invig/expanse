@@ -326,8 +326,8 @@ final class CanvasView: NSView {
         guard !controller.gliding else { return }
         guard controller.isActive else {
             // Live mode: a click on a parked window's picture on the backdrop goes to that window,
-            // and the Spaces bar works here too. Anywhere else on the backdrop (the desktop, as
-            // far as you can tell), it zooms out.
+            // and the Spaces bar works here too; anywhere else Expanse draws (the minimap), it
+            // zooms out. The bare desktop is see-through, so its clicks go to the desktop itself.
             drag = .none
             let bar = spacesBarHit(e)
             if let i = bar.tile {

@@ -53,6 +53,7 @@ final class CanvasController: NSObject {
     private var saveWork: DispatchWorkItem?
     private var pinchAccumulator: CGFloat = 0
     private var magnifyMonitor: Any?
+    private var scrollMonitor: Any?
     private var observers: [pid_t: AppObserver] = [:]
     private var syncSoonWork: DispatchWorkItem?
     private var saved: SavedLayout?
@@ -465,6 +466,10 @@ final class CanvasController: NSObject {
         }
         magnifyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .magnify) { [weak self] event in
             self?.handleGlobalPinch(event)
+            self?.handleDesktopGesture(event)
+        }
+        scrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            self?.handleDesktopGesture(event)
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification,
                                                           object: nil, queue: .main) { [weak self] note in
@@ -1154,6 +1159,32 @@ final class CanvasController: NSObject {
             pinchAccumulator = 0
             enter(zoomOut: true)
         }
+    }
+
+    /// At 100% the desktop shows through the backdrop and gets its events (see OverlayWindow), but
+    /// scrolling or pinching on it still opens the canvas at 100%, as on the backdrop: the rest of
+    /// the gesture then comes to the canvas, on top. Only where no window is under the pointer.
+    private func handleDesktopGesture(_ event: NSEvent) {
+        guard !isActive, !isPaused, !gliding else { return }
+        // ⌥ + pinch zooms out from anywhere (see handleGlobalPinch).
+        if event.type == .magnify, event.modifierFlags.contains(.option) { return }
+        // The start of a gesture (a mouse wheel's ticks have no phases: each counts).
+        guard event.phase == .began || event.phase == .mayBegin || (event.phase == [] && event.momentumPhase == []) else { return }
+        // Where AppKit has it (bottom-left origin) to the window server's (top-left).
+        let p = NSEvent.mouseLocation
+        let point = CGPoint(x: p.x, y: (NSScreen.screens.first?.frame.maxY ?? 0) - p.y)
+        // Inside one of the canvas's windows: not the desktop (and no need to ask the window server).
+        let vp = viewport
+        if windows.contains(where: { !$0.parked && camera.toView($0.canvasFrame).offsetBy(dx: vp.minX, dy: vp.minY).contains(point) }) { return }
+        // Any other window there (a dialog, the Dock, the menu bar, another app's panel)?
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let overWindow = info.contains { w in
+            guard (w[kCGWindowLayer as String] as? Int ?? 0) >= 0, (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return false }
+            return CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0).contains(point)
+        }
+        guard !overWindow else { return }
+        enter(zoomOut: false)
     }
 
     func toggle() {
@@ -3644,12 +3675,11 @@ final class OverlayWindow: NSWindow {
     init() {
         super.init(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         level = OverlayWindow.backdropLevel
-        // See-through at 100% (see backdropLevel), but every click and scroll is still Expanse's:
-        // clicking the desktop zooms out, scrolling it moves the view. The desktop icons that show
-        // through can't be clicked.
+        // See-through at 100% (see backdropLevel), and so are its clicks: where nothing's drawn, they
+        // reach the desktop under it (its icons, its menu). What Expanse draws there takes its own.
+        // Scrolling or pinching on the desktop still opens the canvas (see handleDesktopGesture).
         isOpaque = false
         backgroundColor = .clear
-        ignoresMouseEvents = false
         hasShadow = false
         isReleasedWhenClosed = false
         acceptsMouseMovedEvents = true
