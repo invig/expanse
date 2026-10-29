@@ -134,11 +134,14 @@ final class CanvasView: NSView {
         applyAppearance()
     }
 
-    private var hasWallpaper: Bool { wallpaper.contents != nil && !wallpaper.isHidden }
+    private var hasWallpaper: Bool { wallpaper.contents != nil }
+
+    /// The canvas's own background, behind its copy of the desktop picture (or instead of it).
+    private var canvasBackground = NSColor(white: 0.85, alpha: 1).cgColor
 
     private func applyAppearance() {
-        let background = (isDark ? NSColor(white: 0.13, alpha: 1) : NSColor(white: 0.85, alpha: 1)).cgColor
-        layer?.backgroundColor = background
+        canvasBackground = (isDark ? NSColor(white: 0.13, alpha: 1) : NSColor(white: 0.85, alpha: 1)).cgColor
+        render()
         controller?.windows.forEach { styleLabel($0.node.label) }
     }
 
@@ -197,6 +200,11 @@ final class CanvasView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         labels.isHidden = !Self.showsNames
+        // At 100% the real desktop shows through (see OverlayWindow.backdropLevel); the canvas, and
+        // a glide across it, draw their own copy of it.
+        wallpaper.isHidden = wallpaper.contents == nil || !c.isActive
+        let background = c.isActive ? canvasBackground : NSColor.clear.cgColor
+        if layer?.backgroundColor != background { layer?.backgroundColor = background }
         let viewRect = CGRect(origin: .zero, size: bounds.size)
         selected.formIntersection(c.windows.map(\.id))
         if !c.isActive { selected.removeAll() }

@@ -3618,14 +3618,22 @@ final class CanvasController: NSObject {
 final class OverlayWindow: NSWindow {
     /// Canvas mode: just under the menu bar, above every app window and the Dock.
     static let canvasLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) - 1)
-    /// Live mode: below every app window. Not a desktop-level window: under the menu bar macOS
-    /// treats those as wallpaper and adds its legibility shadow, which flickers as apps switch.
+    /// Live mode: below every app window, and see-through but for what Expanse draws there (the
+    /// pictures of parked windows, the minimap): the real desktop shows, as macOS draws it, with
+    /// the shade it keeps under the menu bar and the dimming behind a window that fills the screen.
+    /// A copy of the desktop picture couldn't follow either. Not a desktop-level window: under the
+    /// menu bar macOS treats those as wallpaper and adds its legibility shadow over them.
     static let backdropLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.backstopMenu)))
 
     init() {
         super.init(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         level = OverlayWindow.backdropLevel
-        isOpaque = true
+        // See-through at 100% (see backdropLevel), but every click and scroll is still Expanse's:
+        // clicking the desktop zooms out, scrolling it moves the view. The desktop icons that show
+        // through can't be clicked.
+        isOpaque = false
+        backgroundColor = .clear
+        ignoresMouseEvents = false
         hasShadow = false
         isReleasedWhenClosed = false
         acceptsMouseMovedEvents = true
