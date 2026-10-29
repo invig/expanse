@@ -3028,11 +3028,11 @@ final class CanvasController: NSObject {
     /// activation bring an app forward without leaving the Space you're on (see activate).
     func switchToSpace(_ space: Spaces.Space) {
         guard !gliding else { return }
-        // Already on that Space. From the canvas opened over a full-screen app, its tile means
-        // back to it, which is what leaving the canvas does; otherwise there's nothing to do
-        // (and no reason to move focus).
+        // Already on that Space: from the canvas, its tile means back to it at 100%, which is what
+        // leaving the canvas does (over a full-screen app, back to that app). At 100% there's
+        // nothing to do (and no reason to move focus).
         if space.id == Spaces.list().active {
-            if isActive, !space.isDesktop { exit() }
+            if isActive { exit() }
             return
         }
         let target: (pid: pid_t, window: CGWindowID?, element: AXUIElement?)
