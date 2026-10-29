@@ -305,7 +305,26 @@ final class CanvasView: NSView {
         } else {
             let k: CGFloat = e.hasPreciseScrollingDeltas ? 1 : 12
             controller.pan(by: CGVector(dx: e.scrollingDeltaX * k, dy: e.scrollingDeltaY * k))
+            scrollMayEnd(e)
         }
+    }
+
+    private var scrollEnd: DispatchWorkItem?
+
+    /// Tells the controller when a scroll that moved the view is over (see scrollEnded): when its
+    /// momentum ends, or the fingers lift with none to follow. A wheel's ticks have no phases,
+    /// so there a pause is the end.
+    private func scrollMayEnd(_ e: NSEvent) {
+        scrollEnd?.cancel()
+        let wait: TimeInterval
+        if e.momentumPhase == .ended || e.momentumPhase == .cancelled { wait = 0 }
+        // Momentum, if any, starts straight after.
+        else if e.momentumPhase == [], e.phase == .ended || e.phase == .cancelled { wait = 0.08 }
+        else if e.momentumPhase == [], e.phase == [] { wait = 0.25 }
+        else { return }
+        let work = DispatchWorkItem { [weak self] in self?.controller.scrollEnded() }
+        scrollEnd = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: work)
     }
 
     override func magnify(with e: NSEvent) {

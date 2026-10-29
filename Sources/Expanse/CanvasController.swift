@@ -3454,6 +3454,73 @@ final class CanvasController: NSObject {
         cameraChanged()
     }
 
+    /// A scroll at 100% has ended, momentum and all (see CanvasView.scrollWheel): if it left windows
+    /// cut off by the screen's edges, the view moves on a little, to where they're whole or out of
+    /// sight (see snappedCamera).
+    func scrollEnded() {
+        guard isActive, !gliding, animation == nil, abs(camera.scale - 1) < 0.001 else { return }
+        let target = snappedCamera()
+        guard target != camera else { return }
+        logger.info("scroll ended: view snapped by \(target.origin.x - self.camera.origin.x), \(target.origin.y - self.camera.origin.y)")
+        animate(to: target, duration: 0.25)
+    }
+
+    /// The view at 100%, moved by the least that leaves the fewest windows cut off by the screen's
+    /// edges, and at least one whole. Each move tried puts the edge of a window on screen a gap in
+    /// from the screen's, which (windows being a gap apart) also takes the next one just out of
+    /// sight, or centres a window with less than that to spare (one filling the screen, say). None
+    /// further than half the screen: you scrolled here, so the view stays near.
+    private func snappedCamera() -> Camera {
+        let screen = CGRect(origin: .zero, size: viewSize)
+        let frames = windows.map { camera.toView($0.canvasFrame) }
+        let shown = frames.filter { !$0.intersection(screen).isEmpty }
+        guard shown.contains(where: { !screen.contains($0) }) else { return camera }
+        let g = Self.gap
+        let reach = CGSize(width: screen.width / 2, height: screen.height / 2)
+        // Moves along one side that line a window up with the screen (`from`, `to`: its edges).
+        func moves(_ from: CGFloat, _ to: CGFloat, screen length: CGFloat) -> [CGFloat] {
+            let spare = length - (to - from)
+            return spare < 2 * g ? [g - from, length - g - to, spare / 2 - from] : [g - from, length - g - to]
+        }
+        let xs = ([0] + shown.flatMap { moves($0.minX, $0.maxX, screen: screen.width) }).filter { abs($0) <= reach.width }
+        let ys = ([0] + shown.flatMap { moves($0.minY, $0.maxY, screen: screen.height) }).filter { abs($0) <= reach.height }
+        // How cut off a window is along one side: 0 whole or out of sight, 0.5 half on screen. One
+        // too big for the screen that way counts as whole.
+        func cut(_ visible: CGFloat, _ length: CGFloat, screen: CGFloat) -> CGFloat {
+            guard length > 0, length <= screen else { return 0 }
+            let f = max(0, min(visible / length, 1))
+            return min(f, 1 - f)
+        }
+        // Lower is better: none whole, then how much is cut off and how far the view moves.
+        func cost(_ dx: CGFloat, _ dy: CGFloat) -> (noneWhole: Bool, cut: CGFloat) {
+            var whole = false
+            var cuts: CGFloat = 0
+            for r in frames {
+                let s = r.offsetBy(dx: dx, dy: dy)
+                let visible = s.intersection(screen)
+                // Out of sight, just touching the screen's edge included.
+                guard !visible.isEmpty else { continue }
+                whole = whole || screen.contains(s)
+                cuts += cut(visible.width, s.width, screen: screen.width) + cut(visible.height, s.height, screen: screen.height)
+            }
+            // Of two that leave as much cut off, the shorter move.
+            return (!whole, cuts + 0.5 * (abs(dx) / screen.width + abs(dy) / screen.height))
+        }
+        var best = (dx: CGFloat(0), dy: CGFloat(0), cost: cost(0, 0))
+        for dx in xs {
+            for dy in ys {
+                let c = cost(dx, dy)
+                if (!c.noneWhole && best.cost.noneWhole) || (c.noneWhole == best.cost.noneWhole && c.cut < best.cost.cut - 0.001) {
+                    best = (dx, dy, c)
+                }
+            }
+        }
+        var target = camera
+        target.pan(by: CGVector(dx: best.dx, dy: best.dy))
+        target.origin = CGPoint(x: target.origin.x.rounded(), y: target.origin.y.rounded())
+        return target
+    }
+
     func zoom(by factor: CGFloat, at anchor: CGPoint) {
         returnCamera = nil
         viewPlaced = false
