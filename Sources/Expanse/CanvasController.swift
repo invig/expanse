@@ -3033,7 +3033,8 @@ final class CanvasController: NSObject {
         // Zooming out, the animation's capture pass covers its whole path; one for the 100% view
         // first would stop streams still warm from the last time.
         if !zoomOut { updateStreaming() }
-        if CACurrentMediaTime() - lastWallpaperRefresh > 30 { refreshWallpaper() }
+        // The desktop as it is now (its icons, any dimming): the last one shows until it comes.
+        if CACurrentMediaTime() - lastWallpaperRefresh > 2, WindowCapture.canAsk { refreshWallpaper() }
         refreshSpaces()
         NSApp.activate(ignoringOtherApps: true)
         overlay.level = canvasLevel
