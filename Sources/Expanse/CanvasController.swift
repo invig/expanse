@@ -918,7 +918,15 @@ final class CanvasController: NSObject {
             if !ours, movedByFullScreen(w, inFullScreenSpace: Spaces.inFullScreenSpace) { return }
         }
         let selfResized = !userDragging && resizedItself(w, to: size)
-        if let size { adoptSize(w, size, fromUser: userDragging) }
+        if let size {
+            // Dragging an edge, or a resize right after you clicked or pressed a key in the window's
+            // app (macOS's Fill from the green button or the Window menu, its keyboard shortcuts, an
+            // app's zoom button), that Expanse didn't cause: the size you chose.
+            let now = CACurrentMediaTime()
+            let yours = userDragging || (inputSince(now - 1.5) && now - w.lastSizedAt > 2
+                                         && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid)
+            adoptSize(w, size, fromUser: yours)
+        }
         let pos = isActive ? nil : position
         // Around a display change macOS keeps shoving windows for a while; only a drag with the
         // mouse button down counts as you moving a window then.
@@ -2141,8 +2149,6 @@ final class CanvasController: NSObject {
     /// window would jump.
     private func fitLayoutToScreen(tidy: Bool, rederiving: Set<CGWindowID>? = nil) {
         rehomeStrays()
-        let margin = Self.screenMargin
-        let maxSize = CGSize(width: viewSize.width - margin * 2, height: viewSize.height - margin * 2)
         var home = windows.map { CGRect(origin: $0.home ?? $0.canvasFrame.origin, size: homeSize($0)) }
         if tidy {
             Self.tidyUp(&home)
@@ -2151,15 +2157,14 @@ final class CanvasController: NSObject {
         for w in windows {
             guard let ax = w.ax, !w.sizesItself else { continue }
             let chosen = w.preferredSize.width > 0 ? w.preferredSize : w.canvasFrame.size
-            let target = CGSize(width: min(chosen.width, maxSize.width).rounded(),
-                                height: min(chosen.height, maxSize.height).rounded())
+            let target = Self.cap(chosen, to: viewSize)
             guard abs(target.width - w.canvasFrame.width) > 1 || abs(target.height - w.canvasFrame.height) > 1 else { continue }
             let actual = resizeReal(w, ax, to: target)
             logger.info("fit size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
             // Asked for the size you chose and the app came as close as it goes (Terminal rounds to
             // character cells, Preview has a minimum width): that's the chosen size from now on,
             // rather than asking again at every fit.
-            if chosen.width <= maxSize.width, chosen.height <= maxSize.height,
+            if chosen.width <= viewSize.width, chosen.height <= viewSize.height,
                abs(actual.width - target.width) <= Self.appRounding, abs(actual.height - target.height) <= Self.appRounding {
                 w.preferredSize = actual
             }
@@ -2170,7 +2175,7 @@ final class CanvasController: NSObject {
         // A little off its home size, when that fits the screen, is an app rounding, not a smaller
         // screen: counted as home, or the windows beyond it would creep every time the screen changes.
         let sizes = zip(windows, home).map { w, h in
-            h.width <= maxSize.width && h.height <= maxSize.height
+            h.width <= viewSize.width && h.height <= viewSize.height
                 && abs(w.canvasFrame.width - h.width) <= Self.appRounding && abs(w.canvasFrame.height - h.height) <= Self.appRounding
                 ? h.size : w.canvasFrame.size
         }
@@ -2221,9 +2226,16 @@ final class CanvasController: NSObject {
     /// The size fitting gives a window on a screen of `size`: the size you chose, capped at the screen.
     private func fittedSize(_ w: ManagedWindow, for size: CGSize) -> CGSize {
         guard !w.sizesItself else { return w.canvasFrame.size }
-        let chosen = w.preferredSize.width > 0 ? w.preferredSize : w.canvasFrame.size
-        return CGSize(width: min(chosen.width, (size.width - Self.screenMargin * 2).rounded()),
-                      height: min(chosen.height, (size.height - Self.screenMargin * 2).rounded()))
+        return Self.cap(w.preferredSize.width > 0 ? w.preferredSize : w.canvasFrame.size, to: size)
+    }
+
+    /// A window of `chosen` size on a screen of `view`: as chosen where it fits; where it doesn't
+    /// (a size from a bigger screen), the screen less a margin all round, so it doesn't touch the
+    /// edges. A window you sized to fill the screen (macOS's Fill, say) keeps filling it.
+    static func cap(_ chosen: CGSize, to view: CGSize) -> CGSize {
+        let margin = screenMargin * 2
+        return CGSize(width: chosen.width <= view.width ? chosen.width.rounded() : (view.width - margin).rounded(),
+                      height: chosen.height <= view.height ? chosen.height.rounded() : (view.height - margin).rounded())
     }
 
     /// Positions for windows of `sizes` that keep the `home` layout where you see it: each window
@@ -3329,9 +3341,7 @@ final class CanvasController: NSObject {
 
     /// Shrink a window that doesn't fit the screen; grow it back toward the size the user chose.
     private func fitToScreen(_ w: ManagedWindow) {
-        let margin = Self.screenMargin
-        let target = CGSize(width: min(w.preferredSize.width, viewSize.width - margin * 2).rounded(),
-                            height: min(w.preferredSize.height, viewSize.height - margin * 2).rounded())
+        let target = Self.cap(w.preferredSize, to: viewSize)
         guard let ax = w.ax, !w.sizesItself,
               abs(target.width - w.canvasFrame.width) > 1 || abs(target.height - w.canvasFrame.height) > 1 else { return }
         logger.info("resize \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.canvasFrame.size), privacy: .public) -> \(NSStringFromSize(target), privacy: .public)")
@@ -3355,14 +3365,16 @@ final class CanvasController: NSObject {
         AX.setSize(ax, size)
         let actual = AX.size(ax) ?? size
         w.lastSized = actual
+        w.lastSizedAt = CACurrentMediaTime()
         return actual
     }
 
     /// Takes on a size change of the real window. Resizes we didn't make become the
     /// window's preferred size.
-    /// Only a resize made with the mouse button down (dragging an edge) counts as you choosing a
-    /// size. macOS, apps (Chromium animates AX resizes in steps) and Expanse itself resize windows
-    /// too, and none of those should change the size you chose. The exception: a VM or remote
+    /// Only a resize you made counts as you choosing a size: dragging an edge, or one right after
+    /// your click or key press in its app (see realWindowChanged). macOS, apps (Chromium animates
+    /// AX resizes in steps) and Expanse itself resize windows too, and none of those should change
+    /// the size you chose. The exception: a VM or remote
     /// screen window, whose app picks its size (see ManagedWindow.sizesItself).
     private func adoptSize(_ w: ManagedWindow, _ size: CGSize, fromUser: Bool = false) {
         guard size != w.canvasFrame.size, size.width > 0, size.height > 0 else { return }

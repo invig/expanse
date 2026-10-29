@@ -43,6 +43,9 @@ final class ManagedWindow {
     var sizesItself: Bool { Self.sizesOwnWindows.contains(bundleID) }
     /// The size we last set, so our own resizes aren't mistaken for the user's.
     var lastSized: CGSize?
+    /// When Expanse last resized it (CACurrentMediaTime): an app catching up with that (Chromium
+    /// resizes in steps) isn't you choosing a size.
+    var lastSizedAt: CFTimeInterval = 0
     /// Where macOS had the window before Expanse managed it (global CG). Restored on quit / pause.
     var originalFrame: CGRect = .zero
     /// Where the window sits in the home layout: the arrangement at full chosen sizes (the big
