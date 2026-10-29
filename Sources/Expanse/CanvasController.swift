@@ -122,6 +122,10 @@ final class CanvasController: NSObject {
     /// The app whose window just closed, and when: macOS then gives focus to another of its
     /// windows, which isn't you picking that one (see focusSettled).
     private var lastClose: (pid: pid_t, at: CFTimeInterval)?
+    /// When an app was last unhidden (by pid), and a window last brought back from the Dock (by
+    /// ID): its windows coming back then are ones you asked for (see arrive).
+    private var shownAgainAt: [pid_t: CFTimeInterval] = [:]
+    private var restoredAt: [CGWindowID: CFTimeInterval] = [:]
     private var wallpaperTimer: Timer?
     private var lastWallpaperRefresh: CFTimeInterval = 0
 
@@ -440,7 +444,11 @@ final class CanvasController: NSObject {
             }
         }
         for name in [NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification] {
-            NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                if name == NSWorkspace.didUnhideApplicationNotification,
+                   let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                    self?.shownAgainAt[app.processIdentifier] = CACurrentMediaTime()
+                }
                 self?.syncSoon()
             }
         }
@@ -785,6 +793,9 @@ final class CanvasController: NSObject {
             if notification == kAXUIElementDestroyedNotification as String, let id, let w = windows.first(where: { $0.id == id }) {
                 closedWindows.insert(id)
                 lastClose = (w.pid, CACurrentMediaTime())
+            }
+            if notification == kAXWindowDeminiaturizedNotification as String, let id {
+                restoredAt[id] = CACurrentMediaTime()
             }
             syncSoon()
         case kAXFocusedWindowChangedNotification:
@@ -2502,9 +2513,14 @@ final class CanvasController: NSObject {
         }
         guard live else { view.render(); return }
         let r = camera.toView(w.canvasFrame)
-        // You opened the app again, and it's in front: the view goes to its window, as to a new
-        // one. (Its focus came before the window did, so focus can't decide.)
-        let opened = reopened && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid
+        // You opened the app again, or brought it back from hiding (⌘-Tab, the Dock) or this window
+        // back from the Dock, and it's in front: the view goes to its window, as to a new one. (Its
+        // focus came before the window did, so focus can't decide.) Windows back for other reasons
+        // (a display change, a Space switch) come back quietly.
+        let now = CACurrentMediaTime()
+        let shownAgain = returning && ((shownAgainAt[w.pid].map { now - $0 < 3 } ?? false)
+                                       || (restoredAt.removeValue(forKey: w.id).map { now - $0 < 3 } ?? false))
+        let opened = (reopened || shownAgain) && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid
         if CGRect(origin: .zero, size: viewSize).contains(r) || (returning && !opened) {
             // On screen, or back from minimize / hide (quietly to its spot; focus decides whether
             // to glide): moved with the other new windows once the scan is applied. Until then,
