@@ -124,7 +124,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Any app or web page can open expanse:// links. Commands that reach into individual
             // windows or fake the display are for debugging only and stay off unless enabled with
             // `defaults write com.invignation.expanse debugURLCommands -bool true`.
-            let debugCommands: Set<String> = ["place", "prefer", "dump", "screen", "update", "appearance", "logging", "copylogs", "snapshot"]
+            let debugCommands: Set<String> = ["place", "prefer", "dump", "screen", "update", "appearance", "logging", "copylogs", "snapshot",
+                                              "poweroff"]
             if debugCommands.contains(command), !UserDefaults.standard.bool(forKey: "debugURLCommands") {
                 logger.info("ignored debug URL command \(command, privacy: .public) (debugURLCommands is off)")
                 continue
@@ -185,6 +186,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "copylogs": copyLogs()
             // What Take snapshot in the menu bar panel does.
             case "snapshot": controller.takeSnapshot()
+            // What a logout or restart starting does (see willPowerOff).
+            case "poweroff": controller.willPowerOff()
             case "appearance":
                 // Light or dark for Expanse alone, to check its look in both (anything else: the Mac's).
                 let names: [String: NSAppearance.Name] = ["light": .aqua, "dark": .darkAqua]

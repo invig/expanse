@@ -4,7 +4,11 @@ import ScreenCaptureKit
 /// A real window that lives somewhere on the canvas.
 final class ManagedWindow {
     let id: CGWindowID
+    /// The process that owns the window, which Accessibility and capture go through.
     let pid: pid_t
+    /// The app it belongs to: the same process, or the app a helper process draws it for (see
+    /// CanvasController.appPID). Activating, hiding and quitting are the app's.
+    let appPID: pid_t
     let bundleID: String
     var appName: String
     var title: String
@@ -67,9 +71,13 @@ final class ManagedWindow {
 
     init(scWindow: SCWindow, canvasFrame: CGRect) {
         self.id = scWindow.windowID
-        self.pid = scWindow.owningApplication?.processID ?? 0
-        self.bundleID = scWindow.owningApplication?.bundleIdentifier ?? ""
-        self.appName = scWindow.owningApplication?.applicationName ?? "Window"
+        let pid = scWindow.owningApplication?.processID ?? 0
+        self.pid = pid
+        appPID = CanvasController.appPID(owning: pid) ?? pid
+        // A helper's window goes by its app's name (Steam, not Steam Helper).
+        let app = appPID == pid ? nil : NSRunningApplication(processIdentifier: appPID)
+        self.bundleID = app?.bundleIdentifier ?? scWindow.owningApplication?.bundleIdentifier ?? ""
+        self.appName = app?.localizedName ?? scWindow.owningApplication?.applicationName ?? "Window"
         self.title = scWindow.title ?? ""
         self.scWindow = scWindow
         self.canvasFrame = canvasFrame

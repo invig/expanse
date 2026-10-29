@@ -119,6 +119,13 @@ final class CanvasView: NSView {
         CATransaction.commit()
     }
 
+    /// The minimap and the Spaces panel, in view coordinates from the top left (as the camera's):
+    /// what a window peeking in at the screen's edge mustn't cover (see CanvasController.goesOnScreen).
+    var panelsFrame: CGRect {
+        let panels = spacesGlass.isHidden ? [minimapGlass] : [minimapGlass, spacesGlass]
+        return panels.reduce(CGRect.null) { $0.union(flip($1.frame)) }
+    }
+
     private func placeSpacesBar() {
         spacesGlass.isHidden = spacesBar.isHidden
         spacesGlass.frame = CGRect(x: minimapGlass.frame.minX - 12 - spacesBar.bounds.width, y: 16,

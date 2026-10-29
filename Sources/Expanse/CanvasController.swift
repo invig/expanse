@@ -63,6 +63,13 @@ final class CanvasController: NSObject {
     /// that haven't come back are let go, except ones still out of view (see letGoOfSavedSpots).
     private var restartSpotsUntil = Date.distantFuture
     private static let restartSpotsFor: TimeInterval = 3 * 60
+    /// Windows of apps that quit in the last half minute, as saved spots. A restart quits apps
+    /// before Expanse, and the layout it saves on the way out must still have their windows (see
+    /// save); an app you quit yourself is let go of (see appQuit).
+    private var justQuit: [(at: Date, spots: [SavedLayout.Window])] = []
+    private static let justQuitKept: TimeInterval = 30
+    /// Paused because the Mac is logging out, restarting or shutting down (see start).
+    private var pausedForPowerOff = false
     private var lastSavedLayout: Data?
     let hotCorner = HotCorner()
 
@@ -461,6 +468,9 @@ final class CanvasController: NSObject {
             logger.info("displays awake: re-placing windows")
             self.scheduleRelayout()
         }
+        workspace.addObserver(forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.willPowerOff()
+        }
         registerDisplayCallback()
         sync()
         // New, closed, minimised and restored windows trigger a scan straight away (every app is
@@ -572,7 +582,7 @@ final class CanvasController: NSObject {
         // Clicking a big window would otherwise bury an open system prompt.
         raiseSystemPrompts()
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return }
-        let pid = app.processIdentifier
+        let appPID = app.processIdentifier, pid = axPID(ofApp: appPID)
         // Asking the app which window has focus waits on the app; do that off the main thread.
         // An answer that comes back after you've moved on (another app, or a glide started) is
         // dropped: acting on it would pull you back.
@@ -582,7 +592,7 @@ final class CanvasController: NSObject {
             guard let focused = AX.focusedWindow(pid: pid), let id = AX.windowID(focused) else { return }
             DispatchQueue.main.async {
                 guard let self, query == self.focusQuery,
-                      NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+                      NSWorkspace.shared.frontmostApplication?.processIdentifier == appPID else { return }
                 self.focusedWindowByApp[pid] = id
                 self.focusSettled(on: id)
             }
@@ -710,14 +720,14 @@ final class CanvasController: NSObject {
     /// `applied`, if given, runs on the main thread once the app has taken focus.
     private func focusWindow(_ w: ManagedWindow, reasserting: Bool = false, applied: (() -> Void)? = nil) {
         lastFocusRequest = (w.id, w.pid, CACurrentMediaTime(), reasserting)
-        activationRequest = (w.pid, CACurrentMediaTime())
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid { activationRequest = nil }
+        activationRequest = (w.appPID, CACurrentMediaTime())
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == w.appPID { activationRequest = nil }
         // The app has to answer each of these; a busy one takes 30ms+, so they go on the
         // Accessibility queue (after any moves still running there), not the main thread.
-        let ax = w.ax, pid = w.pid
-        focusedWindowByApp[pid] = w.id
+        let ax = w.ax, appPID = w.appPID
+        focusedWindowByApp[w.pid] = w.id
         axQueue.async {
-            AX.focus(ax, pid: pid)
+            AX.focus(ax, pid: appPID)
             if let applied { DispatchQueue.main.async(execute: applied) }
         }
         raiseSystemPrompts()
@@ -973,7 +983,7 @@ final class CanvasController: NSObject {
             // app's zoom button), that Expanse didn't cause: the size you chose.
             let now = CACurrentMediaTime()
             let yours = userDragging || (inputSince(now - 1.5) && now - w.lastSizedAt > 2
-                                         && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid)
+                                         && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.appPID)
             adoptSize(w, size, fromUser: yours)
         }
         let pos = isActive ? nil : position
@@ -1071,6 +1081,19 @@ final class CanvasController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
     }
 
+    /// A window on the canvas, as a saved layout keeps it.
+    private func savedEntry(_ w: ManagedWindow) -> SavedLayout.Window {
+        SavedLayout.Window(bundleID: w.bundleID, appName: w.appName, title: LayoutStore.titleKey(w.title),
+                           x: Double(w.canvasFrame.minX), y: Double(w.canvasFrame.minY),
+                           w: Double(w.canvasFrame.width), h: Double(w.canvasFrame.height),
+                           hx: Double((w.home ?? w.canvasFrame.origin).x),
+                           hy: Double((w.home ?? w.canvasFrame.origin).y),
+                           pw: Double(w.preferredSize.width), ph: Double(w.preferredSize.height),
+                           ox: Double(w.originalFrame.minX), oy: Double(w.originalFrame.minY),
+                           ow: Double(w.originalFrame.width), oh: Double(w.originalFrame.height),
+                           id: w.id, pid: w.pid)
+    }
+
     /// A window gone from screen, as a saved layout keeps it.
     private func savedEntry(_ id: CGWindowID, _ gone: Departed) -> SavedLayout.Window {
         SavedLayout.Window(bundleID: gone.bundleID, appName: gone.appName, title: LayoutStore.titleKey(gone.title),
@@ -1086,9 +1109,15 @@ final class CanvasController: NSObject {
 
     /// An app quit. Its windows' spots go with them: opened again later, its windows are new
     /// ones, beside what you're working on now, not where they were before you moved things on.
+    /// For half a minute they're still saved, in case this is a restart (see justQuit).
     private func appQuit(_ app: NSRunningApplication) {
         let pid = app.processIdentifier
-        for w in windows where w.pid == pid { remove(w) }
+        let open = windows.filter { $0.pid == pid || $0.appPID == pid }
+        // Its windows out of view, and any that went just now: an app closes its windows as it quits.
+        let gone = recentlyRemoved.filter { $0.value.pid == pid && (!$0.value.closed || Date().timeIntervalSince($0.value.at) < 5) }
+        let spots = open.map { savedEntry($0) } + gone.sorted { $0.value.at > $1.value.at }.map { savedEntry($0.key, $0.value) }
+        if !spots.isEmpty { justQuit.append((Date(), spots.map { var e = $0; e.away = true; return e })) }
+        for w in open { remove(w) }
         recentlyRemoved = recentlyRemoved.filter { $0.value.pid != pid }
         logger.info("\(app.localizedName ?? "?", privacy: .public) quit")
         scheduleSave()
@@ -1123,23 +1152,16 @@ final class CanvasController: NSObject {
             .map { savedEntry($0.key, $0.value) }
         // Spots kept from a saved layout for windows not back yet (see restartSpotsUntil).
         let kept = savedPool.prefix(60).map { var e = $0; e.away = true; return e }
+        // Windows of apps that quit moments ago, newest first, in case this is a restart (see justQuit).
+        justQuit.removeAll { Date().timeIntervalSince($0.at) > Self.justQuitKept }
+        let quit = justQuit.reversed().flatMap(\.spots)
         let layout = SavedLayout(
             cameraX: Double(camera.origin.x), cameraY: Double(camera.origin.y),
             centerX: Double(center.x), centerY: Double(center.y),
             cleanExit: cleanExit,
             fittedWidth: fittedViewSize == .zero ? nil : Double(fittedViewSize.width),
             fittedHeight: fittedViewSize == .zero ? nil : Double(fittedViewSize.height),
-            windows: windows.map {
-                SavedLayout.Window(bundleID: $0.bundleID, appName: $0.appName, title: LayoutStore.titleKey($0.title),
-                                   x: Double($0.canvasFrame.minX), y: Double($0.canvasFrame.minY),
-                                   w: Double($0.canvasFrame.width), h: Double($0.canvasFrame.height),
-                                   hx: Double(($0.home ?? $0.canvasFrame.origin).x),
-                                   hy: Double(($0.home ?? $0.canvasFrame.origin).y),
-                                   pw: Double($0.preferredSize.width), ph: Double($0.preferredSize.height),
-                                   ox: Double($0.originalFrame.minX), oy: Double($0.originalFrame.minY),
-                                   ow: Double($0.originalFrame.width), oh: Double($0.originalFrame.height),
-                                   id: $0.id, pid: $0.pid)
-            } + away + kept)
+            windows: windows.map { savedEntry($0) } + quit + away + kept)
         guard let data = try? JSONEncoder().encode(layout), data != lastSavedLayout else { return }
         lastSavedLayout = data
         LayoutStore.save(layout)
@@ -1269,10 +1291,27 @@ final class CanvasController: NSObject {
         logger.info("paused")
     }
 
+    /// Logging out, restarting or shutting down: apps are about to quit, many before Expanse.
+    /// Windows go back to where macOS had them, so that's where they reopen (not parked in the
+    /// corner), and the layout is kept as it is for when Expanse starts again. Still running a
+    /// few minutes on, the logout was cancelled: carry on.
+    func willPowerOff() {
+        guard !isPaused else { return }
+        logger.notice("logging out or restarting: windows back to the macOS layout, layout kept for next time")
+        pause()
+        pausedForPowerOff = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 180) { [weak self] in
+            guard let self, self.pausedForPowerOff, self.isPaused else { return }
+            logger.notice("still running: the logout was cancelled, so resuming")
+            self.resume()
+        }
+    }
+
     /// Like a fresh launch: bring the canvas back from the layout saved by pause().
     func resume() {
         guard isPaused else { return }
         isPaused = false
+        pausedForPowerOff = false
         saved = LayoutStore.load()
         savedPool = saved?.windows ?? []
         firstSync = true
@@ -1464,21 +1503,40 @@ final class CanvasController: NSObject {
     /// for it (and the app kept moving it back).
     private static let leftAlone: Set<String> = ["com.apple.mobilephone", "com.apple.FaceTime"]
 
-    /// Ordinary apps (with a Dock icon), not menu-bar extras or background agents. Asking is a
-    /// LaunchServices lookup (around a millisecond), and window scans ask for every app, so the
-    /// answer is kept for half a minute. Thread-safe.
-    static func isRegularApp(_ pid: pid_t) -> Bool {
+    /// An ordinary app (with a Dock icon), not a menu-bar extra or background agent.
+    static func isRegularApp(_ pid: pid_t) -> Bool { appPID(owning: pid) == pid }
+
+    /// The ordinary app a process's windows belong to: the process itself if it's one, or the app
+    /// whose bundle it's a helper in, for one that draws the app's windows (Steam's main window
+    /// is drawn by its built-in browser, Steam Helper, a background process). Nil for anything
+    /// else. Asking is a LaunchServices lookup (around a millisecond), and window scans ask for
+    /// every app, so the answer is kept for half a minute. Thread-safe.
+    static func appPID(owning pid: pid_t) -> pid_t? {
         appPolicyLock.lock()
         defer { appPolicyLock.unlock() }
         let now = CACurrentMediaTime()
-        if let cached = appPolicies[pid], now - cached.at < 30 { return cached.regular }
-        let regular = NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular
-        appPolicies[pid] = (regular, now)
-        return regular
+        if let cached = appOwners[pid], now - cached.at < 30 { return cached.app }
+        let app = findAppPID(owning: pid)
+        appOwners[pid] = (app, now)
+        return app
+    }
+
+    private static func findAppPID(owning pid: pid_t) -> pid_t? {
+        guard let process = NSRunningApplication(processIdentifier: pid) else { return nil }
+        if process.activationPolicy == .regular { return pid }
+        var info = kinfo_proc(), size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return nil }
+        let parentPID = info.kp_eproc.e_ppid
+        guard parentPID > 1, let parent = NSRunningApplication(processIdentifier: parentPID), parent.activationPolicy == .regular,
+              let parentBundle = parent.bundleURL?.standardizedFileURL.path,
+              let own = (process.bundleURL ?? process.executableURL)?.standardizedFileURL.path,
+              own.hasPrefix(parentBundle + "/") else { return nil }
+        return parentPID
     }
 
     private static let appPolicyLock = NSLock()
-    nonisolated(unsafe) private static var appPolicies: [pid_t: (regular: Bool, at: CFTimeInterval)] = [:]
+    nonisolated(unsafe) private static var appOwners: [pid_t: (app: pid_t?, at: CFTimeInterval)] = [:]
 
     /// The window's true frame. ScreenCaptureKit reports transformed frames during
     /// Mission Control and similar animations; the Accessibility API doesn't.
@@ -1548,6 +1606,8 @@ final class CanvasController: NSObject {
         var kinds: [CGWindowID: WindowKind] = [:]
         /// Some window is still opening (see WindowKind.pending): scan again soon.
         var pending = false
+        /// Windows on screen that aren't taken on, and why (see noteSkipped).
+        var skipped: [CGWindowID: String] = [:]
         var calls = 0
         /// Window server stacking order (live mode only).
         var order: [CGWindowID: Int] = [:]
@@ -1577,8 +1637,15 @@ final class CanvasController: NSObject {
             }
             // Not manageable anyway (see isManageable): no need to ask.
             guard sc.isOnScreen, sc.frame.width >= 100, sc.frame.height >= 60 else { continue }
-            if regularApps[pid] == nil { regularApps[pid] = isRegularApp(pid) }
-            guard regularApps[pid] == true else { continue }
+            if regularApps[pid] == nil { regularApps[pid] = appPID(owning: pid) != nil }
+            guard regularApps[pid] == true else {
+                // (Titled ones only: a menu-bar extra's popovers aren't windows anyone misses.)
+                if sc.title?.isEmpty == false {
+                    let name = sc.owningApplication?.applicationName ?? "pid \(pid)"
+                    snapshot.skipped[id] = "\(name) isn't an app in the Dock (a menu-bar extra or background process)"
+                }
+                continue
+            }
             if let kind = kinds[id], !kind.standard, !kind.pending, now - kind.at < 10 {
                 snapshot.known.insert(id)
                 continue
@@ -1598,7 +1665,10 @@ final class CanvasController: NSObject {
                 snapshot.known.insert(id)
                 let standard = subrole == kAXStandardWindowSubrole as String
                 kinds[id] = WindowKind(standard: standard, at: now)
-                guard standard else { continue }
+                guard standard else {
+                    snapshot.skipped[id] = "not an ordinary window (\(subrole)): it stays where its app puts it"
+                    continue
+                }
                 snapshot.standard.insert(id)
                 snapshot.elements[id] = element
                 if let p = AX.position(element), let s = AX.size(element), s.width > 0, s.height > 0 {
@@ -1613,6 +1683,9 @@ final class CanvasController: NSObject {
                 // (Only a window seen for the first time starts out pending.)
                 let firstSeen = kinds[id].map { $0.pending ? $0.at : -.infinity } ?? now
                 let pending = now - firstSeen < 5
+                if !pending {
+                    snapshot.skipped[id] = "its app doesn't list it as one of its windows (Accessibility); asked again every 10s"
+                }
                 kinds[id] = WindowKind(standard: false, at: pending ? firstSeen : now, pending: pending)
                 snapshot.pending = snapshot.pending || pending
                 snapshot.known.insert(id)
@@ -1625,6 +1698,17 @@ final class CanvasController: NSObject {
 
     /// Windows open now (see LayoutStore.takeMatch), from the last scan.
     private var openWindowKeys = Set<String>()
+
+    /// Says once, in the log that stays (with Detailed Logging off too), why a window that's on
+    /// screen isn't on the canvas: so a window that wasn't picked up can be explained afterwards.
+    private func noteSkipped(_ skipped: [CGWindowID: String], in scWindows: [SCWindow]) {
+        if loggedSkips.count > 5000 { loggedSkips = [] }
+        for (id, why) in skipped where loggedSkips.insert(id).inserted {
+            let app = scWindows.first { $0.windowID == id }?.owningApplication?.applicationName ?? "?"
+            logger.notice("not on the canvas: \(app, privacy: .public)[\(id)]: \(why, privacy: .public)")
+        }
+    }
+    private var loggedSkips = Set<CGWindowID>()
 
     /// `stale`: the windows' frames are out of date; only new and gone windows count.
     private func apply(_ scWindows: [SCWindow], ax: AXSnapshot, stale: Bool = false) {
@@ -1662,11 +1746,16 @@ final class CanvasController: NSObject {
         var regularApps: [pid_t: Bool] = [:]
         func regular(_ pid: pid_t) -> Bool {
             if let known = regularApps[pid] { return known }
-            let r = Self.isRegularApp(pid)
+            let r = Self.appPID(owning: pid) != nil
             regularApps[pid] = r
             return r
         }
         scannedIDs = Set(scWindows.map(\.windowID))
+        var skipped = ax.skipped
+        for sc in scWindows where byID[sc.windowID] == nil && ax.standard.contains(sc.windowID) && !screenRectCG.intersects(sc.frame) {
+            skipped[sc.windowID] = "it's outside the main display, at \(NSStringFromRect(sc.frame))"
+        }
+        noteSkipped(skipped, in: scWindows)
         for sc in scWindows where isManageable(sc, tracked: byID[sc.windowID] != nil, regular: regular) {
             // Only ordinary document windows live on the canvas. Sheets (like Xcode's Manage
             // Certificates), dialogs and floating panels belong to their parent window and stay
@@ -1806,7 +1895,7 @@ final class CanvasController: NSObject {
         // or an app you quit and open again, is new: in a spot of its own beside where you are.
         // The same window back from out of view (unhidden, say) always has its own.
         let mayTakeSavedSpot = firstSync
-            || Date() < restartSpotsUntil && (NSRunningApplication(processIdentifier: w.pid)?.launchDate
+            || Date() < restartSpotsUntil && (NSRunningApplication(processIdentifier: w.appPID)?.launchDate
                 .map { Date().timeIntervalSince($0) < 60 } ?? false)
             || savedPool.contains { $0.id == w.id && $0.pid == w.pid && $0.bundleID == w.bundleID }
         // An app that quit opening again: its window is back at its spot (see appQuit).
@@ -1968,11 +2057,18 @@ final class CanvasController: NSObject {
     /// so a hop doesn't wait on the app to say (50ms+ for a busy one) before it can start.
     private var focusedWindowByApp: [pid_t: CGWindowID] = [:]
 
-    private func focusedWindow(of pid: pid_t) -> ManagedWindow? {
+    private func focusedWindow(of app: pid_t) -> ManagedWindow? {
+        let pid = axPID(ofApp: app)
         if let id = focusedWindowByApp[pid], let w = windows.first(where: { $0.id == id }) { return w }
         guard let focused = AX.focusedWindow(pid: pid), let id = AX.windowID(focused) else { return nil }
         focusedWindowByApp[pid] = id
         return windows.first { $0.id == id }
+    }
+
+    /// Whom to ask (through Accessibility) about the app `pid`'s windows: the app itself, or the
+    /// helper process that draws them (see appPID(owning:)).
+    private func axPID(ofApp pid: pid_t) -> pid_t {
+        windows.contains { $0.pid == pid } ? pid : windows.first { $0.appPID == pid }?.pid ?? pid
     }
 
     /// The nearest window in `direction`. A window sharing the row (for left / right) or column
@@ -2613,9 +2709,9 @@ final class CanvasController: NSObject {
         // focus came before the window did, so focus can't decide.) Windows back for other reasons
         // (a display change, a Space switch) come back quietly.
         let now = CACurrentMediaTime()
-        let shownAgain = returning && ((shownAgainAt[w.pid].map { now - $0 < 3 } ?? false)
+        let shownAgain = returning && ((shownAgainAt[w.appPID].map { now - $0 < 3 } ?? false)
                                        || (restoredAt.removeValue(forKey: w.id).map { now - $0 < 3 } ?? false))
-        let opened = (reopened || shownAgain) && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid
+        let opened = (reopened || shownAgain) && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.appPID
         if CGRect(origin: .zero, size: viewSize).contains(r) || (returning && !opened) {
             // On screen, or back from minimize / hide (quietly to its spot; focus decides whether
             // to glide): moved with the other new windows once the scan is applied. Until then,
@@ -3199,7 +3295,7 @@ final class CanvasController: NSObject {
     /// app, and raise it through Accessibility (see AX.window for finding it off this Space, when
     /// `known` isn't given).
     private func activate(_ pid: pid_t, raising window: CGWindowID?, element known: AXUIElement?, toward space: UInt64) {
-        guard let app = NSRunningApplication(processIdentifier: pid) else { return }
+        guard let app = NSRunningApplication(processIdentifier: Self.appPID(owning: pid) ?? pid) else { return }
         axQueue.async {
             let element = known ?? window.flatMap { AX.window(pid: pid, id: $0) }
             DispatchQueue.main.async {
@@ -3242,7 +3338,7 @@ final class CanvasController: NSObject {
             bringToFront(focus)
             fitToScreen(focus)
             if viewPlaced, abs(camera.scale - 1) < 0.001,
-               Self.goesOnScreen(camera.toView(focus.canvasFrame).offsetBy(dx: viewport.minX, dy: viewport.minY), in: viewport) {
+               goesOnScreen(camera.toView(focus.canvasFrame).offsetBy(dx: viewport.minX, dy: viewport.minY), in: viewport) {
                 // You put the view here: the window you picked is on screen, and the view stays.
                 logger.info("view placed by you: diving into \(focus.appName, privacy: .public)[\(focus.id)] where it is")
                 target = Camera(origin: CGPoint(x: camera.origin.x.rounded(), y: camera.origin.y.rounded()), scale: 1)
@@ -3297,7 +3393,7 @@ final class CanvasController: NSObject {
         let vp = viewport
         return windows.map { w in
             let r = camera.toView(w.canvasFrame).offsetBy(dx: vp.minX, dy: vp.minY)
-            if Self.goesOnScreen(r, in: vp) {
+            if goesOnScreen(r, in: vp) {
                 return (w, CGPoint(x: r.minX.rounded(), y: r.minY.rounded()), false)
             }
             return (w, parkPoint, true)
@@ -3307,9 +3403,18 @@ final class CanvasController: NSObject {
     /// A window at `r` (global) is put on screen, not parked: enough of it shows. macOS won't put
     /// a title bar above the menu bar (it would shove the window down), so one whose top is cut
     /// off stays parked, and the backdrop draws it where it belongs.
-    private static func goesOnScreen(_ r: CGRect, in vp: CGRect) -> Bool {
+    private func goesOnScreen(_ r: CGRect, in vp: CGRect) -> Bool {
+        Self.goesOnScreen(r, in: vp, panels: view.panelsFrame.offsetBy(dx: vp.minX, dy: vp.minY))
+    }
+
+    /// `panels`: the minimap and the Spaces panel (global). A window peeking in at the edge of the
+    /// screen, only a sliver of it showing, would cover them: it stays parked, and the backdrop
+    /// draws what shows of it around them, under them.
+    static func goesOnScreen(_ r: CGRect, in vp: CGRect, panels: CGRect) -> Bool {
         let visible = r.intersection(vp)
-        return r.minY >= vp.minY - 1 && !visible.isNull && visible.width >= 48 && visible.height >= 48
+        guard r.minY >= vp.minY - 1, !visible.isNull, visible.width >= 48, visible.height >= 48 else { return false }
+        let sliver = visible.width < min(200, r.width / 3) || visible.height < min(200, r.height / 3)
+        return !(sliver && visible.intersects(panels))
     }
 
     private let axQueue = DispatchQueue(label: "com.invignation.expanse.ax", qos: .userInteractive)
@@ -3433,7 +3538,7 @@ final class CanvasController: NSObject {
                   let bounds = w[kCGWindowBounds as String] as? [String: CGFloat], bounds["Width"] ?? 0 >= 100 else { continue }
             let kind = windowKinds[id].map { "standard=\($0.standard) pending=\($0.pending) age=\(Int(CACurrentMediaTime() - $0.at))s" } ?? "never asked"
             let owner = w[kCGWindowOwnerName as String] as? String ?? "?"
-            logger.info("dump unmanaged \(owner, privacy: .public)[\(id)] \(kind, privacy: .public) scanned=\(self.scannedIDs.contains(id)) fullScreen=\(fullScreen.contains(id)) regular=\(Self.isRegularApp(pid)) recentlyRemoved=\(self.recentlyRemoved[id] != nil)")
+            logger.info("dump unmanaged \(owner, privacy: .public)[\(id)] \(kind, privacy: .public) scanned=\(self.scannedIDs.contains(id)) fullScreen=\(fullScreen.contains(id)) app=\(Self.appPID(owning: pid).map { "\($0)" } ?? "none", privacy: .public) recentlyRemoved=\(self.recentlyRemoved[id] != nil)")
         }
     }
 

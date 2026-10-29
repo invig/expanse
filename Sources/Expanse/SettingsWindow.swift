@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// What doesn't need to be one click away in the menu bar panel: opening at login and updates.
-/// Release builds only: a development build has neither, so they show greyed out.
+/// A development build has no updates, so those show greyed out; it opens at login only if you
+/// turn that on here (a release turns it on by itself: see LoginItem).
 enum SettingsWindow {
     private static var window: NSWindow?
 
@@ -34,7 +35,6 @@ private struct SettingsView: View {
                     openAtLogin = LoginItem.enabled
                 }))
             }
-            .disabled(!isRelease)
             Section("Updates") {
                 Toggle("Check for updates automatically", isOn: Binding(get: { automatic }, set: {
                     Updater.shared.automatic = $0
@@ -46,7 +46,7 @@ private struct SettingsView: View {
             }
             .disabled(!isRelease)
             if !isRelease {
-                Text("This is a development build: opening at login and updates are for release builds.")
+                Text("This is a development build: it has no updates, and opening at login opens this copy.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
