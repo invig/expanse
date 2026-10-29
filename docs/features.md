@@ -4,9 +4,6 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-- **The canvas can show a dimmed desktop picture** (another Mac, 29 Oct). macOS dims the desktop
-  behind a window that fills the screen, and the canvas captures its copy of the desktop picture
-  from the screen, so a copy taken then stays dark. Fix: load the picture from its file instead.
 - **Windows peeking in at the screen's edges** cover the minimap and Spaces panels (29 Oct), which
   sit on the backdrop under every window. Park a window that only shows a sliver, or float the
   panels above windows?
@@ -14,6 +11,14 @@ What we might build next. New requests go in as they come up, and finished work 
 Fixed, not yet released:
 - At 100% the real desktop shows through: macOS's own shade under the menu bar and its dimming
   behind a filled window, instead of a copy of the desktop picture that missed both.
+- The canvas's desktop is a fresh picture of the real one, taken each time it opens: icons, the
+  shade under the menu bar and any dimming, so opening it changes nothing under the windows (and
+  no dimmed copy is left behind, as on another Mac on 29 Oct).
+- Desktop icons can be clicked at 100% (the minimap zooms out instead), and scrolling or pinching
+  on the bare desktop still opens the canvas.
+- A scroll at 100% snaps when it stops, so windows aren't left cut off by the screen's edges.
+- Hiding an app, then ⌘-Tab to it, glides to its window.
+- Clicking Expanse's own Space tile on the canvas goes back to 100%.
 
 ## Next up
 
