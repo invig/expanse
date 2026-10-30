@@ -54,6 +54,12 @@ None open. If a new window doesn't make it onto the canvas, the log now says why
 
 ## Done
 
+- Not released yet (30 Oct): ⌘-Tab, or the Dock, to an app whose window was off screen did nothing
+  for about 20s after unlocking or waking the Mac (reported with Outlook; it was any app). Expanse
+  ignored every focus change while the displays settled, so macOS's own wouldn't move the view; a
+  switch you make is followed now, once windows are back in place. An app opened in those 20s
+  (Outlook again) was left in the middle of the view, over your windows; it goes beside what
+  you're working on now, like any new window. Both checked with a real unlock.
 - 0.1.31: The menu bar icon opens a glass panel instead of a menu (the canvas at a glance, the
   main actions and switches, earlier layouts to restore, and a Take snapshot button); Open at Login
   and updates moved to a new Settings window. Restarts keep the layout: windows go back where macOS

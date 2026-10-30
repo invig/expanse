@@ -263,6 +263,10 @@ final class CanvasController: NSObject {
     /// After a display change macOS keeps moving windows for a while (it restores each window's
     /// remembered spot for that display). Until then, moves are reverted instead of adopted.
     private var settleUntil = Date.distantPast
+    /// The layout is back in place after a display change (or unlocking), and the view with it,
+    /// but macOS may still move windows (see settleUntil): their moves aren't followed, but a
+    /// window that opens meanwhile is placed as usual.
+    private var settling: Bool { suspendTracking && settleUntil != .distantFuture && !screenLocked && !isActive }
     private var reassertWork: DispatchWorkItem?
     private var focusSettleWork: DispatchWorkItem?
     private var lastHiddenHint: CGWindowID?
@@ -577,8 +581,9 @@ final class CanvasController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: work)
     }
 
-    /// If the focused window isn't fully on screen, glide to center it.
-    private func focusSettled() {
+    /// If the focused window isn't fully on screen, glide to center it. `switchedAt`: when you
+    /// switched to the app, for a switch held back while displays settle (see focusSettled(on:)).
+    private func focusSettled(switchedAt: CFTimeInterval? = nil) {
         // Clicking a big window would otherwise bury an open system prompt.
         raiseSystemPrompts()
         guard let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid() else { return }
@@ -594,7 +599,7 @@ final class CanvasController: NSObject {
                 guard let self, query == self.focusQuery,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == appPID else { return }
                 self.focusedWindowByApp[pid] = id
-                self.focusSettled(on: id)
+                self.focusSettled(on: id, switchedAt: switchedAt)
             }
         }
     }
@@ -611,9 +616,33 @@ final class CanvasController: NSObject {
         }
     }
 
-    private func focusSettled(on id: CGWindowID) {
-        guard !isActive, !isPaused, !suspendTracking, animation == nil,
-              let w = windows.first(where: { $0.id == id }) else { return }
+    /// Whether you just switched app yourself: a click, a key, or letting go of ⌘ at the end of a
+    /// ⌘-Tab, in the last 1.5s.
+    private var switchedJustNow: Bool {
+        [.leftMouseDown, .rightMouseDown, .keyDown, .flagsChanged].contains { type in
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: type) < 1.5
+        }
+    }
+
+    private func focusSettled(on id: CGWindowID, switchedAt: CFTimeInterval? = nil) {
+        guard !isPaused, let w = windows.first(where: { $0.id == id }) else { return }
+        if suspendTracking {
+            // While displays change, and for 20s after (waking or unlocking is one), macOS moves
+            // focus about by itself, so only a switch you just made is followed. (Ignoring them all
+            // left ⌘-Tab doing nothing for 20s after an unlock.)
+            guard !screenLocked else { return }
+            guard let at = switchedAt ?? (switchedJustNow ? CACurrentMediaTime() : nil) else {
+                logger.info("\(w.appName, privacy: .public)[\(id)] focused while displays settle, not by you: not followed")
+                return
+            }
+            // Windows still going back where the canvas says: follow it once they're there.
+            if settleUntil == .distantFuture || isActive {
+                guard CACurrentMediaTime() - at < 5 else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.focusSettled(switchedAt: at) }
+                return
+            }
+        }
+        guard !isActive, animation == nil else { return }
         // Moments after Expanse focused a window, focus moved to another of the same app's, and
         // not by you: arriving on a Space (from a full-screen app's, say), macOS activates the app
         // in front there, and the app puts its previous window back in focus. That's not a choice
@@ -1848,8 +1877,8 @@ final class CanvasController: NSObject {
             } else {
                 // A new window is where its app put it, which nothing here has moved, so its frame
                 // holds even in an out-of-date scan (opening windows in a burst makes most scans
-                // out of date).
-                if add(sc, live: liveNow, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) {
+                // out of date). While displays settle, too, once the view is back in place.
+                if add(sc, live: liveNow || settling, element: ax.elements[sc.windowID], frame: axFrames[sc.windowID]) {
                     restored.insert(sc.windowID)
                 } else {
                     unrecognised.append(sc.windowID)
@@ -2000,9 +2029,11 @@ final class CanvasController: NSObject {
 
         // A window opened (or came back) while Expanse is running, not one found at launch. It
         // goes next to the window it came from: its app's front window in view, else the window
-        // in front.
+        // in front. That holds while displays change too (an app opened just after unlocking was
+        // left in the middle of the view, over your windows): before the layout is back in
+        // place, it gets its spot on the canvas, and the real window goes there with the rest.
         let anchor = windows.last { !$0.parked && $0.pid == w.pid } ?? windows.last { !$0.parked }
-        let arriving = !firstSync && !suspendTracking
+        let arriving = !firstSync
 
         windows.append(w)
         w.node.setContentsScale(screen.backingScaleFactor)
