@@ -4,8 +4,14 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-None open. If a new window doesn't make it onto the canvas, the log says why (look for "not on
-the canvas" in Copy Logs for a Bug Report).
+1. **To check** (found writing the regression tests, 30 Oct; not confirmed): Restore all windows
+   while zoomed out doesn't update the windows' spots on the canvas; `expanse://fit` and `zoom`
+   move the view at 100% without opening the canvas; the README's Questions section and
+   how-it-works still name the old menu items and `update?install=1`. Details in
+   [regression/README.md](regression/README.md).
+
+If a new window doesn't make it onto the canvas, the log says why (look for "not on the canvas"
+in Copy Logs for a Bug Report).
 
 ## Next up
 
@@ -26,10 +32,11 @@ the canvas" in Copy Logs for a Bug Report).
 5. **Low-motion mode** (asked 28 Oct): animated screen moves turned off, so glides, zooms and
    centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
    is on (Accessibility › Display), which Expanse doesn't follow yet.
-6. **Regression tests** (asked 29 Oct). A unit test for each problem we fix, so a later change
-   can't quietly bring it back. There are no tests yet: the layout maths would move into its own
-   target that tests can reach. Start with the recent fixes (the lock pile-up, Restore Layout,
-   display changes and back).
+6. **Regression tests** (asked 29 Oct). The test cases are written: 439 in
+   [regression/](regression/README.md), one for every feature and fixed bug since 0.1.0. Next,
+   automate the 218 marked "unit": there are no tests yet, so the layout maths would move into
+   its own target that tests can reach. Start with the recent fixes (the lock pile-up, Restore
+   Layout, display changes and back). A new fix adds its case there.
 
 ## In progress elsewhere
 
