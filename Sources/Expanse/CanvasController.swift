@@ -140,7 +140,6 @@ final class CanvasController: NSObject {
     /// ID): its windows coming back then are ones you asked for (see arrive).
     private var shownAgainAt: [pid_t: CFTimeInterval] = [:]
     private var restoredAt: [CGWindowID: CFTimeInterval] = [:]
-    private var wallpaperTimer: Timer?
     private var lastWallpaperRefresh: CFTimeInterval = 0
 
     private struct CameraAnimation {
@@ -539,8 +538,9 @@ final class CanvasController: NSObject {
         hotCorner.start()
 
         refreshWallpaper()
-        // Dynamic wallpapers change through the day; Spaces can each have their own picture.
-        wallpaperTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in self?.refreshWallpaper() }
+        // Spaces can each have their own picture. Not on a timer (for dynamic wallpapers): the
+        // canvas takes a fresh one as it opens (see enterNow), and every capture makes video that
+        // macOS protects blink.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
             self?.refreshWallpaper()
@@ -552,6 +552,7 @@ final class CanvasController: NSObject {
     }
 
     func refreshWallpaper() {
+        guard !isPaused else { return }
         lastWallpaperRefresh = CACurrentMediaTime()
         guard Wallpaper.enabled, CGPreflightScreenCaptureAccess() else { view.setWallpaper(nil); return }
         Wallpaper.capture(screen: screen) { [weak self] image in
@@ -3024,7 +3025,15 @@ final class CanvasController: NSObject {
             && want.keep && w.capture.isRunning && !w.needsFirstFrame {
             streamed.insert(w.id)
         }
-        snapshotQueue = ranked.filter { !streamed.contains($0.id) }.map(\.id)
+        let queued = ranked.filter { !streamed.contains($0.id) }
+        // At 100%, a stand-in gets one picture as it comes into the queue, unless a stream
+        // stopping now has just drawn it; it isn't kept fresh after that. Every capture makes
+        // video that macOS protects (Prime Video, say) blink, wherever it's playing.
+        if !isActive {
+            let before = Set(snapshotQueue)
+            for w in queued where !before.contains(w.id) && !w.capture.isRunning { w.pictureStale = true }
+        }
+        snapshotQueue = queued.map(\.id)
         captureLoad = min(ranked.count, budget)
         var toStart: [ManagedWindow] = []
         for w in ranked where streamed.contains(w.id) {
@@ -3076,9 +3085,10 @@ final class CanvasController: NSObject {
 
     /// One-off pictures, three at a time: first pictures of new windows as fast as they come;
     /// on the canvas, fresh pictures of windows in view without a stream, about ten a second in
-    /// all and each at most every 1.5s; at 100%, full-size pictures of parked windows whose last
-    /// one is a thumbnail from the canvas, nearest first, four a second (a glide shows them before
-    /// their streams catch up). A window whose snapshot fails is tried again later and later.
+    /// all and each at most every 1.5s; at 100%, one of each stand-in as it comes into view
+    /// (never on a timer: see updateStreaming), and full-size pictures of parked windows whose
+    /// last one is a thumbnail from the canvas, nearest first, four a second (a glide shows them
+    /// before their streams catch up). A window whose snapshot fails is tried again later and later.
     private func pumpSnapshots() {
         // replayd isn't answering: asking for more only piles them up in it.
         guard WindowCapture.canAsk else { return }
@@ -3088,8 +3098,9 @@ final class CanvasController: NSObject {
         }
         let firsts = windows.filter { $0.needsFirstFrame && !$0.capture.isRunning && due($0, every: 2) }
         let byID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        // (At 100% they're slivers at the edge of the screen: every 3s is plenty.)
-        var refresh = snapshotQueue.compactMap { byID[$0] }.filter { due($0, every: isActive ? 1.5 : 3) }
+        let queue = snapshotQueue.compactMap { byID[$0] }
+        let pending = isActive ? queue : queue.filter(\.pictureStale)
+        var refresh = pending.filter { due($0, every: isActive ? 1.5 : 3) }
             .sorted { $0.lastSnapshotAt < $1.lastSnapshotAt }
         let blurry = isActive ? [] : windows.filter(pictureNeedsResizing)
         if refresh.isEmpty, now - lastSharpening > 0.25 {
@@ -3099,7 +3110,7 @@ final class CanvasController: NSObject {
             if !refresh.isEmpty { lastSharpening = now }
         }
         guard !firsts.isEmpty || !refresh.isEmpty else {
-            if snapshotsInFlight == 0, snapshotQueue.isEmpty, blurry.isEmpty, !windows.contains(where: \.needsFirstFrame) {
+            if snapshotsInFlight == 0, pending.isEmpty, blurry.isEmpty, !windows.contains(where: \.needsFirstFrame) {
                 snapshotTimer?.invalidate()
                 snapshotTimer = nil
             }
@@ -3114,6 +3125,7 @@ final class CanvasController: NSObject {
             w.capture.snapshot(window: w.scWindow, pixelSize: size) { [weak self, weak w] ok in
                 self?.snapshotsInFlight -= 1
                 if let w { w.snapshotFailures = ok ? 0 : w.snapshotFailures + 1 }
+                if ok { w?.pictureStale = false }
             }
         }
     }

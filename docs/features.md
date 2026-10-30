@@ -4,8 +4,8 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-None open. If a new window doesn't make it onto the canvas, the log now says why (look for
-"not on the canvas" in Copy Logs for a Bug Report).
+None open. If a new window doesn't make it onto the canvas, the log says why (look for "not on
+the canvas" in Copy Logs for a Bug Report).
 
 ## Next up
 
@@ -54,6 +54,12 @@ None open. If a new window doesn't make it onto the canvas, the log now says why
 
 ## Done
 
+- Not released yet (30 Oct): Prime Video blinked every so often, in a window or full screen.
+  Every screen capture makes macOS blink protected video, and at 100% Expanse re-captured the
+  slivers of parked windows at the screen's edge every 3s (about 80 captures a minute), and the
+  desktop picture every 5 minutes. Now a sliver gets one picture as it comes into view and the
+  desktop is captured as the canvas opens, so at rest Expanse captures nothing (checked: none in
+  80s, and no blinks while watching). A sliver no longer updates while it sits at the edge.
 - 0.1.33: Security fixes. An `expanse://` link from a web page runs only once you allow it, and
   a malformed one can't crash Expanse. Window titles in the layout file are hashed with a secret
   key kept in your Keychain, so the file alone can't be used to check a guessed title. Layout

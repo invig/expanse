@@ -21,8 +21,11 @@ Expanse runs on a stock Mac with System Integrity Protection on. Everything belo
 - **Capture only what can be seen.** Every stream costs the window server work, and macOS marks
   every captured window with a purple badge. So Expanse streams only the windows in view while
   zoomed out or gliding, when the backdrop covers them anyway. Those streams stop before the
-  backdrop drops. At 100% nothing streams: the slivers of parked windows showing at the screen's
-  edges are refreshed with snapshots. Pictures are captured at the size they're drawn.
+  backdrop drops. At 100% nothing streams: each sliver of a parked window showing at the screen's
+  edge gets one snapshot as it comes into view, and isn't refreshed after that. Every capture
+  makes video that macOS protects (streaming services' DRM) blink on screen, wherever it's
+  playing, so at rest Expanse captures nothing at all. Pictures are captured at the size they're
+  drawn.
 - **Sixteen streams at most.** The system service behind every screen capture on the Mac runs
   out of file descriptors at a few dozen streams, other apps' included. After that, new streams
   silently get no frames. So the sixteen most visible windows stream, and every other window in
