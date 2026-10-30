@@ -26,14 +26,7 @@ None open. If a new window doesn't make it onto the canvas, the log now says why
 5. **Low-motion mode** (asked 28 Oct): animated screen moves turned off, so glides, zooms and
    centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
    is on (Accessibility › Display), which Expanse doesn't follow yet.
-6. **Menu bar panel** (asked 29 Oct). The menu bar icon opens a glass panel instead of a menu, built
-   30 Oct to design A on the Expanse Menu Redesign canvas, plus a Take snapshot button. Updates
-   and Open at Login moved into a new Settings window. Not released yet: click through it first, then release.
-7. **Fewer kept window spots** (asked 30 Oct). Built, not released. A closed window's spot goes,
-   and an app you quit and open later opens beside what you're working on, not at an old spot.
-   Saved spots are only for a restart: windows coming back at launch, and apps reopened in its
-   first 3 minutes. Windows still out of view (hidden, minimised, another Space) keep theirs.
-8. **Regression tests** (asked 29 Oct). A unit test for each problem we fix, so a later change
+6. **Regression tests** (asked 29 Oct). A unit test for each problem we fix, so a later change
    can't quietly bring it back. There are no tests yet: the layout maths would move into its own
    target that tests can reach. Start with the recent fixes (the lock pile-up, Restore Layout,
    display changes and back).
@@ -61,24 +54,15 @@ None open. If a new window doesn't make it onto the canvas, the log now says why
 
 ## Done
 
-- Not released yet (30 Oct), the four bugs from 29 Oct:
-  - Steam's window is taken on. It's drawn by a helper process (Steam Helper) without a Dock icon,
-    which Expanse skipped; a helper inside an app's bundle now counts as that app.
-  - New windows not picked up, three causes. Helper-drawn windows like Steam's were never taken
-    on. A window whose app gets its Dock icon as it opens it waited up to 30s (measured 24s, now
-    3.5s), and one its app was slow to list waited up to 15s (measured 11s, now under 1s): both
-    are asked about again every 2s for their first minute. A window still left off the canvas
-    logs why ("not on the canvas" in Copy Logs).
-  - A window peeking in at the screen's edge, only a sliver of it showing, no longer covers the
-    minimap or Spaces panels: it stays parked and the backdrop draws it under them. (Checked:
-    a 120pt sliver over the minimap stays parked; 300pt showing, or a sliver elsewhere, is placed.)
-  - Restarts keep the layout: when the Mac logs out or restarts, Expanse puts windows back where
-    macOS had them before apps quit (they used to quit parked in the corner) and saves the
-    layout, and apps quitting on the way out keep their spots. A development build can open at
-    login now if you turn it on in Settings. Checked with a simulated restart, then a real one
-    (30 Oct): the layout came back. Windows the layout had no spot for (apps that open at login
-    with a window closed before the restart) landed on top of it; at launch they now go in a free
-    spot beside what's in view, as a window opened later does.
+- 0.1.31: The menu bar icon opens a glass panel instead of a menu (the canvas at a glance, the
+  main actions and switches, earlier layouts to restore, and a Take snapshot button); Open at Login
+  and updates moved to a new Settings window. Restarts keep the layout: windows go back where macOS
+  had them before apps quit, and windows the layout has no spot for (an app that opens at login)
+  go beside what's in view instead of on top of it. A closed window's spot goes, and an app you
+  quit and open later opens beside what you're working on; saved spots are only for a restart and
+  windows still out of view. Steam's window is taken on (a helper process draws it); a new window
+  its app is slow to list is picked up in seconds (was up to 30s); a window peeking in at the
+  screen's edge no longer covers the minimap or Spaces panels.
 - 0.1.30: Locking the Mac or sleeping its displays no longer moves windows (on 29 Oct macOS piled
   every parked window at one spot while the Mac was locked, and Expanse kept the pile as your
   layout); Restore Layout puts windows exactly where the snapshot had them.
