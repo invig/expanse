@@ -224,8 +224,11 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private static func configuration(pixelSize: CGSize, fps: Int) -> SCStreamConfiguration {
         let c = SCStreamConfiguration()
-        c.width = max(2, Int(pixelSize.width.rounded()))
-        c.height = max(2, Int(pixelSize.height.rounded()))
+        // Within what a picture can be (the largest texture there is): a window's size comes from
+        // its app, and converting NaN, infinity or a huge number to whole pixels traps.
+        func pixels(_ v: CGFloat) -> Int { v.isFinite ? Int(min(max(v.rounded(), 2), 16384)) : 2 }
+        c.width = pixels(pixelSize.width)
+        c.height = pixels(pixelSize.height)
         c.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, fps)))
         c.pixelFormat = kCVPixelFormatType_32BGRA
         // Each buffer in the pool is a full picture (tens of MB for a big window at full size): a

@@ -121,8 +121,10 @@ final class Updater {
         let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
         // Digits and dots only: it's compared, and named in what's downloaded.
         guard !version.isEmpty, version.allSatisfy({ $0.isNumber || $0 == "." }) else { return nil }
+        // GitHub gives the asset's real size: one far bigger than a release isn't downloaded at all.
         guard let zip = assets.lazy.compactMap({ asset -> URL? in
-            guard let name = asset["name"] as? String, name == "Expanse-\(version).zip" else { return nil }
+            guard let name = asset["name"] as? String, name == "Expanse-\(version).zip",
+                  let size = asset["size"] as? Int, size <= maxDownload else { return nil }
             return (asset["browser_download_url"] as? String).flatMap(URL.init(string:))
         }).first else { return nil }
         return Release(version: version, zip: zip, page: page)
@@ -138,19 +140,32 @@ final class Updater {
         return false
     }
 
+    /// A release zip is a few MB, about twice that unpacked. Anything far bigger isn't one, and
+    /// isn't unpacked: the signature is only checked once it is (see unpackedSize).
+    private static let maxDownload = 64 << 20, maxUnpacked = 256 << 20, maxFiles = 10_000
+
     /// Downloads and unpacks `release`, and hands back the app if it checks out (see verify).
     private func download(_ release: Release, completion: @escaping (URL?) -> Void) {
-        URLSession.shared.downloadTask(with: release.zip) { file, _, error in
+        LimitedDownload.start(release.zip, limit: Int64(Self.maxDownload)) { file, error in
             var app: URL?
             if let file {
+                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
+                let unpacked = size <= Self.maxDownload ? Self.unpackedSize(file) : nil
                 let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Expanse-update-\(UUID().uuidString)")
                 let unzip = Process()
                 unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
                 unzip.arguments = ["-x", "-k", file.path, folder.path]
-                if (try? unzip.run()) != nil {
+                if size > Self.maxDownload || unpacked.map({ $0.bytes > Self.maxUnpacked || $0.files > Self.maxFiles }) ?? true {
+                    logger.error("update \(release.version, privacy: .public) not unpacked: \(size) bytes, unpacked \(unpacked.map { "\($0.bytes) bytes in \($0.files) files" } ?? "unknown", privacy: .public)")
+                } else if (try? unzip.run()) != nil {
+                    // A zip can claim one size and unpack to far more: a minute at most.
+                    let limit = DispatchWorkItem { if unzip.isRunning { unzip.terminate() } }
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: limit)
                     unzip.waitUntilExit()
+                    limit.cancel()
                     let candidate = folder.appendingPathComponent("Expanse.app")
-                    if unzip.terminationStatus == 0, Self.verify(candidate, version: release.version) { app = candidate }
+                    if unzip.terminationReason == .exit, unzip.terminationStatus == 0,
+                       Self.verify(candidate, version: release.version) { app = candidate }
                 }
                 // Nothing to keep from a download that didn't check out.
                 if app == nil { try? FileManager.default.removeItem(at: folder) }
@@ -158,7 +173,25 @@ final class Updater {
                 logger.info("update download failed: \(error?.localizedDescription ?? "?", privacy: .public)")
             }
             DispatchQueue.main.async { completion(app) }
-        }.resume()
+        }
+    }
+
+    /// What the zip says it unpacks to, from its directory ("19 files, 7379131 bytes uncompressed,
+    /// ..."), or nil if it can't be read.
+    private static func unpackedSize(_ zip: URL) -> (files: Int, bytes: Int)? {
+        let info = Process(), out = Pipe()
+        info.executableURL = URL(fileURLWithPath: "/usr/bin/zipinfo")
+        info.arguments = ["-t", zip.path]
+        info.standardOutput = out
+        info.standardError = FileHandle.nullDevice
+        guard (try? info.run()) != nil else { return nil }
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        info.waitUntilExit()
+        let parts = text.split(separator: ",").map { $0.split(separator: " ") }
+        guard info.terminationStatus == 0, parts.count >= 2,
+              parts[0].count >= 2, parts[0][1] == "files" || parts[0][1] == "file", let files = Int(parts[0][0]),
+              parts[1].count >= 2, parts[1][1] == "bytes", let bytes = Int(parts[1][0]) else { return nil }
+        return (files, bytes)
     }
 
     /// Signed the way this copy is (same Developer ID and app: its designated requirement), every
@@ -227,5 +260,47 @@ final class Updater {
         alert.messageText = title
         alert.informativeText = text
         alert.runModal()
+    }
+}
+
+/// A download that stops once more than `limit` bytes have come, or are said to be coming.
+/// GitHub's size for the asset is checked first (see Updater.release(from:)); this counts what
+/// actually arrives.
+final class LimitedDownload: NSObject, URLSessionDownloadDelegate {
+    private let limit: Int64
+    /// The file (gone once this returns), or nil and why.
+    private let done: (URL?, Error?) -> Void
+    private var finished = false, stopped = false
+
+    private init(limit: Int64, done: @escaping (URL?, Error?) -> Void) {
+        self.limit = limit
+        self.done = done
+    }
+
+    static func start(_ url: URL, limit: Int64, done: @escaping (URL?, Error?) -> Void) {
+        // The session holds on to its delegate until it's invalidated, when the download ends.
+        let session = URLSession(configuration: .ephemeral, delegate: LimitedDownload(limit: limit, done: done), delegateQueue: nil)
+        session.downloadTask(with: url).resume()
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData _: Int64,
+                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard !stopped, totalBytesWritten > limit || totalBytesExpectedToWrite > limit else { return }
+        stopped = true
+        logger.error("update download stopped at \(totalBytesWritten) bytes (expected \(totalBytesExpectedToWrite)): more than a release")
+        downloadTask.cancel()
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        finished = true
+        done(location, nil)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if !finished {
+            finished = true
+            done(nil, error)
+        }
+        session.finishTasksAndInvalidate()
     }
 }

@@ -60,9 +60,38 @@ enum LayoutStore {
     private static var url: URL { folder.appendingPathComponent("layout.json") }
 
     static func load() -> SavedLayout? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(SavedLayout.self, from: data)
+        read(url)
     }
+
+    /// A layout file is the user's to edit, and any app of theirs could write it: what it says
+    /// moves other apps' windows, so only numbers within reason are taken (a window with others
+    /// is left out). Titles from older files, stored as they were, are hashed (see titleKey), so
+    /// the next save doesn't carry them on.
+    private static func read(_ url: URL) -> SavedLayout? {
+        guard let data = try? Data(contentsOf: url),
+              var layout = try? JSONDecoder().decode(SavedLayout.self, from: data),
+              plausible(layout.cameraX), plausible(layout.cameraY) else { return nil }
+        func valid(_ v: Double?) -> Double? { v.flatMap { plausible($0) ? $0 : nil } }
+        func size(_ v: Double?) -> Double? { valid(v).flatMap { $0 > 0 ? $0 : nil } }
+        if valid(layout.centerX) == nil || valid(layout.centerY) == nil { layout.centerX = nil; layout.centerY = nil }
+        if size(layout.fittedWidth) == nil || size(layout.fittedHeight) == nil { layout.fittedWidth = nil; layout.fittedHeight = nil }
+        layout.windows = layout.windows.compactMap { e in
+            guard plausible(e.x), plausible(e.y) else { return nil }
+            var e = e
+            if size(e.w) == nil || size(e.h) == nil { e.w = nil; e.h = nil }
+            if valid(e.hx) == nil || valid(e.hy) == nil { e.hx = nil; e.hy = nil }
+            if size(e.pw) == nil || size(e.ph) == nil { e.pw = nil; e.ph = nil }
+            if valid(e.ox) == nil || valid(e.oy) == nil || size(e.ow) == nil || size(e.oh) == nil {
+                e.ox = nil; e.oy = nil; e.ow = nil; e.oh = nil
+            }
+            if !e.title.isEmpty, !e.title.hasPrefix("sha256:"), !e.title.hasPrefix("hmac:") { e.title = titleKey(e.title) }
+            return e
+        }
+        return layout
+    }
+
+    /// Far bigger than any canvas gets (see AX.plausible).
+    private static func plausible(_ v: Double) -> Bool { v.isFinite && abs(v) <= 1_000_000 }
 
     static func save(_ layout: SavedLayout) {
         write(layout, to: url)
@@ -109,17 +138,61 @@ enum LayoutStore {
     }
 
     static func load(_ snapshot: Snapshot) -> SavedLayout? {
-        guard let data = try? Data(contentsOf: snapshot.url) else { return nil }
-        return try? JSONDecoder().decode(SavedLayout.self, from: data)
+        read(snapshot.url)
     }
 
     /// Window titles can be private (document names, mail subjects), so the layout file stores
-    /// a hash: enough to recognise the same window next time, not to read the title.
+    /// a hash: enough to recognise the same window next time, not to read the title. It's keyed
+    /// with a secret kept in your Keychain, so someone with only the file (a copy, a backup)
+    /// can't check a guessed title against it either.
     static func titleKey(_ title: String) -> String {
         guard !title.isEmpty else { return "" }
+        guard let secret = titleSecret else { return plainTitleKey(title) }
+        let code = HMAC<SHA256>.authenticationCode(for: Data(title.utf8), using: secret)
+        return "hmac:" + Data(code).prefix(12).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// What layouts saved before the key stored, and what's stored without the Keychain.
+    private static func plainTitleKey(_ title: String) -> String {
         let digest = SHA256.hash(data: Data(title.utf8))
         return "sha256:" + digest.prefix(12).map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Every form a saved entry for `title` can have.
+    private static func titleKeys(_ title: String) -> Set<String> {
+        title.isEmpty ? [""] : [titleKey(title), plainTitleKey(title)]
+    }
+
+    /// The key for title hashes, made on first use. Releases only: the Keychain lets the app that
+    /// made an item read it without asking, going by its signature, and asks for any other.
+    /// Every release is signed the same way, so none ever asks; a development build is signed
+    /// afresh (or ad hoc) as it's built, so it would, and hashes titles unkeyed as before. Both
+    /// kinds are recognised.
+    private static let titleSecret: SymmetricKey? = {
+        guard Updater.shared.isRelease else { return nil }
+        let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                   kSecAttrService as String: "com.invignation.expanse",
+                                   kSecAttrAccount as String: "window-title-key"]
+        var found: CFTypeRef?
+        var query = item
+        query[kSecReturnData as String] = true
+        let status = SecItemCopyMatching(query as CFDictionary, &found)
+        if status == errSecSuccess, let data = found as? Data, data.count == 32 { return SymmetricKey(data: data) }
+        guard status == errSecItemNotFound else {
+            logger.info("window title key not available (\(status)): titles hashed without it")
+            return nil
+        }
+        let key = SymmetricKey(size: .bits256)
+        var add = item
+        add[kSecValueData as String] = key.withUnsafeBytes { Data($0) }
+        add[kSecAttrLabel as String] = "Expanse window title key"
+        let added = SecItemAdd(add as CFDictionary, nil)
+        guard added == errSecSuccess else {
+            logger.info("window title key not saved (\(added)): titles hashed without it")
+            return nil
+        }
+        return key
+    }()
 
     /// Identifies a window for as long as its app keeps running.
     static func windowKey(pid: pid_t, id: CGWindowID) -> String { "\(pid):\(id)" }
@@ -155,10 +228,9 @@ enum LayoutStore {
             // and due back.
             return !open.contains(windowKey(pid: epid, id: eid)) && !exists(id: eid, pid: epid)
         }
-        let key = titleKey(title)
+        let keys = titleKeys(title)
         func fits(_ e: SavedLayout.Window) -> Bool { size.map { !tooSmall($0, for: e) } ?? true }
-        // Older layout files stored the title itself.
-        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && ($0.title == key || $0.title == title) && free($0) && fits($0) }) {
+        if let i = pool.firstIndex(where: { $0.bundleID == bundleID && keys.contains($0.title) && free($0) && fits($0) }) {
             return pool.remove(at: i)
         }
         if let i = pool.firstIndex(where: { $0.bundleID == bundleID && free($0) && fits($0) }) {

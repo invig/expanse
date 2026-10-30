@@ -154,12 +154,19 @@ you're zoomed out or gliding between windows, and only in memory.
 
 Window pictures exist only in memory, to draw the canvas. Nothing is recorded or sent anywhere.
 The one network request is a daily update check to GitHub, which you can turn off in Settings.
-The only files Expanse writes are its layouts in `~/Library/Application Support/Expanse/`:
-window positions and sizes, app names, and a scrambled fingerprint (a hash) of each window's
-title, which recognises the window without storing the title. If you turn on **Detailed Logging**
-(menu bar icon › Troubleshooting), it also keeps a log in `~/Library/Logs/Expanse/`: what it did
-with which app's windows, never their titles. It stays on your Mac unless you copy it into a bug
-report yourself.
+When there's a newer release, Expanse downloads its zip from GitHub, unpacks it in a temporary
+folder, and installs it only if it's signed by the same developer and notarised by Apple.
+
+Expanse keeps its layouts in `~/Library/Application Support/Expanse/`: window positions and
+sizes, app names, and a scrambled fingerprint (a hash) of each window's title, which recognises
+the window without storing the title. Expanse makes the fingerprint with a secret key kept in
+your Keychain, so the layout file on its own (a copy, a backup) can't even be used to check a
+guessed title. Its settings are where
+macOS keeps every app's (`~/Library/Preferences/com.invignation.expanse.plist`), and what it does
+goes to the macOS log, without window titles. If you turn on **Detailed Logging** (menu bar
+icon › Troubleshooting), it also keeps a log in `~/Library/Logs/Expanse/`: what it did with which
+app's windows, never their titles. It stays on your Mac unless you copy it into a bug report
+yourself.
 
 </details>
 
@@ -184,6 +191,8 @@ brew uninstall --zap --cask expanse
 ```
 
 Or drag Expanse from Applications to the Bin, and delete `~/Library/Application Support/Expanse`.
+Its window title key stays in your Keychain until you delete "Expanse window title key" in
+Keychain Access.
 
 </details>
 
@@ -205,6 +214,10 @@ open "expanse://resume"
 ```
 
 Also `enter`, `exit`, `fit`, `zoom?scale=0.5`, `pan?dx=100&dy=0` and `restore`.
+
+Any app on your Mac can open these links. They only do what you can do yourself with the canvas,
+the menu bar icon and the shortcuts. A web page can open them too, once you allow it in the
+browser's prompt, so a link that comes from a browser runs only after Expanse asks you as well.
 
 </details>
 

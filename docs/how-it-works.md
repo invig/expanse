@@ -27,7 +27,8 @@ Expanse runs on a stock Mac with System Integrity Protection on. Everything belo
   out of file descriptors at a few dozen streams, other apps' included. After that, new streams
   silently get no frames. So the sixteen most visible windows stream, and every other window in
   view is refreshed with one-off snapshots in turn. New windows get their first picture the same
-  way.
+  way. `defaults write com.invignation.expanse streamBudget -int 8` lowers the limit (a VM's
+  service gives out sooner); nothing raises it.
 - **Full-screen apps** get a Space of their own from macOS, so they aren't on the canvas. Expanse
   leaves their windows alone, and lists the Spaces (as the window server reports them, the list
   Mission Control shows) beside the minimap.
@@ -71,8 +72,9 @@ Expanse still reports itself trusted but sees no windows. To fix it, turn Expans
 again in System Settings › Privacy & Security › Accessibility.
 
 The log shows every window Expanse moves, resizes or follows, glide timings, and anything slow.
-Debugging URL commands are off by default; turn them on with
-`defaults write com.invignation.expanse debugURLCommands -bool true`. Then
+Development builds have debugging URL commands, off by default; turn them on with
+`defaults write com.invignation.expanse debugURLCommands -bool true`. (A release ignores that
+setting: any app could change it, then move other apps' windows through Expanse.) Then
 `open "expanse://dump"` writes the full layout to the log, and `screen?w=1512&h=982` pretends the
 display is that size. The others are `place`, `prefer`, `focus?id=` with a window ID,
 `appearance?mode=light|dark`, and `update?install=1` to update without asking.

@@ -2977,8 +2977,9 @@ final class CanvasController: NSObject {
     /// started after that never delivers a frame, without any error. So Expanse streams at most
     /// this many windows, the ones that matter most, leaving room for screen sharing and the
     /// like; the other windows in view get one-off pictures in turn. A VM's replayd gives out
-    /// sooner: `defaults write com.invignation.expanse streamBudget -int 8` lowers it.
-    private static let streamBudget = { let n = UserDefaults.standard.integer(forKey: "streamBudget"); return n > 0 ? n : 16 }()
+    /// sooner: `defaults write com.invignation.expanse streamBudget -int 8` lowers it. Only lowers:
+    /// any app could set it, and more would starve every other app's captures.
+    private static let streamBudget = { let n = UserDefaults.standard.integer(forKey: "streamBudget"); return (1...16).contains(n) ? n : 16 }()
 
     /// `reconfigure`: also bring running streams to the size they should have now (which restarts
     /// them; see WindowCapture.update). While the camera moves this is left to

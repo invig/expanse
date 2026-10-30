@@ -111,22 +111,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// expanse://toggle | enter | exit | fit | restore | menu | zoom?scale=0.5 | pan?dx=100&dy=0 | focus?app=Safari
     func application(_ application: NSApplication, open urls: [URL]) {
+        let browser = browserSending()
         for url in urls {
-            guard url.scheme == "expanse", let command = url.host else { continue }
-            let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                .queryItems ?? []).map { ($0.name, $0.value ?? "") })
+            // Known commands only: the name goes into the log, and the question a web page's link
+            // gets (see allowFromWebPage), so it mustn't be whatever the page likes.
+            guard url.scheme == "expanse", let command = url.host, Self.commands.contains(command) else {
+                logger.info("ignored unknown URL command")
+                continue
+            }
+            // A name given twice: the first counts (uniqueKeysWithValues traps on it, and any web
+            // page can open these links).
+            let query = Dictionary((URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { first, _ in first })
             // Finite numbers only: "nan" and "inf" parse as Doubles and would poison the camera.
             func number(_ key: String) -> CGFloat? {
                 guard let d = Double(query[key] ?? ""), d.isFinite else { return nil }
                 return CGFloat(d)
             }
-            logger.info("url command \(command, privacy: .public)")
+            logger.info("url command \(command, privacy: .public)\(browser.map { " from \($0)" } ?? "", privacy: .public)")
             // Any app or web page can open expanse:// links. Commands that reach into individual
-            // windows or fake the display are for debugging only and stay off unless enabled with
-            // `defaults write com.invignation.expanse debugURLCommands -bool true`.
+            // windows or fake the display are for debugging only (see debugURLCommands).
             let debugCommands: Set<String> = ["place", "prefer", "dump", "screen", "update", "appearance", "logging", "copylogs", "snapshot",
                                               "poweroff"]
-            if debugCommands.contains(command), !UserDefaults.standard.bool(forKey: "debugURLCommands") {
+            if debugCommands.contains(command), !Self.debugURLCommands {
                 logger.info("ignored debug URL command \(command, privacy: .public) (debugURLCommands is off)")
                 continue
             }
@@ -134,16 +141,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 logger.info("ignored URL command \(command, privacy: .public): Expanse starts once the walkthrough is done")
                 continue
             }
+            if let browser, !["welcome", "menu"].contains(command), !allowFromWebPage(command, in: browser) {
+                logger.info("URL command \(command, privacy: .public) from a web page in \(browser, privacy: .public): not allowed")
+                continue
+            }
             if command == "nav" { runURLCommand(command, query: query, number: number); continue }
             controller.whenIdle { [weak self] in self?.runURLCommand(command, query: query, number: number) }
         }
     }
 
+    /// The web browser a link came from, by name: the app that sent the Apple event it arrived in
+    /// (or whose helper did), if it opens web pages. Nil for anything else: a script, `open`, an
+    /// app like Raycast or Shortcuts.
+    private func browserSending() -> String? {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              let pid = event.attributeDescriptor(forKeyword: AEKeyword(keySenderPIDAttr))?.int32Value, pid > 0,
+              let app = CanvasController.appPID(owning: pid).flatMap(NSRunningApplication.init(processIdentifier:)),
+              let id = app.bundleIdentifier, let web = URL(string: "https://example.com"),
+              // By bundle ID: the same app can be listed at another path (Safari's is in a Cryptex).
+              NSWorkspace.shared.urlsForApplications(toOpen: web).contains(where: { Bundle(url: $0)?.bundleIdentifier == id })
+        else { return nil }
+        return app.localizedName ?? app.bundleIdentifier ?? "a web browser"
+    }
+
+    /// Scripts and apps run these links as they are. A web page can open one too, once you let
+    /// the browser, and could then rearrange your windows or switch apps while you type into one:
+    /// so you're asked, each time. (Zoomed out, the canvas would cover the question: no.)
+    private func allowFromWebPage(_ command: String, in browser: String) -> Bool {
+        guard !controller.isActive else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "A web page in \(browser) wants Expanse to run “\(command)”"
+        alert.informativeText = "Links from web pages can move your windows and switch apps. Allow it only if you clicked the link yourself, expecting this."
+        alert.addButton(withTitle: "Don't Allow")
+        alert.addButton(withTitle: "Allow")
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    private static let commands: Set<String> = [
+        "toggle", "centre", "center", "enter", "exit", "fit", "restore", "tidy", "layout", "welcome", "menu", "nav", "pause",
+        "resume", "zoom", "pan", "space", "focus",
+        "place", "prefer", "dump", "screen", "update", "appearance", "logging", "copylogs", "snapshot", "poweroff",
+    ]
+
+    /// Debugging URL commands, which reach into particular windows: development builds only, with
+    /// `defaults write com.invignation.expanse debugURLCommands -bool true`. A release ignores the
+    /// setting, since any app can change it and then move other apps' windows through Expanse.
+    private static var debugURLCommands: Bool { !Updater.shared.isRelease && UserDefaults.standard.bool(forKey: "debugURLCommands") }
+
     private func runURLCommand(_ command: String, query: [String: String], number: (String) -> CGFloat?) {
             // A window ID or an index: a whole number in range, or nothing. Converting anything
-            // else traps, and any web page can open these links.
+            // else traps, as does arithmetic on a huge index, and any web page can open these links.
             func windowID(_ key: String) -> CGWindowID? { number(key).flatMap { CGWindowID(exactly: $0) } }
-            func index(_ key: String) -> Int? { number(key).flatMap { Int(exactly: $0) } }
+            func index(_ key: String) -> Int? { number(key).flatMap { Int(exactly: $0) }.flatMap { (0...10_000).contains($0) ? $0 : nil } }
             switch command {
             case "toggle": controller.toggle()
             case "centre", "center": controller.centreCurrentWindow()
@@ -154,8 +204,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "tidy": controller.tidy()
             case "layout":
                 // A layout snapshot, 0 the newest (see Earlier layouts in the menu bar panel).
-                let all = LayoutStore.snapshots(), n = Int(number("snapshot") ?? 0)
-                if all.indices.contains(n), let layout = LayoutStore.load(all[n]) { controller.restoreLayout(layout) }
+                let all = LayoutStore.snapshots(), n = query["snapshot"] == nil ? 0 : index("snapshot")
+                if let n, all.indices.contains(n), let layout = LayoutStore.load(all[n]) { controller.restoreLayout(layout) }
             case "welcome": showWelcome()
             case "menu": menuPanel?.show()
             case "place":
@@ -171,7 +221,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let dirs: [String: CanvasController.Direction] = ["left": .left, "right": .right, "up": .up, "down": .down]
                 if let d = dirs[query["dir"] ?? ""] {
                     // Optional delay, so a test hop runs after the URL hand-off has settled.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + Double(number("delay") ?? 0)) { [weak self] in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Double(min(max(number("delay") ?? 0, 0), 10))) { [weak self] in
                         self?.controller.navigate(d)
                     }
                 }
@@ -207,7 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let name = (query["name"] ?? "").lowercased()
                 let position = (index("index") ?? 0) - 1
                 if let space = (name == "expanse" || name == "canvas" ? spaces.first { $0.id == controller.canvasDesktop } : nil)
-                    ?? spaces.first(where: { $0.name.lowercased() == name })
+                    ?? spaces.first(where: { !name.isEmpty && $0.name.lowercased() == name })
                     ?? (spaces.indices.contains(position) ? spaces[position] : nil) {
                     controller.switchToSpace(space)
                 }
@@ -215,7 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // ?app=Safari (its front window), or ?id= a window ID (from dump). Reaching into a
                 // particular window is for debugging, like place and prefer (see above).
                 let name = (query["app"] ?? "").lowercased()
-                let id = UserDefaults.standard.bool(forKey: "debugURLCommands") ? windowID("id") : nil
+                let id = Self.debugURLCommands ? windowID("id") : nil
                 if let w = controller.windows.last(where: { id != nil ? $0.id == id : $0.appName.lowercased() == name }) {
                     controller.focus(w)
                 }

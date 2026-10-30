@@ -49,12 +49,18 @@ enum AX {
         return id
     }
 
+    /// A window's position and size come from its app, so they're taken within reason only: never
+    /// NaN or infinity, nor far beyond any screen (such a value wrecks the layout, and converting
+    /// it to whole pixels traps).
+    private static func plausible(_ v: CGFloat) -> Bool { v.isFinite && abs(v) <= 1_000_000 }
+
     static func position(_ element: AXUIElement) -> CGPoint? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &value) == .success,
               let v = value, CFGetTypeID(v) == AXValueGetTypeID() else { return nil }
         var p = CGPoint.zero
-        return AXValueGetValue(v as! AXValue, .cgPoint, &p) ? p : nil
+        guard AXValueGetValue(v as! AXValue, .cgPoint, &p), plausible(p.x), plausible(p.y) else { return nil }
+        return p
     }
 
     /// In macOS full screen, on a Space of its own.
@@ -68,7 +74,8 @@ enum AX {
         guard AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &value) == .success,
               let v = value, CFGetTypeID(v) == AXValueGetTypeID() else { return nil }
         var s = CGSize.zero
-        return AXValueGetValue(v as! AXValue, .cgSize, &s) ? s : nil
+        guard AXValueGetValue(v as! AXValue, .cgSize, &s), plausible(s.width), plausible(s.height) else { return nil }
+        return s
     }
 
     static func subrole(_ element: AXUIElement?) -> String? {
