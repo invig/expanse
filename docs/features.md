@@ -54,17 +54,10 @@ None open. If a new window doesn't make it onto the canvas, the log now says why
 
 ## Done
 
-- Not released yet (30 Oct): security review fixes. A malformed `expanse://` link (a name given
-  twice, a huge or minimum-integer index) no longer crashes Expanse; an invalid `layout?snapshot=`
-  does nothing instead of restoring the newest layout. Debugging URL commands work in development
-  builds only (any app could turn the setting on). A window size or position its app reports as
-  NaN, infinite or absurd is ignored, and capture sizes are capped. Layout files are checked on
-  load (out-of-range numbers dropped, titles from older files hashed). The stream limit can only
-  be lowered. An update far bigger than a release isn't downloaded (GitHub's size for it, and
-  the bytes as they come) or unpacked (the zip's own size), and unpacking stops after a minute.
-  A link from a web browser runs only once you say so (scripts and other apps' links run as
-  before). Releases key title hashes with a secret in the Keychain, so the layout file alone
-  can't confirm a guessed title (development builds don't: the Keychain would ask each build).
+- 0.1.33: Security fixes. An `expanse://` link from a web page runs only once you allow it, and
+  a malformed one can't crash Expanse. Window titles in the layout file are hashed with a secret
+  key kept in your Keychain, so the file alone can't be used to check a guessed title. Layout
+  files, window sizes an app reports, and updates are all checked against sensible limits.
 - 0.1.32: For about 20s after unlocking or waking the Mac, ⌘-Tab (or the Dock) to an app whose
   window was off screen did nothing, and an app opened then landed in the middle of the view, over
   your windows. Now the view goes to the app you switch to, and a new window goes beside what
