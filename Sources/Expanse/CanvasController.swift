@@ -42,6 +42,10 @@ final class CanvasController: NSObject {
     /// a row that got none (to about five minutes), so a capture service that's stuck isn't sent a
     /// new request every ten seconds.
     private static let scanTimeout: TimeInterval = 10
+    /// The wait after `unanswered` scans in a row got no answer (or were refused).
+    private static func scanWait(after unanswered: Int) -> TimeInterval {
+        scanTimeout * pow(2, Double(min(unanswered, 5)))
+    }
     private var unansweredScans = 0
     /// No scan before this (CACurrentMediaTime): macOS refused the last one (see sync).
     private var scanRetryAt: CFTimeInterval = 0
@@ -192,12 +196,17 @@ final class CanvasController: NSObject {
     /// expanse://screen?w=&h= pretends the display is this size, to exercise display changes.
     private var screenOverride: CGSize?
 
-    private var screenSize: CGSize { screenOverride ?? screen.frame.size }
+    /// Tests pretend the whole display: its frame and the part apps use (less the menu bar and Dock).
+    private var displayOverride: (frame: CGRect, usable: CGRect)?
+    private var screenFrame: CGRect { displayOverride?.frame ?? screen.frame }
+    private var usableFrame: CGRect { displayOverride?.usable ?? screen.visibleFrame }
+
+    private var screenSize: CGSize { screenOverride ?? screenFrame.size }
 
     /// The overlay area in global CG coordinates (top-left origin, y down): the screen minus the menu bar.
     var viewport: CGRect {
-        let f = screen.frame
-        let menuBar = max(0, f.maxY - screen.visibleFrame.maxY)
+        let f = screenFrame
+        let menuBar = max(0, f.maxY - usableFrame.maxY)
         return CGRect(x: 0, y: menuBar, width: screenSize.width, height: screenSize.height - menuBar)
     }
 
@@ -221,7 +230,7 @@ final class CanvasController: NSObject {
     /// inside the usable screen area (30-50pt up), and a Dock that's always shown shrinks that
     /// area: so the corner is measured from the usable area's edges, not the screen's.
     private var parkingCorner: CGPoint {
-        let f = screen.frame, usable = screen.visibleFrame
+        let f = screenFrame, usable = usableFrame
         let right = screenRectCG.maxX - max(0, f.maxX - usable.maxX)
         let bottom = screenRectCG.maxY - max(0, usable.minY - f.minY)
         return CGPoint(x: right - 40, y: bottom - 80)
@@ -234,7 +243,7 @@ final class CanvasController: NSObject {
     }
 
     private func updateOverlayFrame() {
-        let f = screen.frame
+        let f = screenFrame
         let vp = viewport
         overlay.setFrame(NSRect(x: f.minX + vp.minX, y: f.maxY - vp.maxY, width: vp.width, height: vp.height), display: false)
         view.menuBarHeight = vp.minY
@@ -374,18 +383,7 @@ final class CanvasController: NSObject {
         view.render()
         overlay.level = canvasLevel
         overlay.orderFrontRegardless()
-        // Same as Tidy Up: sizes back to what you chose (capped at this screen), overlaps pushed
-        // apart, clusters pulled back to the standard gap.
-        fitLayoutToScreen(tidy: false, rederiving: [])
-        // The screen changed size: the window you were in goes in the middle. Fitting moves windows
-        // (the layout tightens on a smaller screen), so the old middle can be somewhere else now.
-        if screenResized, let w = centreAfterResize ?? currentWindow(), windows.contains(where: { $0 === w }) {
-            camera = focusCamera(for: w)
-            viewPlaced = false
-            logger.info("display change: centred on \(w.appName, privacy: .public)[\(w.id)]")
-        }
-        screenResized = false
-        centreAfterResize = nil
+        fitToNewScreen()
         view.render()
         // Like a glide's last step: input waits while the real windows move in the background.
         gliding = true
@@ -403,6 +401,23 @@ final class CanvasController: NSObject {
                 }
             }
         }
+    }
+
+    /// The layout fitted to the new screen, and the window you were in centred if the screen
+    /// changed size (see restoreSizesAndPlace; a function of its own for the tests).
+    private func fitToNewScreen() {
+        // Same as Tidy Up: sizes back to what you chose (capped at this screen), overlaps pushed
+        // apart, clusters pulled back to the standard gap.
+        fitLayoutToScreen(tidy: false, rederiving: [])
+        // The screen changed size: the window you were in goes in the middle. Fitting moves windows
+        // (the layout tightens on a smaller screen), so the old middle can be somewhere else now.
+        if screenResized, let w = centreAfterResize ?? currentWindow(), windows.contains(where: { $0 === w }) {
+            camera = focusCamera(for: w)
+            viewPlaced = false
+            logger.info("display change: centred on \(w.appName, privacy: .public)[\(w.id)]")
+        }
+        screenResized = false
+        centreAfterResize = nil
     }
 
     /// commit(), with the Accessibility calls off the main thread (see commitAsync): with dozens
@@ -519,12 +534,7 @@ final class CanvasController: NSObject {
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification,
                                                           object: nil, queue: .main) { [weak self] note in
-            // A pid can be reused by a later app; don't hand it this app's observer.
-            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
-                self?.observers[app.processIdentifier] = nil
-                self?.focusedWindowByApp[app.processIdentifier] = nil
-                if self?.isPaused == false { self?.appQuit(app) }
-            }
+            self?.appTerminated(note)
         }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appActivated(_:)),
                                                           name: NSWorkspace.didActivateApplicationNotification, object: nil)
@@ -548,6 +558,16 @@ final class CanvasController: NSObject {
             self?.fullScreenChanging()
             self?.canvasFollowsSpace()
             self?.syncSoon()
+        }
+    }
+
+    /// An app quit (NSWorkspace's notification; see start).
+    private func appTerminated(_ note: Notification) {
+        // A pid can be reused by a later app; don't hand it this app's observer.
+        if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+            observers[app.processIdentifier] = nil
+            focusedWindowByApp[app.processIdentifier] = nil
+            if !isPaused { appQuit(app) }
         }
     }
 
@@ -988,8 +1008,13 @@ final class CanvasController: NSObject {
     /// `userDragging`: the mouse button was down when the change was reported.
     private func realWindowChanged(_ w: ManagedWindow, _ element: AXUIElement, userDragging: Bool) {
         guard !isPaused else { return }
-        let size = AX.size(element)
-        let position = AX.position(element)
+        realWindowChanged(w, element, userDragging: userDragging, size: AX.size(element), position: AX.position(element))
+    }
+
+    /// The same, given the real window's size and position (tests give them, and the Space's kind).
+    private func realWindowChanged(_ w: ManagedWindow, _ element: AXUIElement, userDragging: Bool,
+                                   size: CGSize?, position: CGPoint?,
+                                   inFullScreenSpace: @autoclosure () -> Bool = Spaces.inFullScreenSpace) {
         if !userDragging {
             // Going full screen: it has a Space of its own now and keeps its spot on the canvas,
             // and for a moment other windows may move too (see movedAroundFullScreen).
@@ -1004,7 +1029,7 @@ final class CanvasController: NSObject {
             }
             // (Not where Expanse just put it: that's its own move, putting it back included.)
             let ours = w.lastPlaced.flatMap { last in position.map { last.distance(to: $0) < 2 } } ?? false
-            if !ours, movedByFullScreen(w, inFullScreenSpace: Spaces.inFullScreenSpace) { return }
+            if !ours, movedByFullScreen(w, inFullScreenSpace: inFullScreenSpace()) { return }
         }
         let selfResized = !userDragging && resizedItself(w, to: size)
         if let size {
@@ -1069,9 +1094,8 @@ final class CanvasController: NSObject {
     /// where its app wanted it (apps often position a new window a moment late, after Expanse put
     /// it in free space). Neither is followed; the caller puts it back. Only once in a while per
     /// window, so an app that insists on its own spot gets its way rather than a tug of war.
-    /// Returns true if the caller should put it back.
-    private func cameBack(_ w: ManagedWindow, to p: CGPoint) -> Bool {
-        let now = CACurrentMediaTime()
+    /// Returns true if the caller should put it back. (`now`: tests pass a later time.)
+    private func cameBack(_ w: ManagedWindow, to p: CGPoint, now: CFTimeInterval = CACurrentMediaTime()) -> Bool {
         let toBefore = w.placedBefore.map { $0.distance(to: p) < 2 } ?? false
         guard toBefore || now - w.addedAt < 5, now - w.lastPlacedAt < 10, now - w.cameBackAt > 10 else { return false }
         logger.info("\(w.appName, privacy: .public)[\(w.id)] moved to \(NSStringFromPoint(p), privacy: .public) by its app right after being placed; putting it back")
@@ -1391,19 +1415,26 @@ final class CanvasController: NSObject {
     }
 
     private func restore(_ ax: AXUIElement, to original: CGRect, currentSize: CGSize) {
-        var r = original
-        guard r.width > 0, r.height > 0 else { return }
-        let vp = viewport
-        // If the original spot is gone (smaller screen now), bring it back into view.
-        if !r.insetBy(dx: 40, dy: 40).intersects(vp) {
-            r.origin = CGPoint(x: vp.midX - r.width / 2, y: vp.minY + 40)
-        }
+        guard let r = restoredFrame(original) else { return }
         // Move first: macOS won't grow a window past the screen edge from the parking corner.
         AX.setPosition(ax, r.origin)
         if r.size != currentSize {
             AX.setSize(ax, r.size)
             AX.setPosition(ax, r.origin)
         }
+    }
+
+    /// Where restore puts a window back: its macOS frame, or in view if that spot is gone. Nil
+    /// for a frame with no size.
+    private func restoredFrame(_ original: CGRect) -> CGRect? {
+        var r = original
+        guard r.width > 0, r.height > 0 else { return nil }
+        let vp = viewport
+        // If the original spot is gone (smaller screen now), bring it back into view.
+        if !r.insetBy(dx: 40, dy: 40).intersects(vp) {
+            r.origin = CGPoint(x: vp.midX - r.width / 2, y: vp.minY + 40)
+        }
+        return r
     }
 
     /// Run `action` now, or once the glide in flight has handed back. Camera actions mid-glide
@@ -1422,7 +1453,7 @@ final class CanvasController: NSObject {
         guard !isPaused else { return }
         // Until Screen Recording is in effect (granted, and Expanse relaunched), any
         // ScreenCaptureKit call makes macOS show its permission prompt again, every time.
-        guard CGPreflightScreenCaptureAccess() else { completion?(); return }
+        guard Self.screenCaptureAllowed ?? CGPreflightScreenCaptureAccess() else { completion?(); return }
         // Window discovery queries every app; don't let it land in the middle of a glide.
         if gliding || view.isDragging || (animation != nil && completion == nil) {
             if let completion { pendingSyncCompletions.append(completion) }
@@ -1457,13 +1488,13 @@ final class CanvasController: NSObject {
         syncToken += 1
         let token = syncToken
         latestScan.withLock { $0 = token }
-        let wait = Self.scanTimeout * pow(2, Double(min(unansweredScans, 5)))
+        let wait = Self.scanWait(after: unansweredScans)
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             guard let self, self.syncing, self.syncToken == token else { return }
             self.unansweredScans += 1
             // No pictures or new streams either until it answers (see WindowCapture.overdue).
             WindowCapture.replaydStuck = true
-            logger.notice("window scan got no answer in \(Int(wait))s (macOS's capture service stuck or restarting?); the next waits \(Int(Self.scanTimeout * pow(2, Double(min(self.unansweredScans, 5)))))s")
+            logger.notice("window scan got no answer in \(Int(wait))s (macOS's capture service stuck or restarting?); the next waits \(Int(Self.scanWait(after: self.unansweredScans)))s")
             self.syncing = false
             self.syncSoon()
         }
@@ -1501,9 +1532,7 @@ final class CanvasController: NSObject {
                     // Windows moved (a glide, leaving the canvas) or the camera changed while the
                     // scan ran: its frames say where windows were, which would read as you moving
                     // them. Take only what's new from it and scan again.
-                    let liveNow = !self.isActive && !self.suspendTracking
-                    let stale = input.live != liveNow
-                        || (liveNow && (input.moves != ManagedWindow.moves || input.camera != self.camera))
+                    let stale = self.scanIsStale(input)
                     // Tracked windows this scan leaves out for being full screen (see wentFullScreen).
                     self.wentFullScreen.formUnion(fullScreen.filter { id in self.windows.contains { $0.id == id } })
                     self.apply(found, ax: ax, stale: stale)
@@ -1518,7 +1547,7 @@ final class CanvasController: NSObject {
                     // Refused (Screen Recording not allowed, or its approval waiting on you): asking
                     // again at once only asks again. Back off as for a scan with no answer, and
                     // capture nothing meanwhile.
-                    self.scanRetryAt = CACurrentMediaTime() + Self.scanTimeout * pow(2, Double(min(self.unansweredScans, 5)))
+                    self.scanRetryAt = CACurrentMediaTime() + Self.scanWait(after: self.unansweredScans)
                     self.unansweredScans += 1
                     WindowCapture.replaydStuck = true
                 }
@@ -1528,6 +1557,16 @@ final class CanvasController: NSObject {
                 completions.forEach { $0() }
             }
         }
+    }
+
+    /// Tests stand in for Screen Recording being allowed or not (nil: ask macOS).
+    private static var screenCaptureAllowed: Bool?
+
+    /// The scan's frames are out of date: windows moved, or the camera changed, while it ran (see sync).
+    private func scanIsStale(_ input: ScanInput) -> Bool {
+        let liveNow = !isActive && !suspendTracking
+        return input.live != liveNow
+            || (liveNow && (input.moves != ManagedWindow.moves || input.camera != camera))
     }
 
     /// `tracked`: Expanse already manages this window. The on-screen test is only for discovering
@@ -2980,7 +3019,9 @@ final class CanvasController: NSObject {
     /// like; the other windows in view get one-off pictures in turn. A VM's replayd gives out
     /// sooner: `defaults write com.invignation.expanse streamBudget -int 8` lowers it. Only lowers:
     /// any app could set it, and more would starve every other app's captures.
-    private static let streamBudget = { let n = UserDefaults.standard.integer(forKey: "streamBudget"); return (1...16).contains(n) ? n : 16 }()
+    private static let streamBudget = streamBudget(setting: UserDefaults.standard.integer(forKey: "streamBudget"))
+    /// The setting counts from 1 to 16; anything else (unset, 0, more) is 16.
+    private static func streamBudget(setting n: Int) -> Int { (1...16).contains(n) ? n : 16 }
 
     /// `reconfigure`: also bring running streams to the size they should have now (which restarts
     /// them; see WindowCapture.update). While the camera moves this is left to
@@ -3377,9 +3418,7 @@ final class CanvasController: NSObject {
     /// from a full-screen app's Space until it's shown again, and gives the keyboard to an app on
     /// the new Space. (Moving to a full-screen app's Space, the canvas is on its way out.)
     private func canvasFollowsSpace() {
-        // Not once leaving has got to moving windows (gliding): the window you picked has the
-        // keyboard, or is about to.
-        guard isActive, !gliding, Spaces.current?.isDesktop == true else { return }
+        guard canvasShouldFollowSpace else { return }
         overlay.orderOut(nil)
         overlay.orderFrontRegardless()
         // Once another app is active, ordinary activation is refused; the window server's own
@@ -3389,6 +3428,11 @@ final class CanvasController: NSObject {
         overlay.makeKeyAndOrderFront(nil)
         overlay.makeFirstResponder(view)
     }
+
+    /// Whether the canvas comes along (see canvasFollowsSpace; a property of its own for the tests).
+    /// Not once leaving has got to moving windows (gliding): the window you picked has the
+    /// keyboard, or is about to.
+    private var canvasShouldFollowSpace: Bool { isActive && !gliding && Spaces.current?.isDesktop == true }
 
     /// The desktop Space the canvas's windows are on.
     var canvasDesktop: UInt64? {
@@ -3919,9 +3963,13 @@ final class CanvasController: NSObject {
         view.bringToFront(w.node)
     }
 
+    /// Tests: told what close would close, and nothing closes.
+    static var closeOverride: (([ManagedWindow]) -> Void)?
+
     /// Presses each window's own close button, so apps ask about unsaved changes as usual. Off the
     /// main thread: pressing waits on the app.
     func close(_ ws: [ManagedWindow]) {
+        if let closeOverride = Self.closeOverride { closeOverride(ws); return }
         let elements = ws.compactMap(\.ax)
         guard !elements.isEmpty else { return }
         if elements.count > 1 { logger.info("closing \(elements.count) windows") }

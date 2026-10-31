@@ -1,0 +1,521 @@
+import Testing
+import AppKit
+import ScreenCaptureKit
+@_private(sourceFile: "CanvasController.swift") @testable import Expanse
+@_private(sourceFile: "CanvasView.swift") @testable import Expanse
+@_private(sourceFile: "SpacesBar.swift") @testable import Expanse
+@_private(sourceFile: "SpaceSwipe.swift") @testable import Expanse
+
+/// docs/regression/spaces-and-full-screen.md. The window server's Spaces are stood in for by
+/// Spaces.displaysOverride, swipes are caught (SpaceSwipe.post) rather than posted, and nothing
+/// switches Spaces, activates an app or moves a real window.
+@MainActor @Suite("SPACES: Full-screen apps and Spaces", .serialized)
+struct SPACESTests {
+
+    // MARK: Helpers
+
+    /// A desktop, as CGSCopyManagedDisplaySpaces lists it.
+    private static func desktop(_ id: UInt64, managedKey: Bool = false) -> [String: Any] {
+        [managedKey ? "ManagedSpaceID" : "id64": NSNumber(value: id), "type": NSNumber(value: 0)]
+    }
+
+    /// A full-screen app's Space: one tile per app (two for split view), each app with a pid and
+    /// window of its own.
+    private static func fullScreen(_ id: UInt64, pid: pid_t, window: CGWindowID, apps: [String],
+                                   topLevel: Bool = true) -> [String: Any] {
+        let tiles: [[String: Any]] = apps.enumerated().map { i, name in
+            ["appName": name, "pid": NSNumber(value: pid + Int32(i)), "TileWindowID": NSNumber(value: window + UInt32(i))]
+        }
+        var s: [String: Any] = ["id64": NSNumber(value: id), "type": NSNumber(value: 4),
+                                "TileLayoutManager": ["TileSpaces": tiles]]
+        if topLevel {
+            s["pid"] = NSNumber(value: pid)
+            s["fs_wid"] = NSNumber(value: window)
+        }
+        return s
+    }
+
+    private static func display(_ spaces: [[String: Any]], current: UInt64, currentType: Int? = nil,
+                                id: String = "Main") -> [String: Any] {
+        var cur: [String: Any] = ["id64": NSNumber(value: current)]
+        if let currentType { cur["type"] = NSNumber(value: currentType) }
+        return ["Display Identifier": id, "Spaces": spaces, "Current Space": cur]
+    }
+
+    /// Desktop 1 (the canvas's), Safari full screen, Desktop 2; `current` is showing.
+    private static func usual(current: UInt64) -> [[String: Any]] {
+        [display([desktop(1), fullScreen(5, pid: 90_501, window: 77, apps: ["Safari"]), desktop(3)], current: current)]
+    }
+
+    /// Runs `body` with the window server's Spaces stood in for by `displays`.
+    private static func withSpaces<T>(_ displays: [[String: Any]], _ body: () throws -> T) rethrows -> T {
+        let old = Spaces.displaysOverride
+        Spaces.displaysOverride = displays
+        defer { Spaces.displaysOverride = old }
+        return try body()
+    }
+
+    /// Runs `body` with swipes caught instead of posted; returns what it returned and the events.
+    private static func catchingSwipes<T>(_ body: () throws -> T) rethrows -> (T, [CGEvent]) {
+        let old = SpaceSwipe.post
+        var posted: [CGEvent] = []
+        SpaceSwipe.post = { posted.append($0) }
+        defer { SpaceSwipe.post = old }
+        let result = try body()
+        return (result, posted)
+    }
+
+    /// Stops everything the test left scheduled, and pauses the canvas so anything queued does nothing.
+    private static func finish(_ c: CanvasController) {
+        c.relayoutWork.forEach { $0.cancel() }
+        [c.saveWork, c.reassertWork, c.putBackWork, c.focusSettleWork, c.syncSoonWork, c.recheckWork,
+         c.streamingWork, c.lingerWork].forEach { $0?.cancel() }
+        c.cancelAnimation()
+        c.snapshotTimer?.invalidate()
+        c.isPaused = true
+    }
+
+    /// Window IDs no real window has (the window server's are far smaller), for anything that asks
+    /// the window server about a canvas window's Space.
+    private static let firstID: CGWindowID = 3_900_000_001
+
+    // MARK: SPACES-01
+
+    @Test("SPACES-01 Spaces.fullScreenWindows lists every full-screen window, on every display")
+    func spaces01a() {
+        let displays = [
+            Self.display([Self.desktop(1), Self.fullScreen(5, pid: 90_501, window: 77, apps: ["Safari"]),
+                          Self.fullScreen(6, pid: 90_502, window: 88, apps: ["Safari", "Notes"])], current: 1),
+            Self.display([Self.desktop(7), Self.fullScreen(8, pid: 90_503, window: 99, apps: ["Mail"], topLevel: false)],
+                         current: 7, id: "Other"),
+        ]
+        Self.withSpaces(displays) {
+            #expect(Spaces.fullScreenWindows() == [77, 88, 89, 99])
+        }
+        Self.withSpaces([Self.display([Self.desktop(1), Self.desktop(2)], current: 1)]) {
+            #expect(Spaces.fullScreenWindows().isEmpty)
+        }
+    }
+
+    @Test("SPACES-01 On a full-screen app's Space no scan is applied: the canvas keeps its windows")
+    func spaces01b() throws {
+        try Self.withSpaces(Self.usual(current: 5)) {
+            try #require(Spaces.inFullScreenSpace)
+            let ws = (0..<3).map { Fake.window(id: Self.firstID + CGWindowID($0), canvas: CGRect(x: 700 * $0, y: 0, width: 600, height: 400)) }
+            let c = TestCanvas.make(windows: ws)
+            defer { Self.finish(c) }
+            let before = c.windows.map(\.canvasFrame)
+            var done = false
+            c.sync { done = true }
+            #expect(done)
+            #expect(!c.syncing)
+            #expect(c.syncToken == 0, "no scan started")
+            #expect(c.windows.map(\.id) == ws.map(\.id))
+            #expect(c.windows.map(\.canvasFrame) == before)
+        }
+    }
+
+    // MARK: SPACES-02
+
+    @Test("SPACES-02 Spaces.list reads desktops and full-screen apps in Mission Control's order")
+    func spaces02a() {
+        Self.withSpaces(Self.usual(current: 3)) {
+            let (spaces, active) = Spaces.list()
+            #expect(spaces.map(\.id) == [1, 5, 3])
+            #expect(spaces.map(\.name) == ["Desktop 1", "Safari", "Desktop 2"])
+            #expect(spaces.map(\.isDesktop) == [true, false, true])
+            #expect(spaces[1].pid == 90_501 && spaces[1].window == 77)
+            #expect(active == 3)
+            #expect(Spaces.current?.name == "Desktop 2")
+            #expect(Spaces.order().ids == [1, 5, 3] && Spaces.order().active == 3)
+        }
+    }
+
+    @Test("SPACES-02 Split view is named for both apps; one desktop is just Desktop")
+    func spaces02b() {
+        let displays = [
+            // Another display first: the main one is found by its identifier.
+            Self.display([Self.desktop(40), Self.desktop(41)], current: 40, id: "Other"),
+            Self.display([Self.desktop(1, managedKey: true),
+                          Self.fullScreen(6, pid: 90_502, window: 88, apps: ["Safari", "Notes"]),
+                          Self.fullScreen(8, pid: 90_503, window: 99, apps: ["Mail"], topLevel: false),
+                          ["id64": NSNumber(value: 9), "type": NSNumber(value: 2)]],   // a kind Expanse doesn't show
+                         current: 6),
+        ]
+        Self.withSpaces(displays) {
+            let (spaces, active) = Spaces.list()
+            #expect(spaces.map(\.name) == ["Desktop", "Safari & Notes", "Mail"])
+            #expect(spaces.map(\.id) == [1, 6, 8])
+            // Without the Space's own pid and window, the first tile's.
+            #expect(spaces[2].pid == 90_503 && spaces[2].window == 99)
+            #expect(active == 6)
+        }
+    }
+
+    @Test("SPACES-02 The Spaces panel names each Space and rings the current one")
+    func spaces02c() {
+        let spaces = [Spaces.Space(id: 1, pid: nil, window: nil, name: "Expanse"),
+                      Spaces.Space(id: 3, pid: nil, window: nil, name: "Desktop 2"),
+                      Spaces.Space(id: 5, pid: 90_501, window: 77, name: "Safari")]
+        let bar = SpacesBar()
+        bar.update(spaces: spaces, active: 5, wallpaper: nil)
+        #expect(!bar.isHidden)
+        #expect(bar.labels.map { $0.string as? String } == ["Expanse", "Desktop 2", "Safari"])
+        #expect(bar.rings.map(\.isHidden) == [true, true, false])
+        #expect(bar.rings[2].borderWidth == 2.5)
+        #expect(bar.labels[2].font as? NSFont == NSFont.systemFont(ofSize: 11, weight: .semibold))
+        #expect(bar.labels[0].font as? NSFont == NSFont.systemFont(ofSize: 11, weight: .regular))
+        // Hovering a tile gives it a quiet ring.
+        bar.hovered = 1
+        #expect(bar.rings.map(\.isHidden) == [true, false, false])
+        #expect(bar.rings[1].borderWidth == 1.5)
+    }
+
+    // MARK: SPACES-03
+
+    @Test("SPACES-03 No Spaces panel when there's only one Space")
+    func spaces03() {
+        let bar = SpacesBar()
+        bar.update(spaces: [Spaces.Space(id: 1, pid: nil, window: nil, name: "Expanse")], active: 1, wallpaper: nil)
+        #expect(bar.isHidden)
+        #expect(bar.tile(at: CGPoint(x: 64, y: 60)) == nil)
+        bar.update(spaces: [], active: nil, wallpaper: nil)
+        #expect(bar.isHidden)
+        bar.update(spaces: [Spaces.Space(id: 1, pid: nil, window: nil, name: "Expanse"),
+                            Spaces.Space(id: 2, pid: nil, window: nil, name: "Desktop 2")], active: 1, wallpaper: nil)
+        #expect(!bar.isHidden)
+        #expect(bar.tile(at: CGPoint(x: 64, y: 60)) == 0)
+    }
+
+    // MARK: SPACES-04
+
+    /// A window-list entry, as CGWindowListCopyWindowInfo gives it.
+    private static func listed(_ id: CGWindowID, pid: pid_t, width: Double = 800, height: Double = 600) -> [String: Any] {
+        [kCGWindowNumber as String: NSNumber(value: id), kCGWindowOwnerPID as String: NSNumber(value: pid),
+         kCGWindowLayer as String: NSNumber(value: 0),
+         kCGWindowBounds as String: ["X": 0.0, "Y": 0.0, "Width": width, "Height": height]]
+    }
+
+    @Test("SPACES-04 Spaces.someWindow returns nil for an empty Space")
+    func spaces04() {
+        let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first?.processIdentifier
+        let pid = finder ?? 1
+        let info = [Self.listed(10, pid: pid), Self.listed(11, pid: pid)]
+        let spaceOf: [CGWindowID: [UInt64]] = [10: [1], 11: [5]]
+        #expect(Spaces.someWindow(on: 3, info: info, spacesOf: { spaceOf[$0] ?? [] }) == nil)
+        #expect(Spaces.someWindow(on: 3, info: [], spacesOf: { _ in [] }) == nil)
+        // (Finder, an app in the Dock, has a window on Space 1.)
+        if finder != nil {
+            #expect(Spaces.someWindow(on: 1, info: info, spacesOf: { spaceOf[$0] ?? [] })?.id == 10)
+        }
+    }
+
+    @Test("SPACES-08 Switching to another desktop picks its front-most window (logic)")
+    func spaces08() throws {
+        let finder = try #require(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first)
+        let pid = finder.processIdentifier
+        // Front to back: a small panel, then two windows on Desktop 2, one on Desktop 1.
+        let info = [Self.listed(20, pid: pid, width: 80, height: 40), Self.listed(21, pid: pid),
+                    Self.listed(22, pid: pid), Self.listed(23, pid: pid)]
+        let spaceOf: [CGWindowID: [UInt64]] = [20: [3], 21: [1], 22: [3], 23: [3]]
+        let found = Spaces.someWindow(on: 3, info: info, spacesOf: { spaceOf[$0] ?? [] })
+        #expect(found?.id == 22)
+        #expect(found?.pid == pid)
+        // Not another app's that isn't in the Dock.
+        let agent = [Self.listed(30, pid: Fake.firstPID)]
+        #expect(Spaces.someWindow(on: 3, info: agent, spacesOf: { _ in [3] }) == nil)
+    }
+
+    // MARK: SPACES-10, SPACES-19
+
+    private static let mainFrame = CGRect(x: 0, y: 0, width: 1512, height: 982)
+
+    @Test("SPACES-10 With the pointer on another display, go(to:) returns false and posts nothing")
+    func spaces10() {
+        Self.withSpaces(Self.usual(current: 1)) {
+            for pointer in [CGPoint(x: -1, y: 500), CGPoint(x: 1513, y: 500), CGPoint(x: 700, y: -1), CGPoint(x: 700, y: 983),
+                            CGPoint(x: 2400, y: 700)] {
+                let (went, posted) = Self.catchingSwipes { SpaceSwipe.go(to: 3, pointer: pointer, mainScreen: Self.mainFrame) }
+                #expect(!went, "pointer at \(pointer)")
+                #expect(posted.isEmpty)
+            }
+            // Nor for a Space that isn't on the main display, or with no display at all.
+            let (other, posted) = Self.catchingSwipes {
+                [SpaceSwipe.go(to: 40, pointer: CGPoint(x: 700, y: 500), mainScreen: Self.mainFrame),
+                 SpaceSwipe.go(to: 3, pointer: CGPoint(x: 700, y: 500), mainScreen: nil)]
+            }
+            #expect(other == [false, false])
+            #expect(posted.isEmpty)
+        }
+    }
+
+    @Test("SPACES-19 go(to:) counts the pointer on the screen's edges as on the main display")
+    func spaces19() {
+        Self.withSpaces(Self.usual(current: 1)) {
+            let f = Self.mainFrame
+            // Already there: true as soon as the pointer counts as on the main display (nothing to post).
+            for pointer in [CGPoint(x: f.maxX, y: f.maxY), CGPoint(x: f.maxX, y: f.minY), CGPoint(x: f.minX, y: f.maxY),
+                            CGPoint(x: f.minX, y: f.minY), CGPoint(x: f.midX, y: f.maxY)] {
+                let (went, posted) = Self.catchingSwipes { SpaceSwipe.go(to: 1, pointer: pointer, mainScreen: f) }
+                #expect(went, "pointer at \(pointer)")
+                #expect(posted.isEmpty)
+            }
+            // Resting in the top-right corner, a switch is made: two Spaces on, two swipes.
+            let (went, posted) = Self.catchingSwipes { SpaceSwipe.go(to: 3, pointer: CGPoint(x: f.maxX, y: f.maxY), mainScreen: f) }
+            #expect(went)
+            #expect(posted.count == 2 * 3 * (SpaceSwipe.modern ? 2 : 1))
+        }
+    }
+
+    // MARK: SPACES-11
+
+    @Test("SPACES-11 The swipe's direction follows the Natural scrolling setting")
+    func spaces11() throws {
+        func sign(right: Bool, natural: Bool) throws -> (progress: Double, velocity: Double) {
+            let events = try #require(SpaceSwipe.modernEvents(phase: SpaceSwipe.ended, right: right, natural: natural))
+            #expect(events.count == 2)
+            return (events[0].getDoubleValueField(SpaceSwipe.progressField), events[0].getDoubleValueField(SpaceSwipe.velocityX))
+        }
+        // Right is negative with Natural scrolling on, positive with it off; left the opposite.
+        let rightNatural = try sign(right: true, natural: true)
+        let rightPlain = try sign(right: true, natural: false)
+        let leftNatural = try sign(right: false, natural: true)
+        let leftPlain = try sign(right: false, natural: false)
+        #expect(rightNatural.progress < 0 && rightNatural.velocity < 0)
+        #expect(rightPlain.progress > 0 && rightPlain.velocity > 0)
+        #expect(leftNatural.progress > 0 && leftNatural.velocity > 0)
+        #expect(leftPlain.progress < 0 && leftPlain.velocity < 0)
+    }
+
+    // MARK: SPACES-15, SPACES-20
+
+    @Test("SPACES-15 The canvas comes along to a desktop Space (logic)")
+    func spaces15() {
+        let c = TestCanvas.make()
+        defer { Self.finish(c) }
+        c.isActive = true
+        Self.withSpaces(Self.usual(current: 1)) { #expect(c.canvasShouldFollowSpace) }
+        Self.withSpaces(Self.usual(current: 3)) { #expect(c.canvasShouldFollowSpace) }
+        // Not to a full-screen app's Space (the canvas is on its way out), nor at 100%.
+        Self.withSpaces(Self.usual(current: 5)) { #expect(!c.canvasShouldFollowSpace) }
+        c.isActive = false
+        Self.withSpaces(Self.usual(current: 1)) { #expect(!c.canvasShouldFollowSpace) }
+    }
+
+    @Test("SPACES-20 canvasFollowsSpace doesn't bring the canvas back once leaving is under way")
+    func spaces20() {
+        let c = TestCanvas.make()
+        defer { Self.finish(c) }
+        c.isActive = true
+        c.gliding = true
+        Self.withSpaces(Self.usual(current: 1)) {
+            #expect(!c.canvasShouldFollowSpace)
+        }
+    }
+
+    // MARK: SPACES-16
+
+    @Test("SPACES-16 Focus taken by another of the app's windows just after a pick is given back")
+    func spaces16a() {
+        let a = Fake.window(id: Self.firstID, appName: "TextEdit", canvas: CGRect(x: 4000, y: 0, width: 600, height: 400))
+        let b = Fake.window(id: Self.firstID + 1, appName: "TextEdit", canvas: CGRect(x: 100, y: 100, width: 600, height: 400))
+        let c = TestCanvas.make(windows: [a, b])
+        defer { Self.finish(c) }
+        c.lastFocusRequest = (a.id, a.pid, CACurrentMediaTime(), false)
+        c.focusSettled(on: b.id)
+        #expect(c.lastFocusRequest?.id == a.id)
+        #expect(c.lastFocusRequest?.reasserted == true)
+        #expect(c.focusedWindowByApp[a.pid] == a.id)
+        #expect(!c.isActive && !c.gliding)
+    }
+
+    @Test("SPACES-16 Focus is given back only once, within a second, and only from the same app")
+    func spaces16b() {
+        Env.withDefaults(["autoCentre": false]) {
+            let a = Fake.window(id: Self.firstID, appName: "TextEdit", canvas: CGRect(x: 4000, y: 0, width: 600, height: 400))
+            // B, and another app's window, fully on screen: the view has no reason to move.
+            let b = Fake.window(id: Self.firstID + 1, appName: "TextEdit", canvas: CGRect(x: 100, y: 100, width: 600, height: 400))
+            let other = Fake.window(id: Self.firstID + 2, pid: Fake.firstPID + 1, bundleID: "com.example.other", appName: "Other",
+                                    canvas: CGRect(x: 800, y: 100, width: 600, height: 400))
+            let c = TestCanvas.make(windows: [a, b, other])
+            defer { Self.finish(c) }
+            let now = CACurrentMediaTime()
+            // Already given back once: the app wins.
+            c.lastFocusRequest = (a.id, a.pid, now, true)
+            c.focusSettled(on: b.id)
+            #expect(c.lastFocusRequest?.reasserted == true && c.lastFocusRequest?.at == now)
+            #expect(c.focusedWindowByApp[a.pid] == nil)
+            // More than a second after the pick.
+            c.lastFocusRequest = (a.id, a.pid, now - 1.2, false)
+            c.focusSettled(on: b.id)
+            #expect(c.lastFocusRequest?.reasserted == false)
+            #expect(c.focusedWindowByApp[a.pid] == nil)
+            // Another app's window.
+            c.lastFocusRequest = (a.id, a.pid, CACurrentMediaTime(), false)
+            c.focusSettled(on: other.id)
+            #expect(c.lastFocusRequest?.reasserted == false)
+            #expect(c.focusedWindowByApp[a.pid] == nil)
+            #expect(!c.isActive && !c.gliding)
+        }
+    }
+
+    // MARK: SPACES-17, SPACES-24
+
+    @Test("SPACES-17 At 100%, the tile of the Space you're on does nothing")
+    func spaces17a() {
+        Self.withSpaces(Self.usual(current: 1)) {
+            let c = TestCanvas.make()
+            defer { Self.finish(c) }
+            let camera = c.camera
+            c.switchToSpace(Spaces.Space(id: 1, pid: nil, window: nil, name: "Expanse"))
+            #expect(!c.isActive)
+            #expect(c.animation == nil)
+            #expect(c.camera == camera)
+            #expect(c.lastFocusRequest == nil && c.activationRequest == nil)
+        }
+    }
+
+    @Test("SPACES-17 Zoomed out, the current Space's tile just leaves the canvas")
+    func spaces17b() {
+        // On the canvas's desktop, and over a full-screen app (back to it).
+        for current: UInt64 in [1, 5] {
+            Self.withSpaces(Self.usual(current: current)) {
+                let c = TestCanvas.make()
+                defer { Self.finish(c) }
+                c.isActive = true
+                c.camera = Camera(origin: CGPoint(x: -500, y: -300), scale: 0.4)
+                let space = Spaces.list().spaces.first { $0.id == current }!
+                let (_, posted) = Self.catchingSwipes { c.switchToSpace(space) }
+                #expect(posted.isEmpty, "no switch")
+                let a = c.animation
+                #expect(a?.handsBack == true, "leaving the canvas, on Space \(current)")
+                #expect(a?.to.scale == 1)
+            }
+        }
+    }
+
+    @Test("SPACES-24 Clicking Expanse's own Space tile goes back to 100%, to the view you left (logic)")
+    func spaces24() {
+        Self.withSpaces(Self.usual(current: 1)) {
+            let c = TestCanvas.make()
+            defer { Self.finish(c) }
+            let left = Camera(origin: CGPoint(x: 300, y: 200), scale: 1)
+            c.isActive = true
+            c.returnCamera = left
+            c.camera = Camera(origin: CGPoint(x: -500, y: -300), scale: 0.4)
+            let (_, posted) = Self.catchingSwipes { c.switchToSpace(Spaces.Space(id: 1, pid: nil, window: nil, name: "Expanse")) }
+            #expect(posted.isEmpty)
+            #expect(c.animation?.to == left)
+            #expect(c.animation?.handsBack == true)
+            // Leaving it is still pending (the zoom back in); nothing else happened.
+            #expect(c.lastFocusRequest == nil)
+        }
+    }
+
+    // MARK: SPACES-18
+
+    @Test("SPACES-18 Spaces.inFullScreenSpace reads the current Space's kind")
+    func spaces18a() {
+        Self.withSpaces(Self.usual(current: 5)) { #expect(Spaces.inFullScreenSpace) }
+        Self.withSpaces(Self.usual(current: 3)) { #expect(!Spaces.inFullScreenSpace) }
+        // The current Space's own kind, when the window server gives it.
+        Self.withSpaces([Self.display([Self.desktop(1)], current: 1, currentType: 4)]) { #expect(Spaces.inFullScreenSpace) }
+        Self.withSpaces([Self.display([Self.desktop(1), Self.fullScreen(5, pid: 90_501, window: 77, apps: ["Safari"])],
+                                      current: 5, currentType: 0)]) { #expect(!Spaces.inFullScreenSpace) }
+    }
+
+    @Test("SPACES-18 No window scans while a full-screen app's Space is showing")
+    func spaces18b() throws {
+        try Self.withSpaces(Self.usual(current: 5)) {
+            try #require(Spaces.inFullScreenSpace)
+            let c = TestCanvas.make()
+            defer { Self.finish(c) }
+            var done = 0
+            c.sync { done += 1 }
+            c.sync { done += 1 }
+            #expect(done == 2, "whoever waits gets an answer straight away")
+            #expect(!c.syncing)
+            #expect(c.syncToken == 0, "no scan started")
+            #expect(!c.hasSynced)
+            // Only the Spaces panel is brought up to date (once Screen Recording is allowed, which
+            // sync checks first).
+            if CGPreflightScreenCaptureAccess() {
+                #expect(c.view.spacesBar.spaces.map(\.id) == [1, 5, 3])
+                #expect(c.view.spacesBar.active == 5)
+            }
+        }
+    }
+
+    // MARK: SPACES-21
+
+    @Test("SPACES-21 Moves while a full-screen window comes or goes are noted to be put back")
+    func spaces21a() {
+        let w = Fake.window(id: Self.firstID, appName: "Brave Browser", canvas: CGRect(x: 3000, y: 0, width: 800, height: 600))
+        let c = TestCanvas.make(windows: [w])
+        defer { Self.finish(c) }
+        // Long after any full-screen change, on a desktop: not ours to put back.
+        #expect(!c.movedByFullScreen(w, inFullScreenSpace: false))
+        #expect(c.putBackWork == nil)
+        // On a full-screen app's Space it is.
+        #expect(c.movedByFullScreen(w, inFullScreenSpace: true))
+        c.movedAroundFullScreen = []
+        // And for 1.5s after a full-screen window comes or goes.
+        c.fullScreenChanging()
+        #expect(abs(c.fullScreenSettleUntil - CACurrentMediaTime() - 1.5) < 0.1)
+        #expect(c.movedByFullScreen(w, inFullScreenSpace: false))
+        #expect(c.movedAroundFullScreen == [w.id])
+        #expect(c.putBackWork != nil)
+        c.fullScreenSettleUntil = CACurrentMediaTime() - 0.01
+        c.movedAroundFullScreen = []
+        #expect(!c.movedByFullScreen(w, inFullScreenSpace: false))
+    }
+
+    @Test("SPACES-21 Half a second after the moves stop, they're put back where the canvas has them")
+    func spaces21b() throws {
+        let ws = [Fake.window(id: Self.firstID, appName: "Brave Browser", canvas: CGRect(x: 3000, y: 0, width: 800, height: 600)),
+                  Fake.window(id: Self.firstID + 1, appName: "Brave Browser", canvas: CGRect(x: 100, y: 100, width: 800, height: 600)),
+                  Fake.window(id: Self.firstID + 2, appName: "Notes", canvas: CGRect(x: 1000, y: 100, width: 400, height: 300))]
+        let c = TestCanvas.make(windows: ws)
+        defer { Self.finish(c) }
+        for w in ws { w.lastPlaced = CGPoint(x: w.canvasFrame.minX, y: w.canvasFrame.minY + c.viewport.minY) }
+        let canvas = ws.map(\.canvasFrame)
+        c.fullScreenChanging()
+        // The browser fits its windows onto the screen, in a burst.
+        #expect(c.movedByFullScreen(ws[0], inFullScreenSpace: false))
+        let first = try #require(c.putBackWork)
+        #expect(c.movedByFullScreen(ws[1], inFullScreenSpace: false))
+        let last = try #require(c.putBackWork)
+        #expect(first.isCancelled && !last.isCancelled, "timed from the last move")
+        // Zoomed out, so the put-back itself moves nothing; the next commit does.
+        c.isActive = true
+        last.perform()
+        #expect(c.movedAroundFullScreen.isEmpty)
+        #expect(ws[0].lastPlaced == nil && ws[1].lastPlaced == nil)
+        #expect(ws[2].lastPlaced != nil, "a window that didn't move is left alone")
+        #expect(ws.map(\.canvasFrame) == canvas, "not followed")
+    }
+
+    // MARK: SPACES-23
+
+    @Test("SPACES-23 A scan just after full screen doesn't take where macOS set a window down (logic)")
+    func spaces23() {
+        let w = Fake.window(id: Self.firstID, appName: "Calendar", canvas: CGRect(x: 100, y: 100, width: 800, height: 600))
+        let c = TestCanvas.make(windows: [w])
+        defer { Self.finish(c) }
+        c.firstSync = false
+        let setDown = CGRect(x: 400, y: 300, width: 800, height: 600)   // where macOS put it
+        let scan = [Fake.scWindow(id: w.id, appName: "Calendar", frame: setDown)]
+        // Just back from full screen (not placed since).
+        w.lastPlaced = nil
+        c.fullScreenChanging()
+        c.apply(scan, ax: CanvasController.AXSnapshot())
+        #expect(w.canvasFrame.origin == CGPoint(x: 100, y: 100))
+        #expect(c.movedAroundFullScreen == [w.id])
+        // Long after, a window found elsewhere was moved by you or its app: followed.
+        c.putBackWork?.cancel()
+        c.movedAroundFullScreen = []
+        c.fullScreenSettleUntil = 0
+        c.apply(scan, ax: CanvasController.AXSnapshot())
+        #expect(w.canvasFrame.origin == c.canvasPoint(forGlobal: setDown.origin))
+    }
+}

@@ -34,7 +34,14 @@ final class Updater {
     }
 
     /// Signed with a Developer ID: a release, which has releases to update to.
-    let isRelease: Bool = {
+    let isRelease: Bool
+
+    convenience init() { self.init(isRelease: Updater.signedWithDeveloperID()) }
+
+    /// Tests can make one that takes itself for a release.
+    init(isRelease: Bool) { self.isRelease = isRelease }
+
+    private static func signedWithDeveloperID() -> Bool {
         var me: SecCode?
         var developerID: SecRequirement?
         guard SecCodeCopySelf([], &me) == errSecSuccess, let me,
@@ -42,7 +49,7 @@ final class Updater {
                                              [], &developerID) == errSecSuccess
         else { return false }
         return SecCodeCheckValidity(me, [], developerID) == errSecSuccess
-    }()
+    }
 
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0" }
 
@@ -215,12 +222,12 @@ final class Updater {
     /// Swaps the downloaded copy in for this one and relaunches. Where this copy can't be
     /// replaced (a folder you can't write to, or run straight from a download), opens the
     /// release on GitHub instead.
-    func install() {
+    /// `current`: this copy (tests give a copy of their own).
+    func install(replacing current: URL = Bundle.main.bundleURL) {
         guard let ready else { return }
-        let current = Bundle.main.bundleURL
         let folder = current.deletingLastPathComponent()
         guard !current.path.contains("/AppTranslocation/"), FileManager.default.isWritableFile(atPath: folder.path) else {
-            NSWorkspace.shared.open(ready.release.page)
+            Self.openPage(ready.release.page)
             return
         }
         let staged = folder.appendingPathComponent(".Expanse-update.app")
@@ -239,7 +246,7 @@ final class Updater {
             try? FileManager.default.removeItem(at: ready.app.deletingLastPathComponent())
             self.ready = nil
             Self.tell("Couldn't install Expanse \(ready.release.version)", error.localizedDescription)
-            NSWorkspace.shared.open(ready.release.page)
+            Self.openPage(ready.release.page)
         }
     }
 
@@ -254,13 +261,15 @@ final class Updater {
         NSApp.terminate(nil)
     }
 
-    private static func tell(_ title: String, _ text: String) {
+    /// An alert, and a release's page in the browser. Tests take note of them instead.
+    private static var tell: (_ title: String, _ text: String) -> Void = { title, text in
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = text
         alert.runModal()
     }
+    private static var openPage: (URL) -> Void = { NSWorkspace.shared.open($0) }
 }
 
 /// A download that stops once more than `limit` bytes have come, or are said to be coming.

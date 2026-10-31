@@ -35,17 +35,23 @@ enum Wallpaper {
                 DispatchQueue.main.async { completion(fromFile(screen: screen)) }
                 return
             }
-            let config = SCStreamConfiguration()
-            config.width = Int(size.width * scale)
-            config.height = Int(size.height * scale)
-            config.showsCursor = false
-            config.capturesAudio = false
+            let config = configuration(size: size, scale: scale)
             SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: display, including: desktop),
                                              configuration: config) { image, error in
                 if let error { logger.error("wallpaper capture failed: \(error.localizedDescription)") }
                 DispatchQueue.main.async { completion(image ?? fromFile(screen: screen)) }
             }
         }
+    }
+
+    /// The desktop at the screen's pixel size: no cursor, no audio.
+    private static func configuration(size: CGSize, scale: CGFloat) -> SCStreamConfiguration {
+        let config = SCStreamConfiguration()
+        config.width = Int(size.width * scale)
+        config.height = Int(size.height * scale)
+        config.showsCursor = false
+        config.capturesAudio = false
+        return config
     }
 
     private static func fromFile(screen: NSScreen) -> CGImage? {

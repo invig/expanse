@@ -42,7 +42,12 @@ final class HotCorner {
 
     private func poll() {
         guard corner != .off, let f = NSScreen.screens.first?.frame else { return }
-        let p = NSEvent.mouseLocation
+        poll(pointer: NSEvent.mouseLocation, buttons: NSEvent.pressedMouseButtons, screen: f, now: CACurrentMediaTime())
+    }
+
+    /// One look at the pointer `p` (AppKit coordinates), with `buttons` held, on the display `f`.
+    /// Apart from poll so tests can give it pointer positions and times.
+    private func poll(pointer p: CGPoint, buttons: Int, screen f: CGRect, now: CFTimeInterval) {
         let t = Self.tolerance
         let left = p.x <= f.minX + t, right = p.x >= f.maxX - t
         let top = p.y >= f.maxY - t, bottom = p.y <= f.minY + t
@@ -54,13 +59,12 @@ final class HotCorner {
         case .bottomLeft: bottom && left
         case .bottomRight: bottom && right
         }
-        guard inCorner, NSEvent.pressedMouseButtons == 0 else {
+        guard inCorner, buttons == 0 else {
             enteredAt = nil
             armed = true
             return
         }
         guard armed else { return }
-        let now = CACurrentMediaTime()
         if let enteredAt {
             if now - enteredAt >= Self.dwell {
                 armed = false

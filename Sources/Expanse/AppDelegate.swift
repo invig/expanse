@@ -82,6 +82,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         askedToCheck = false
         UserDefaults.standard.set(release.version, forKey: key)
+        switch Self.askToInstall(release) {
+        case .alertFirstButtonReturn: Updater.shared.install()
+        case .alertThirdButtonReturn: NSWorkspace.shared.open(release.page)
+        default: break
+        }
+    }
+
+    /// The question itself: Install and Relaunch, Later or What's New. Tests answer it instead.
+    private static var askToInstall: (Updater.Release) -> NSApplication.ModalResponse = { release in
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Expanse \(release.version) is ready to install"
@@ -89,11 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Install and Relaunch")
         alert.addButton(withTitle: "Later")
         alert.addButton(withTitle: "What's New")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn: Updater.shared.install()
-        case .alertThirdButtonReturn: NSWorkspace.shared.open(release.page)
-        default: break
-        }
+        return alert.runModal()
     }
 
     private func checkForUpdates() {
@@ -187,7 +192,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Debugging URL commands, which reach into particular windows: development builds only, with
     /// `defaults write com.invignation.expanse debugURLCommands -bool true`. A release ignores the
     /// setting, since any app can change it and then move other apps' windows through Expanse.
-    private static var debugURLCommands: Bool { !Updater.shared.isRelease && UserDefaults.standard.bool(forKey: "debugURLCommands") }
+    private static var debugURLCommands: Bool { debugCommandsAllowed(release: Updater.shared.isRelease) }
+    /// The same for a release or a development build (tests ask about both).
+    private static func debugCommandsAllowed(release: Bool) -> Bool { !release && UserDefaults.standard.bool(forKey: "debugURLCommands") }
 
     private func runURLCommand(_ command: String, query: [String: String], number: (String) -> CGFloat?) {
             // A window ID or an index: a whole number in range, or nothing. Converting anything
@@ -218,11 +225,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     controller.setPreferredSize(id, CGSize(width: w, height: h))
                 }
             case "nav":
-                let dirs: [String: CanvasController.Direction] = ["left": .left, "right": .right, "up": .up, "down": .down]
-                if let d = dirs[query["dir"] ?? ""] {
-                    // Optional delay, so a test hop runs after the URL hand-off has settled.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + Double(min(max(number("delay") ?? 0, 0), 10))) { [weak self] in
-                        self?.controller.navigate(d)
+                if let hop = Self.navHop(query, number: number) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + hop.delay) { [weak self] in
+                        self?.controller.navigate(hop.direction)
                     }
                 }
             case "update":
@@ -251,14 +256,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "zoom": if let s = number("scale") { controller.zoomAnimated(to: s) }
             case "pan": controller.pan(by: CGVector(dx: number("dx") ?? 0, dy: number("dy") ?? 0))
             case "space":
-                // A Space by name ("Expanse" for the canvas's, "Canvas" too as it used to be called,
-                // "Desktop", or a full-screen app's), or by its place in Mission Control's order, from 1.
-                let spaces = Spaces.list().spaces
-                let name = (query["name"] ?? "").lowercased()
-                let position = (index("index") ?? 0) - 1
-                if let space = (name == "expanse" || name == "canvas" ? spaces.first { $0.id == controller.canvasDesktop } : nil)
-                    ?? spaces.first(where: { !name.isEmpty && $0.name.lowercased() == name })
-                    ?? (spaces.indices.contains(position) ? spaces[position] : nil) {
+                if let space = Self.space(named: query["name"] ?? "", at: index("index"), in: Spaces.list().spaces,
+                                          canvas: controller.canvasDesktop) {
                     controller.switchToSpace(space)
                 }
             case "focus":
@@ -271,6 +270,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             default: break
             }
+    }
+
+    /// expanse://nav: the direction, and how long to wait first (0-10s).
+    private static func navHop(_ query: [String: String], number: (String) -> CGFloat?) -> (direction: CanvasController.Direction, delay: Double)? {
+        let dirs: [String: CanvasController.Direction] = ["left": .left, "right": .right, "up": .up, "down": .down]
+        guard let d = dirs[query["dir"] ?? ""] else { return nil }
+        // Optional delay, so a test hop runs after the URL hand-off has settled.
+        return (d, Double(min(max(number("delay") ?? 0, 0), 10)))
+    }
+
+    /// expanse://space: a Space by name ("Expanse" for the canvas's, "Canvas" too as it used to be
+    /// called, "Desktop", or a full-screen app's), or by its place in Mission Control's order, from 1.
+    private static func space(named name: String, at index: Int?, in spaces: [Spaces.Space],
+                              canvas: @autoclosure () -> UInt64?) -> Spaces.Space? {
+        let name = name.lowercased()
+        let position = (index ?? 0) - 1
+        return (name == "expanse" || name == "canvas" ? spaces.first { $0.id == canvas() } : nil)
+            ?? spaces.first(where: { !name.isEmpty && $0.name.lowercased() == name })
+            ?? (spaces.indices.contains(position) ? spaces[position] : nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

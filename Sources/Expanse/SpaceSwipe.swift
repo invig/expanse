@@ -10,12 +10,13 @@ import AppKit
 enum SpaceSwipe {
     /// Steps to `target` on the main display, instantly. False if it can't from here (the pointer
     /// on another display, or `target` not on the main display); then nothing is posted.
-    static func go(to target: UInt64) -> Bool {
+    /// `pointer` and `mainScreen`: where the pointer is and the main display's frame, unless a test gives its own.
+    static func go(to target: UInt64, pointer p: CGPoint = NSEvent.mouseLocation,
+                   mainScreen: CGRect? = NSScreen.screens.first?.frame) -> Bool {
         let (ids, current) = Spaces.order()
         // The pointer's on the main display, edges included (it rests on the top edge in a top hot corner).
-        let p = NSEvent.mouseLocation
         guard let from = ids.firstIndex(where: { $0 == current }), let to = ids.firstIndex(of: target),
-              let f = NSScreen.screens.first?.frame, p.x >= f.minX, p.x <= f.maxX, p.y >= f.minY, p.y <= f.maxY
+              let f = mainScreen, p.x >= f.minX, p.x <= f.maxX, p.y >= f.minY, p.y <= f.maxY
         else { return false }
         guard from != to else { return true }
         let right = to > from
@@ -51,9 +52,12 @@ enum SpaceSwipe {
         let events = phases.compactMap { modern ? modernEvents(phase: $0, right: right) : legacyEvents(phase: $0, right: right) }
         // All or nothing: a began without its ended would leave the Dock mid-gesture.
         guard events.count == phases.count else { return false }
-        for pair in events { pair.forEach { $0.post(tap: .cgSessionEventTap) } }
+        for pair in events { pair.forEach(post) }
         return true
     }
+
+    /// Posts a swipe's event. Tests catch them instead, so nothing reaches the Dock.
+    static var post: (CGEvent) -> Void = { $0.post(tap: .cgSessionEventTap) }
 
     /// Before macOS 27: the dock event alone, with a huge velocity.
     private static func legacyEvents(phase: Int64, right: Bool) -> [CGEvent]? {
@@ -68,11 +72,12 @@ enum SpaceSwipe {
     /// macOS 27: the fields a real trackpad swipe carries, nearly no travel (so nothing is drawn
     /// in between), the fling on the ended phase only, the trackpad data attached, and a
     /// companion gesture event (the Dock ignores a swipe without one).
-    private static func modernEvents(phase: Int64, right: Bool) -> [CGEvent]? {
+    /// `natural`: the Natural scrolling setting, unless a test gives its own.
+    private static func modernEvents(phase: Int64, right: Bool,
+                                     natural: Bool = CFPreferencesCopyAppValue("com.apple.swipescrolldirection" as CFString,
+                                                                               kCFPreferencesAnyApplication) as? Bool ?? true) -> [CGEvent]? {
         guard let e = dockEvent(phase: phase), let companion = CGEvent(source: nil) else { return nil }
         // Right is negative with Natural scrolling on (the default), positive with it off.
-        let natural = CFPreferencesCopyAppValue("com.apple.swipescrolldirection" as CFString,
-                                                kCFPreferencesAnyApplication) as? Bool ?? true
         let sign = (right ? -1.0 : 1.0) * (natural ? 1 : -1)
         e.setDoubleValueField(progressField, value: sign * 0.000016)
         e.setIntegerValueField(phaseMirror, value: phase)

@@ -4,11 +4,26 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Bugs
 
-1. **To check** (found writing the regression tests, 30 Oct; not confirmed): Restore all windows
-   while zoomed out doesn't update the windows' spots on the canvas; `expanse://fit` and `zoom`
-   move the view at 100% without opening the canvas; the README's Questions section and
-   how-it-works still name the old menu items and `update?install=1`. Details in
-   [regression/README.md](regression/README.md).
+1. **A layout that hasn't changed is saved, and snapshotted, as if it had** (found by the
+   regression tests, 31 Oct; PERSIST-21). The check compares JSON whose key order varies between
+   encodes; once the newest snapshot is 15 minutes old, an unchanged layout pushes out an older
+   one. Fix: `.sortedKeys` on that encoder.
+2. **Welcome from the panel while zoomed out opens behind a window** (found by the end-to-end
+   tests, 31 Oct; UI-11). Leaving the canvas hands focus back after the walkthrough has opened.
+   Fix: show it from `exit(then:)`.
+3. **Pictures stay frozen after replayd crashes while zoomed out** (end-to-end, 31 Oct;
+   CAPTURE-21). Nothing restarts the streams until the camera moves.
+4. **Leaving the canvas can glide away from where you were looking** (end-to-end, 31 Oct;
+   NAV-17). The hand-back focus goes to the front window in view; if it's cut off, auto-centre
+   glides to it.
+5. **The end of a drag in the 20s after a display change isn't followed** (end-to-end, 31 Oct;
+   DISPLAY-01). The canvas spot ends a few points short of the window.
+6. **To check** (found writing the regression tests, 30–31 Oct; not confirmed): Restore all
+   windows while zoomed out doesn't update the windows' spots on the canvas; `expanse://fit` and
+   `zoom` move the view at 100% without opening the canvas; capture may spin every 10ms while
+   replayd is stuck; the Expanse tile may point at a full-screen Space just after a window goes
+   full screen; the README's Questions section and how-it-works still name old menu items and
+   `update?install=1`. Details in [regression/README.md](regression/README.md).
 
 If a new window doesn't make it onto the canvas, the log says why (look for "not on the canvas"
 in Copy Logs for a Bug Report).
@@ -32,11 +47,15 @@ in Copy Logs for a Bug Report).
 5. **Low-motion mode** (asked 28 Oct): animated screen moves turned off, so glides, zooms and
    centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
    is on (Accessibility › Display), which Expanse doesn't follow yet.
-6. **Regression tests** (asked 29 Oct). The test cases are written: 439 in
-   [regression/](regression/README.md), one for every feature and fixed bug since 0.1.0. Next,
-   automate the 218 marked "unit": there are no tests yet, so the layout maths would move into
-   its own target that tests can reach. Start with the recent fixes (the lock pile-up, Restore
-   Layout, display changes and back). A new fix adds its case there.
+6. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
+   has a test. 490 unit tests (`scripts/test.sh`, about a minute, all passing), and 223
+   end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
+   `--all` adds the 84 that need you). A new fix adds its case and its test.
+   - End-to-end, 31 Oct: in the last full run 119 automatic cases passed. Each of the rest has
+     since been fixed (most were the case, not Expanse) and passes on its own, or shows a known
+     bug: UI-11, CAPTURE-21, DISPLAY-01, NAV-17 (Bugs above). 9 skip: they need a Developer ID
+     release, a longer `--timeout`, or a Dock that hides. SETUP-07 became a guided case. The 54
+     guided and 30 look cases haven't been run yet.
 
 ## In progress elsewhere
 

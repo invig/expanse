@@ -38,15 +38,24 @@ enum Onboarding {
         !UserDefaults.standard.bool(forKey: doneKey) || !AX.isTrusted(prompt: false) || !CGPreflightScreenCaptureAccess()
     }
 
+    /// Tests: called instead of opening the window.
+    static var showOverride: ((@escaping () -> Void) -> Void)?
+
+    /// The page it opens on: where you were, until you've finished (see pageKey).
+    private static var startPage: Int {
+        let defaults = UserDefaults.standard
+        return defaults.bool(forKey: doneKey) ? 0 : defaults.integer(forKey: pageKey)
+    }
+
     static func show(onFinish: @escaping () -> Void) {
+        if let showOverride { showOverride(onFinish); return }
         if let window {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             return
         }
         Onboarding.onFinish = onFinish
-        let defaults = UserDefaults.standard
-        let view = OnboardingView(startPage: defaults.bool(forKey: doneKey) ? 0 : defaults.integer(forKey: pageKey)) {
+        let view = OnboardingView(startPage: startPage) {
             markDone()
             window?.close()
         }
@@ -84,11 +93,16 @@ enum SystemShortcuts {
     static func hotCorners(in corners: [HotCorner.Corner]) -> [String] {
         let domain = "com.apple.dock" as CFString
         CFPreferencesAppSynchronize(domain)
+        return hotCorners(in: corners) { CFPreferencesCopyAppValue($0 as CFString, domain) }
+    }
+
+    /// The same, with `value` reading a key of the Dock's preferences (tests pass their own).
+    private static func hotCorners(in corners: [HotCorner.Corner], value: (String) -> Any?) -> [String] {
         let keys: [HotCorner.Corner: String] = [.topLeft: "tl", .topRight: "tr", .bottomLeft: "bl", .bottomRight: "br"]
         return corners.compactMap { corner in
             guard let key = keys[corner] else { return nil }
-            let action = CFPreferencesCopyAppValue("wvous-\(key)-corner" as CFString, domain) as? Int ?? 1
-            let modifier = CFPreferencesCopyAppValue("wvous-\(key)-modifier" as CFString, domain) as? Int ?? 0
+            let action = value("wvous-\(key)-corner") as? Int ?? 1
+            let modifier = value("wvous-\(key)-modifier") as? Int ?? 0
             // 0 and 1 are "–"; a corner that only fires with a key held down doesn't get in the way.
             guard action > 1, modifier == 0 else { return nil }
             // A non-breaking hyphen: "bottom-right" stays on one line.
@@ -104,7 +118,11 @@ enum SystemShortcuts {
     static func controlArrows() -> [String] {
         let domain = "com.apple.symbolichotkeys" as CFString
         CFPreferencesAppSynchronize(domain)
-        let all = CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString, domain) as? [String: Any] ?? [:]
+        return controlArrows(in: CFPreferencesCopyAppValue("AppleSymbolicHotKeys" as CFString, domain) as? [String: Any] ?? [:])
+    }
+
+    /// The same, from the AppleSymbolicHotKeys dictionary (tests pass their own).
+    private static func controlArrows(in all: [String: Any]) -> [String] {
         let arrows = [123: "←", 124: "→", 125: "↓", 126: "↑"]
         // Mission Control's own, on until they've been changed.
         let builtIn = [32: ("Mission Control", 126), 33: ("Application windows", 125),
@@ -340,7 +358,9 @@ struct OnboardingView: View {
     }
 
     /// Whether the step on this page is done (or has nothing to do).
-    private var stepDone: Bool {
+    private var stepDone: Bool { Self.stepDone(page: page, model: model) }
+
+    private static func stepDone(page: Int, model: SetupModel) -> Bool {
         switch page {
         case 1: model.accessibility
         case 2: model.screenRecordingDone
@@ -366,23 +386,31 @@ struct OnboardingView: View {
                     .buttonStyle(BrandButtonStyle(prominent: false))
                     .keyboardShortcut(.leftArrow, modifiers: [])
             }
-            // Until a step is done, its own button is the one to press; this one only skips.
-            Button(page == 0 ? "Get started" : page == pages - 1 ? "Start using Expanse" : stepDone ? "Continue" : "Skip for now") {
+            Button(Self.mainButton(page: page, pages: pages, stepDone: stepDone)) {
                 if page == pages - 1 {
-                    // Screen Recording only takes effect after a relaunch: do it for them, and
-                    // Expanse starts then rather than just before quitting.
-                    if model.screenRecordingRequested && !model.screenRecording {
-                        Onboarding.markDone()
-                        model.relaunch()
-                    } else {
-                        finish()
-                    }
+                    Self.lastPage(model, finish: finish, relaunch: model.relaunch)
                 } else {
                     go(to: page + 1)
                 }
             }
             .buttonStyle(BrandButtonStyle(prominent: stepDone))
             .keyboardShortcut(.defaultAction)
+        }
+    }
+
+    /// Until a step is done, its own button is the one to press; this one only skips.
+    private static func mainButton(page: Int, pages: Int, stepDone: Bool) -> String {
+        page == 0 ? "Get started" : page == pages - 1 ? "Start using Expanse" : stepDone ? "Continue" : "Skip for now"
+    }
+
+    /// Screen Recording only takes effect after a relaunch: do it for them, and Expanse starts
+    /// then rather than just before quitting.
+    private static func lastPage(_ model: SetupModel, finish: () -> Void, relaunch: () -> Void) {
+        if model.screenRecordingRequested && !model.screenRecording {
+            Onboarding.markDone()
+            relaunch()
+        } else {
+            finish()
         }
     }
 

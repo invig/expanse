@@ -65,7 +65,7 @@ final class LogFile: @unchecked Sendable {
     static let enabledKey = "detailedLogging"
     private static let maxBytes: UInt64 = 5_000_000
 
-    let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Expanse", isDirectory: true)
+    let folder: URL
     var url: URL { folder.appendingPathComponent("Expanse.log") }
     private var previousURL: URL { folder.appendingPathComponent("Expanse.1.log") }
 
@@ -80,6 +80,11 @@ final class LogFile: @unchecked Sendable {
         f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
         return f
     }()
+
+    /// Tests give a folder of their own.
+    init(folder: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Expanse", isDirectory: true)) {
+        self.folder = folder
+    }
 
     var isEnabled: Bool {
         get { on.withLock { $0 } }

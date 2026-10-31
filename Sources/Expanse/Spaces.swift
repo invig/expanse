@@ -67,7 +67,7 @@ enum Spaces {
     /// Windows that are full screen, on any display: each has a Space of its own, and Expanse
     /// leaves them be. Thread-safe.
     static func fullScreenWindows() -> Set<CGWindowID> {
-        let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID()) as? [[String: Any]] ?? []
+        let displays = managedDisplays()
         var ids = Set<CGWindowID>()
         for display in displays {
             for s in display["Spaces"] as? [[String: Any]] ?? [] where (s["type"] as? Int) == 4 {
@@ -88,14 +88,16 @@ enum Spaces {
     }
 
     /// An ordinary app window on `space`, front-most first: focusing it is how to get there.
-    static func someWindow(on space: UInt64) -> (pid: pid_t, id: CGWindowID)? {
-        let info = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    /// `info` and `spacesOf`: the window server's window list and Spaces, unless a test gives its own.
+    static func someWindow(on space: UInt64,
+                           info: [[String: Any]] = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? [],
+                           spacesOf: (CGWindowID) -> [UInt64] = Spaces.spaces(of:)) -> (pid: pid_t, id: CGWindowID)? {
         for w in info where (w[kCGWindowLayer as String] as? Int) == 0 {
             guard let id = w[kCGWindowNumber as String] as? CGWindowID, let pid = w[kCGWindowOwnerPID as String] as? pid_t,
                   let bounds = w[kCGWindowBounds as String] as? [String: Double],
                   bounds["Width"] ?? 0 >= 100, bounds["Height"] ?? 0 >= 60,
                   NSRunningApplication(processIdentifier: pid)?.activationPolicy == .regular,
-                  spaces(of: id).contains(space) else { continue }
+                  spacesOf(id).contains(space) else { continue }
             return (pid, id)
         }
         return nil
@@ -147,9 +149,17 @@ enum Spaces {
         (space["id64"] as? NSNumber)?.uint64Value ?? (space["ManagedSpaceID"] as? NSNumber)?.uint64Value
     }
 
+    /// Tests stand in for the window server's list of displays and their Spaces (see managedDisplays).
+    static var displaysOverride: [[String: Any]]?
+
+    /// Every display and its Spaces, as the window server has them.
+    private static func managedDisplays() -> [[String: Any]] {
+        displaysOverride ?? CGSCopyManagedDisplaySpaces(CGSMainConnectionID()) as? [[String: Any]] ?? []
+    }
+
     /// The main display's entry (or the only one, when displays share Spaces).
     private static func mainDisplay() -> [String: Any]? {
-        let displays = CGSCopyManagedDisplaySpaces(CGSMainConnectionID()) as? [[String: Any]] ?? []
+        let displays = managedDisplays()
         let uuid = CGDisplayCreateUUIDFromDisplayID(CGMainDisplayID())
             .map { CFUUIDCreateString(nil, $0.takeRetainedValue()) as String }
         return displays.first { ($0["Display Identifier"] as? String) == uuid }

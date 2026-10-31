@@ -50,7 +50,11 @@ struct SavedLayout: Codable {
 }
 
 enum LayoutStore {
+    /// Tests keep their layouts in a folder of their own.
+    static var folderOverride: URL?
+
     private static var folder: URL {
+        if let folderOverride { return folderOverride }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = support.appendingPathComponent("Expanse", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -168,7 +172,10 @@ enum LayoutStore {
     /// Every release is signed the same way, so none ever asks; a development build is signed
     /// afresh (or ad hoc) as it's built, so it would, and hashes titles unkeyed as before. Both
     /// kinds are recognised.
-    private static let titleSecret: SymmetricKey? = {
+    private static var titleSecret: SymmetricKey? { titleSecretOverride ?? keychainTitleSecret }
+    /// Tests give a key of their own, so the Keychain isn't touched.
+    static var titleSecretOverride: SymmetricKey?
+    private static let keychainTitleSecret: SymmetricKey? = {
         guard Updater.shared.isRelease else { return nil }
         let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: "com.invignation.expanse",

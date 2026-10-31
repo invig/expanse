@@ -148,8 +148,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             completion(ok)
         }
         queue.async { [weak self] in
-            let filter = SCContentFilter(desktopIndependentWindow: window)
-            SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: config) { sample, error in
+            Self.screenshot(window, config) { sample, error in
                 let ok = sample?.imageBuffer != nil
                 if let self, let sample, ok { FramePump.shared.post(sample, for: self, snapshot: true) }
                 if let error { logger.info("snapshot of \(window.windowID) failed: \(error.localizedDescription, privacy: .public)") }
@@ -165,6 +164,13 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             if !finished { logger.info("snapshot of \(window.windowID) timed out") }
             finish(false)
         }
+    }
+
+    /// ScreenCaptureKit's one-off picture call (see snapshot). Tests put a stand-in here, so
+    /// nothing is captured.
+    static var screenshot: (SCWindow, SCStreamConfiguration, @escaping (CMSampleBuffer?, Error?) -> Void) -> Void = { window, config, done in
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: config, completionHandler: done)
     }
 
     /// Capture at a new size or rate. ScreenCaptureKit can reconfigure a running stream, but a
