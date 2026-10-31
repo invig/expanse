@@ -136,7 +136,7 @@ import AppKit
             // crash leaves windows, and Expanse quit there. It then launches with no layout to say where A belongs.
             let a = try await t.window("TRACK-11 A", CGRect(x: 300, y: 260, width: 520, height: 360))
             t.link("pause")
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             guard let screen = NSScreen.screens.first else { throw Skip("no display") }
             let full = screen.frame, usable = screen.visibleFrame
             // As CanvasController.parkingCorner works it out.
@@ -364,7 +364,11 @@ import AppKit
             guard let x = f.windows.first else { throw Failure("the fixture has no window") }
             try await t.trackOnCanvas([x], "the fixture's window")
             try await t.trackPlace([(x, trackAt(0, 0))])
-            let s0 = try await t.trackShow(x)
+            _ = try await t.trackShow(x)
+            // The fixture's app coming forward can bring a second glide a moment later; a drag
+            // while one runs waits for it (the overlay is up), so start once all is still.
+            try await t.pause(1.5)
+            let s0 = try await t.settle()
             guard let c0 = s0.window(x)?.canvas, let r0 = realFrame(x) else { throw Failure("the window isn't set out") }
             // Around the screen by its title bar for 5 seconds, then dropped.
             let g = CGPoint(x: r0.minX + r0.width * 0.65, y: r0.minY + 12)
@@ -384,10 +388,10 @@ import AppKit
             try await t.pause(0.6)
             // At most one look at the window per 50ms of dragging, give or take the ends.
             let follows = t.trackLines("follow ", "[\(x)]", since: mark)
-            try t.expect(!follows.isEmpty, "the drag wasn't followed (no “follow …[\(x)]” lines)")
+            try t.expect(!follows.isEmpty, "the drag wasn't followed (no “follow …[\(x)]” lines; the window went from \(NSStringFromRect(r0)) to \(realFrame(x).map(NSStringFromRect) ?? "nowhere"); at the grab point, on top: \(trackWindowAt(g)))")
             try t.expect(follows.count <= Int(took / 0.05) + 10,
                          "\(follows.count) follow lines for \(events) drag events in \(String(format: "%.1f", took))s: the window was looked at more often than every 50ms")
-            try t.expect(worst <= 60, "the window fell \(Int(worst))pt behind the pointer during the drag: something moved it")
+            try t.expectTiming(worst <= 60, "the window fell \(Int(worst))pt behind the pointer during the drag: something moved it")
             guard let r1 = realFrame(x) else { throw Failure("the window is gone") }
             // macOS can leave the window a few points short of the pointer's path (see TRACK-06).
             try t.expectNear(r1.origin, CGPoint(x: r0.minX + drop.dx, y: r0.minY + drop.dy), within: 24, "where it was dropped")
@@ -570,7 +574,9 @@ import AppKit
             // F1 in view, with the keyboard; F2 far off screen.
             try await t.trackShow(f1)
             try await t.until("F1 with the keyboard", timeout: 4) { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid }
-            try await t.pause(0.5)
+            // Past the second after Expanse focused F1, in which another window of the app taking
+            // focus is put right (see focusSettled): closing F1 is something you do later.
+            try await t.pause(1.2)
             let before = try await t.settle()
             let mark = t.log.mark()
             // ⌘W in F1; macOS gives F2 the keyboard.
@@ -727,13 +733,6 @@ private let trackHere = CGPoint(x: -60000, y: 40000)
 
 private func trackAt(_ dx: CGFloat, _ dy: CGFloat) -> CGPoint { CGPoint(x: trackHere.x + dx, y: trackHere.y + dy) }
 
-/// The view is at 100%, with `f` in the middle (as a glide leaves it: top-aligned when it's taller than the screen).
-private func trackIsCentred(_ s: ExpanseState, _ f: CGRect, within d: CGFloat = 4) -> Bool {
-    let v = s.visibleCanvas
-    let dy = f.height > v.height ? abs(v.minY - f.minY) : abs(v.midY - f.midY)
-    return abs(s.scale - 1) < 0.001 && abs(v.midX - f.midX) <= d && dy <= d
-}
-
 /// `a` is next to `b`: side by side or one above the other, a gap or so apart.
 private func trackBeside(_ a: CGRect, _ b: CGRect) -> Bool {
     let gapX = max(b.minX - a.maxX, a.minX - b.maxX), gapY = max(b.minY - a.maxY, a.minY - b.maxY)
@@ -814,7 +813,7 @@ private func trackSystemPrompts() -> [CGWindowID] {
         throw Failure("Expanse never took expanse://\(command)")
     }
     let took = Date().timeIntervalSince(sent)
-    try t.expect(took <= limit, "Expanse took \(String(format: "%.2f", took))s to take expanse://\(command): it stalled")
+    try t.expectTiming(took <= limit, "Expanse took \(String(format: "%.2f", took))s to take expanse://\(command): it stalled")
 }
 
 /// Checks Expanse still answers at once after `what`, with a link it ignores (it logs an unknown one straight away,
@@ -851,7 +850,10 @@ private func trackSystemPrompts() -> [CGWindowID] {
 private func trackDrag(_ path: [CGPoint], seconds: Double, each: ((CGPoint) -> Void)? = nil) async -> Int {
     guard let first = path.first, let last = path.last else { return 0 }
     func post(_ type: CGEventType, _ p: CGPoint) {
-        CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+        let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left)
+        // No modifiers, as Input.dragAsync: left unset, a key still held elsewhere comes along.
+        e?.flags = []
+        e?.post(tap: .cghidEventTap)
     }
     let legs = zip(path, path.dropFirst()).map { pair in (a: pair.0, b: pair.1, length: hypot(pair.1.x - pair.0.x, pair.1.y - pair.0.y)) }
     let total = max(1, legs.reduce(0) { $0 + $1.length })
@@ -937,7 +939,7 @@ private func trackDrag(_ path: [CGPoint], seconds: Double, each: ((CGPoint) -> V
         var last = ExpanseState(lines: [])
         try await until(what, timeout: timeout) {
             last = try await settle()
-            return !last.active && (last.window(id).map { trackIsCentred(last, $0.canvas) } ?? false)
+            return !last.active && last.isViewOn(id, within: 4)
         }
         return last
     }
@@ -959,4 +961,18 @@ private func trackDrag(_ path: [CGPoint], seconds: Double, each: ((CGPoint) -> V
         guard let c = try await settle().window(id)?.canvas else { throw Failure("the window isn't on the canvas \(when)") }
         try expectNear(c, spot, within: 1, "its spot \(when)")
     }
+}
+
+/// The front-most window at `p` on screen (global CG): its owner, ID, layer and title, for a
+/// drag that didn't take.
+private func trackWindowAt(_ p: CGPoint) -> String {
+    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    for w in info {
+        guard let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b), r.contains(p) else { continue }
+        let owner = w[kCGWindowOwnerName as String] as? String ?? "?"
+        let id = w[kCGWindowNumber as String] as? Int ?? 0
+        let layer = w[kCGWindowLayer as String] as? Int ?? 0
+        return "\(owner) [\(id)] layer \(layer) \(NSStringFromRect(r))"
+    }
+    return "nothing"
 }

@@ -582,13 +582,6 @@ private func spacesFrontWindow() -> (id: CGWindowID, pid: pid_t)? {
     return field
 }
 
-/// The view is at 100%, with `f` in the middle (as a glide leaves it).
-private func spacesIsCentred(_ s: ExpanseState, _ f: CGRect, within d: CGFloat = 4) -> Bool {
-    let v = s.visibleCanvas
-    let dy = f.height > v.height ? abs(v.minY - f.minY) : abs(v.midY - f.midY)
-    return abs(s.scale - 1) < 0.001 && abs(v.midX - f.midX) <= d && dy <= d
-}
-
 @MainActor fileprivate extension Ctx {
     /// The first log line since `mark` with every one of `parts` in it.
     @discardableResult
@@ -628,7 +621,8 @@ private func spacesIsCentred(_ s: ExpanseState, _ f: CGRect, within d: CGFloat =
         var last = ExpanseState(lines: [])
         try await until(what, timeout: timeout) {
             last = try await settle()
-            return !last.active && (last.window(id).map { spacesIsCentred(last, $0.canvas) } ?? false)
+            // As a glide leaves it: the window in the middle, or its screen group framed.
+            return !last.active && last.isViewOn(id, within: 4)
         }
         return last
     }

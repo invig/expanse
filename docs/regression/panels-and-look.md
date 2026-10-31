@@ -273,6 +273,7 @@
 - **Expected:** Within about half a second of appearing, the alert shows above the canvas and can be clicked. Once it closes the canvas goes back to its usual level. Step 4: the canvas opens under the alert.
 - **Check in log:** `canvas level <n> -> <m> (under a dialog)`, then `canvas level <m> -> <n>`
 - **Automate:** manual: CanvasController.lowestDialogLevel reads the real window list.
+- **Note:** Since 31 Oct (not released yet) the half-second check reads the window list on a background queue, then sets the level on the main thread; zooming out and starting a glide still read it first, so the canvas never opens over a dialog already showing.
 
 ## UI-24 The Dock doesn't count as a dialog
 - **Type:** Feature

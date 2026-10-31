@@ -113,6 +113,7 @@ import AppKit
                 try? FileManager.default.removeItem(at: folder)
             }
             let doc = try await t.sizeNewTextEditWindow(titled: "SIZE-11 Fill") { try t.open(file.path, in: "TextEdit") }
+            let takenOn = Date()
             opened.append(doc.ax)
             guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.processIdentifier else {
                 throw Failure("TextEdit isn't running")
@@ -134,8 +135,10 @@ import AppKit
             try await t.sizeInView(doc.id)
             try await t.until("TextEdit in front", timeout: 5) { NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundle }
             guard let fill = sizeAXMenuItem(pid, ["Window", "Fill"]) else { throw Skip("TextEdit's Window menu has no Fill (macOS 15 or later)") }
-            // Past the 2s after any resize of Expanse's own (the glide's), which isn't you choosing a size.
-            try await t.pause(2.5)
+            // Past the 2s after any resize of Expanse's own (the glide's), which isn't you choosing a
+            // size, and the window's first 5s, in which a move is taken for its app placing it late
+            // and put back (cameBack): Fill moves it as well.
+            try await t.pause(max(2.5, 5.5 - Date().timeIntervalSince(takenOn)))
             guard let r = realFrame(doc.id) else { throw Failure("the document isn't on screen") }
             // Window › Fill, as you'd choose it: a click, then the menu item.
             Input.click(at: CGPoint(x: r.minX + 100, y: r.minY + 10))

@@ -254,7 +254,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     controller.simulateScreen(nil)
                 }
             case "zoom": if let s = number("scale") { controller.zoomAnimated(to: s) }
-            case "pan": controller.pan(by: CGVector(dx: number("dx") ?? 0, dy: number("dy") ?? 0))
+            case "pan":
+                // Each given must be a number (not nan, inf or text): otherwise the link is ignored,
+                // not half followed.
+                let dx = query["dx"] == nil ? 0 : number("dx"), dy = query["dy"] == nil ? 0 : number("dy")
+                if let dx, let dy { controller.pan(by: CGVector(dx: dx, dy: dy)) }
             case "space":
                 if let space = Self.space(named: query["name"] ?? "", at: index("index"), in: Spaces.list().spaces,
                                           canvas: controller.canvasDesktop) {
@@ -360,8 +364,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The walkthrough is an ordinary window: zoomed out, leave the canvas first, or it would
     /// open underneath.
     private func showWelcome() {
-        if controller.isActive, !controller.gliding { controller.exit() }
-        Onboarding.show {}
+        // Once the canvas or a glide has handed focus back to a window, not before: shown first,
+        // the walkthrough ended up behind that window.
+        if controller.isActive, !controller.gliding {
+            controller.exit(then: { Onboarding.show {} })
+        } else {
+            controller.whenIdle { Onboarding.show {} }
+        }
     }
 
     private func toggleAutoCentre() {

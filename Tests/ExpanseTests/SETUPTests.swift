@@ -349,16 +349,17 @@ import SwiftUI
         let app = AppDelegate()
         let c = app.controller
         #expect(!app.isOn)
-        // A link that clears the camera to return to (and does nothing else at 100%) shows whether it ran.
-        let pan = URL(string: "expanse://pan?dx=40&dy=0")!
-        c.returnCamera = Camera(origin: CGPoint(x: 5, y: 5), scale: 1)
-        app.application(NSApplication.shared, open: [pan])
-        #expect(c.returnCamera != nil)
+        // A link that only starts a camera animation (at 100% nothing moves until a frame is drawn)
+        // shows whether it ran.
+        let zoom = URL(string: "expanse://zoom?scale=0.5")!
+        app.application(NSApplication.shared, open: [zoom])
+        #expect(c.animation == nil)
         #expect(!c.isActive)
 
         app.isOn = true
-        app.application(NSApplication.shared, open: [pan])
-        #expect(c.returnCamera == nil)
+        app.application(NSApplication.shared, open: [zoom])
+        #expect(c.animation != nil)
+        c.cancelAnimation()
 
         // Started already: a second turnOn does nothing (no second set of shortcuts).
         app.turnOn()
@@ -444,28 +445,32 @@ import SwiftUI
         #expect(OnboardingView.size == CGSize(width: 960, height: 620))
     }
 
-    @Test("SETUP-23 Opening the walkthrough while zoomed out leaves the canvas first") func setup23() {
+    @Test("SETUP-23 Opening the walkthrough while zoomed out leaves the canvas first") func setup23() async throws {
         Env.isolate()
         let app = AppDelegate()
         let c = app.controller
-        // For each opening: whether the canvas was already on its way back to 100%.
-        var leaving: [Bool] = []
-        Onboarding.showOverride = { _ in leaving.append(c.animation != nil) }
+        var shown = 0
+        Onboarding.showOverride = { _ in shown += 1 }
         defer { Onboarding.showOverride = nil }
 
-        // Zoomed out.
+        // Zoomed out: back to 100% first; the walkthrough waits for the canvas to be gone (UI-11).
         c.isActive = true
         app.showWelcome()
+        #expect(c.animation?.handsBack == true)
+        #expect(shown == 0)
         c.cancelAnimation()
-        // Mid-glide: the glide finishes on its own.
+        c.isActive = false
+        // Mid-glide: the glide finishes on its own, then the walkthrough.
         c.gliding = true
         app.showWelcome()
         #expect(c.animation == nil)
+        #expect(shown == 0)
         c.gliding = false
-        c.isActive = false
-        // At 100%.
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(shown == 1)
+        // At 100%: straight away.
         app.showWelcome()
         #expect(c.animation == nil)
-        #expect(leaving == [true, false, false])
+        #expect(shown == 2)
     }
 }

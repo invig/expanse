@@ -277,7 +277,7 @@
 - **Steps:**
   1. Set window A's `"x"` to `5000000`. Set window B's `"w"` to `-100`. Set `"centerX"` to `1e9`.
   2. Launch Expanse.
-- **Expected:** A's entry is left out: A is placed as a window the layout has no spot for (beside what's in view, PERSIST-42). B goes back to its spot but keeps its current size. The view comes from cameraX/cameraY (the centre is dropped). Any position or size beyond ±1,000,000 or not finite, and any size ≤ 0, counts as out of range; a bad home, preferred size, original frame or fitted size is dropped the same way, keeping the rest of the entry.
+- **Expected:** A's entry is left out: A is placed as a window the layout has no spot for (beside what's in view, PERSIST-42). B goes back to its spot but keeps its current size. The view comes from cameraX/cameraY (the centre is dropped). Any position or size beyond ±1,000,000, and any size ≤ 0, counts as out of range; a bad home, preferred size, original frame or fitted size is dropped the same way, keeping the rest of the entry. A number that isn't finite can't be written in JSON; the nearest a file gets (`1e400`, too big for a Double) makes it unreadable, and it's ignored as a whole, as SEC-21.
 - **Automate:** unit: LayoutStore.load(_:) on a fixture with bad fields.
 
 ## SEC-23 Old plaintext titles in a layout file are hashed

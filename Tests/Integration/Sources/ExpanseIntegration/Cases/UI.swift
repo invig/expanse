@@ -179,18 +179,21 @@ import Security
                 await t.uiRestoreCorner(old)
             }
         },
-        Case("UI-11", "Welcome and Quit from the panel's footer",
-             known: "zoomed out, Welcome opens the walkthrough before leaving the canvas hands focus back to a window, which then covers it (AppDelegate.showWelcome)") { t in
+        Case("UI-11", "Welcome and Quit from the panel's footer") { t in
             try await t.uiClosingUp {
                 try t.needsInput()
                 let ws = try await t.row(["UI-11 A", "UI-11 B"])
-                t.place(ws[1], at: CGPoint(x: 9000, y: 7000))
+                // Clear of wherever the view is (an earlier case can leave it anywhere).
+                let vis = try await t.state().visibleCanvas
+                t.place(ws[1], at: CGPoint(x: (vis.maxX + 3000).rounded(), y: vis.minY.rounded()))
                 try await t.until("B out of view") { try await t.state().window(ws[1].id)?.parked == true }
                 t.link("enter")
                 try await t.until("zoomed out") { try await t.settle().active }
                 // ? (Welcome & Shortcuts) leaves the canvas first, then opens the walkthrough in front.
                 try t.uiPress("Welcome & Shortcuts", in: try await t.uiOpenPanelTree())
-                try await t.until("the walkthrough to open") { t.uiWelcome() != nil }
+                // It opens once the canvas has handed back to the real windows (the zoom in, the
+                // windows' moves, focus), which in a VM can take seconds.
+                try await t.until("the walkthrough to open", timeout: 20) { t.uiWelcome() != nil }
                 let s = try await t.settle()
                 try t.expect(!s.active, "? should leave the canvas first (back to 100%)")
                 try t.expect(t.uiPanel() == nil, "? should close the panel")
@@ -316,7 +319,7 @@ import Security
             let opened = Date()
             while (t.uiOverlay(s)?.layer ?? uiCanvasLevel) >= alert.level, Date().timeIntervalSince(opened) < 3 { try await t.pause(0.05) }
             let took = Date().timeIntervalSince(opened)
-            try t.expect(took < 1, "the canvas should go under the dialog within about half a second (it took \(String(format: "%.1f", took))s)")
+            try t.expectTiming(took < 1, "the canvas should go under the dialog within about half a second (it took \(String(format: "%.1f", took))s)")
             try await t.expectLog("canvas level \(uiCanvasLevel) -> \(alert.level - 1) (under a dialog)", since: mark)
             // It can be clicked.
             if Input.allowed, let ok = alert.buttonCentre {
@@ -370,7 +373,7 @@ import Security
                          "at 100% the backdrop should be under every app window (level \(uiBackdropLevel); it's at \(backdrop.layer))")
             try await t.ask("Have Finder show items on the desktop, with a light desktop picture. Look closely at the desktop: the shade under the menu bar, the icons.")
             t.link("pause")
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             try await t.look("Expanse is paused now. The desktop looks exactly as it did with Expanse running (the menu bar's shade fades the same way, the icons are the same)?")
             t.link("resume")
             try await t.until("resumed") { try await !t.state().paused }
@@ -598,7 +601,7 @@ import Security
                 try await t.until("back at 100%") { try await !t.settle().active }
                 // Paused: Resume Expanse without ⌥`, dimmed with no outline; a click resumes and the panel stays.
                 t.link("pause")
-                try await t.until("paused") { try await t.state().paused }
+                try await t.untilPaused("paused")
                 let tree = try await t.uiOpenPanelTree()
                 guard let card = tree.button("Resume Expanse") else { throw Failure("paused, the minimap card should read “Resume Expanse”") }
                 try t.expect(!card.flat.contains { $0.says("`") }, "paused, the card shouldn't show the ⌥` keys")
@@ -661,7 +664,9 @@ import Security
                 t.place(ws[0], at: CGPoint(x: s.camera.x + 60, y: s.camera.y + 60))
                 s = try await t.settle()
                 ws[0].focus()
-                try await t.pause(0.5)
+                // Until Expanse has heard: Centre window goes to the window it last heard had focus,
+                // and in a VM the notification can come well after.
+                try await t.until("Expanse to hear “UI-34 A” has focus", timeout: 5) { try await t.state().focusedByApp[getpid()] == ws[0].id }
                 var mark = t.log.mark()
                 try t.uiPress("Centre window", in: try await t.uiOpenPanelTree())
                 try await t.until("the panel to close", timeout: 2) { t.uiPanel() == nil }
@@ -686,7 +691,7 @@ import Security
                 try await t.until("back at 100%") { try await !t.settle().active }
                 // Paused, both tiles are greyed and do nothing.
                 t.link("pause")
-                try await t.until("paused") { try await t.state().paused }
+                try await t.untilPaused("paused")
                 let tree = try await t.uiOpenPanelTree()
                 for title in ["Centre window", "Tidy up"] {
                     guard let tile = tree.button(title) else { throw Failure("no “\(title)” tile in the panel") }
@@ -1043,7 +1048,9 @@ private func uiMacCornersInUse() -> [String] {
 private func uiRightClick(at p: CGPoint) {
     Input.move(to: p)
     for type in [CGEventType.rightMouseDown, .rightMouseUp] {
-        CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .right)?.post(tap: .cghidEventTap)
+        let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .right)
+        e?.flags = []
+        e?.post(tap: .cghidEventTap)
         usleep(30_000)
     }
 }

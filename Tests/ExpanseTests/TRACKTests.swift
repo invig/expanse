@@ -529,6 +529,21 @@ private final class QuitApp: NSRunningApplication {
         #expect(c.syncSoonWork != nil)
     }
 
+    @Test("TRACK-25 A window a scan catches on its way into the Dock comes back to its own spot (logic)")
+    func track25b() {
+        let w = Self.placed(2502, canvas: CGRect(x: 200, y: 200, width: 600, height: 400))
+        let c = Self.canvas([w])
+        defer { Self.finish(c) }
+        // Minimising: a scan sees it part way to the Dock and follows it...
+        let real = w.lastPlaced ?? .zero
+        c.apply([Fake.scWindow(id: w.id, frame: CGRect(x: real.x + 400, y: real.y + 300, width: 600, height: 400))],
+                ax: CanvasController.AXSnapshot())
+        #expect(w.canvasFrame.origin == CGPoint(x: 600, y: 500), "the scan followed it")
+        // ...and a moment later it's gone: what's kept for its return is its spot from before.
+        c.remove(w)
+        #expect(c.recentlyRemoved[w.id]?.canvasFrame.origin == CGPoint(x: 200, y: 200))
+    }
+
     // MARK: TRACK-26
 
     @Test("TRACK-26 A scan's frames are out of date if windows moved or the camera changed while it ran")
@@ -557,6 +572,11 @@ private final class QuitApp: NSRunningApplication {
         let zoomedOut = c.scanInput()
         c.camera.origin.x += 40
         #expect(!c.scanIsStale(zoomedOut))
+        // But sizes are taken from scans zoomed out too: one from before Expanse resized a window
+        // (fitting the layout to a new screen) is out of date (DISPLAY-18).
+        ManagedWindow.resizes += 1
+        #expect(c.scanIsStale(zoomedOut))
+        ManagedWindow.resizes -= 1
         c.isActive = false
         c.camera.origin.x -= 40
     }

@@ -67,9 +67,7 @@ extension NAVTests {
             c.camera = Camera(origin: CGPoint(x: from, y: 0), scale: 1)
             let r = c.snappedCamera().toView(filled.canvasFrame)
             #expect(Self.screen.contains(r), "scrolled to \(from)")
-            withKnownIssue("snappedCamera offers the centring move, but the moves putting it 12pt or 20pt from an edge leave nothing cut off either and are shorter, so they win") {
-                #expect(Self.near(r.midX, Self.screen.midX, 0.5), "scrolled to \(from): left edge at \(r.minX)")
-            }
+            #expect(Self.near(r.midX, Self.screen.midX, 0.5), "scrolled to \(from): left edge at \(r.minX)")
         }
     }
 

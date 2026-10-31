@@ -247,7 +247,7 @@
 - **Expected:** Within a few seconds of replayd coming back, the pictures update again. No window stays blank or frozen, and zooming out later shows live pictures. A stream that answers after Expanse gave up on it is stopped, not used.
 - **Check in log:** `stream start for <id> timed out` for any start replayd never answered
 - **Automate:** manual: needs replayd. WindowCapture.start's 5 s timeout and startToken could be unit-tested with a stubbed SCStream.
-- **Note:** Later commits added holding back requests while three or more are overdue or scans get no answer (WindowCapture.overdue and replaydStuck, 0.1.26), and recovery from macOS restarting the service (0.1.25).
+- **Note:** Later commits added holding back requests while three or more are overdue or scans get no answer (WindowCapture.overdue and replaydStuck, 0.1.26), and recovery from macOS restarting the service (0.1.25). Since 31 Oct (not released yet), zoomed out, streams that stopped by themselves start again after the next scan that's answered, without the camera moving; a start that only timed out isn't retried on every scan (in a VM that piled requests onto replayd and stalled the window server).
 
 ## CAPTURE-22 One-off pictures recover after replayd crashes
 - **Type:** Bug fix

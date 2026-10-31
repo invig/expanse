@@ -111,7 +111,7 @@
 - **Steps:**
   1. `open "expanse://dump"` with the setting off.
   2. Turn it on, restart Expanse, `open "expanse://dump"`.
-- **Expected:** Step 1: nothing but `ignored debug URL command dump (debugURLCommands is off)`. Step 2: a `dump viewport=… camera=…@<scale> active=…` line, one `dump <App>[<id>] sc=… ax=… canvas=… parked=… capturing=… pic=…` line per window, and `dump unmanaged …` lines for app windows not on the canvas. A release build ignores the setting.
+- **Expected:** Step 1: nothing but `ignored debug URL command dump (debugURLCommands is off)`. Step 2: a `dump viewport=… camera=…@<scale> active=…` line, one `dump <App>[<id>] sc=… ax=… canvas=… parked=… capturing=… pic=…` line per window, `dump unmanaged …` lines for app windows not on the canvas, and last `dump end: <N> windows` (since 31 Oct, so a reader knows it has the lot). A release build ignores the setting.
 - **Automate:** manual: URL handling.
 
 ## URL-11 expanse://screen pretends the display is another size (debug only)

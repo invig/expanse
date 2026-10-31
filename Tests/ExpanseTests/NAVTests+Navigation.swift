@@ -307,7 +307,7 @@ extension NAVTests {
                 c.camera = Camera()
                 c.viewPlaced = true
                 c.exit(focus: w)
-                #expect(c.animation?.to == c.focusCamera(for: w)) // centred as usual
+                #expect(c.animation?.to == c.viewCamera(for: w)) // as usual: centred, or its group framed (NAV-55)
                 #expect(!c.viewPlaced)
             }
         }
@@ -349,7 +349,7 @@ extension NAVTests {
         Self.onCanvas(c) {
             c.camera = Camera(origin: CGPoint(x: 4000, y: 3000), scale: 0.25) // zoomed out and panned away
             c.centreCurrentWindow()
-            #expect(c.animation?.to == c.focusCamera(for: x))
+            #expect(c.animation?.to == c.viewCamera(for: x)) // centred, or its group framed (NAV-59)
             #expect(c.animation?.handsBack == true)
         }
     }

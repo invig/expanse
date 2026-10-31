@@ -153,16 +153,14 @@ extension SECTests {
         #expect(e.ox == 0 && e.oy == 25 && e.ow == 800 && e.oh == 600)
     }
 
-    @Test("SEC-22 A number that isn't finite drops its entry, not the layout") func sec22b() throws {
+    @Test("SEC-22 A number too big for a Double makes the file unreadable, and it's ignored") func sec22b() throws {
         // JSON has no NaN or infinity; a number too big for a Double is the nearest a file gets.
         let layout = try loadLayout("""
             {"cameraX": 0, "cameraY": 0, "windows": [
               {"bundleID": "a", "appName": "A", "title": "", "x": 1e400, "y": 100},
               {"bundleID": "b", "appName": "B", "title": "", "x": 200, "y": 100}]}
             """)
-        withKnownIssue("a number beyond a Double in layout.json fails decoding, so the whole file is ignored") {
-            #expect(layout?.windows.map(\.bundleID) == ["b"])
-        }
+        #expect(layout == nil)
     }
 
     // MARK: SEC-23

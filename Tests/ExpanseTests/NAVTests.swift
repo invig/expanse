@@ -202,7 +202,8 @@ import Carbon.HIToolbox
             c.returnCamera = Camera()
             c.view.keyDown(with: Self.key(kVK_ANSI_0))
             #expect(c.animation?.to == c.fitCamera())
-            #expect(c.returnCamera == nil)
+            // Kept: leaving still goes back to the window you were in (NAV-17).
+            #expect(c.returnCamera == Camera())
         }
     }
 
@@ -261,7 +262,7 @@ import Carbon.HIToolbox
                 let to = c.animation?.to
                 #expect(to.map { Self.near($0.scale, 0.4 * factor) } == true)
                 #expect(to.map { Self.near($0.center(in: Self.viewSize), start.center(in: Self.viewSize), 0.01) } == true)
-                #expect(c.returnCamera == nil)
+                #expect(c.returnCamera == Camera()) // kept (NAV-17)
             }
         }
     }
@@ -346,7 +347,7 @@ import Carbon.HIToolbox
             #expect(Self.near(c.camera.center(in: Self.viewSize), CGPoint(x: 2100, y: 1250), 0.01))
             #expect(c.windows.map(\.canvasFrame) == frames)
             #expect(c.view.selected.isEmpty)
-            #expect(c.returnCamera == nil)
+            #expect(c.returnCamera == Camera()) // kept (NAV-17)
         }
     }
 
@@ -392,7 +393,7 @@ import Carbon.HIToolbox
         }
     }
 
-    @Test("NAV-17 After moving around zoomed out, leaving goes to where you are (logic)")
+    @Test("NAV-17 After moving around zoomed out, leaving goes back to the window you were in (logic)")
     func nav17() {
         let c = TestCanvas.make(windows: [Self.win(1, 0, 0, 800, 600), Self.win(2, 3000, 1500, 800, 600)])
         let left = Camera(origin: CGPoint(x: 100, y: 50), scale: 1)
@@ -410,15 +411,42 @@ import Carbon.HIToolbox
             for (name, move) in moves {
                 c.cancelAnimation()
                 c.returnCamera = left // as zooming out leaves it
+                c.returnWindow = c.windows[0]
+                c.returnFrame = c.windows[0].canvasFrame
                 c.camera = c.overviewCamera()
                 move()
                 if let to = c.animation?.to { c.cancelAnimation(); c.camera = to } // landed
-                let here = c.camera.center(in: Self.viewSize)
                 c.exit()
-                let back = c.animation?.to
-                #expect(back.map { Self.near($0, Camera.centered(on: here, scale: 1, viewSize: Self.viewSize)) } == true,
-                        "after \(name)")
+                // You didn't pick anywhere else: back to the view you left, however you moved around.
+                #expect(c.animation?.to == left, "after \(name)")
             }
+        }
+    }
+
+    @Test("NAV-17 Leaving goes back to the window you were in, centred where it is now if it moved (logic)")
+    func nav17b() {
+        let a = Self.win(1, 0, 0, 800, 600)
+        let c = TestCanvas.make(windows: [a, Self.win(2, 3000, 1500, 800, 600)])
+        Self.onCanvas(c) {
+            c.returnCamera = Camera(origin: CGPoint(x: -356, y: -174), scale: 1)
+            c.returnWindow = a
+            c.returnFrame = a.canvasFrame
+            c.camera = c.overviewCamera()
+            // Dragged (or tidied) while zoomed out.
+            a.canvasFrame.origin = CGPoint(x: 1200, y: 400)
+            c.exit()
+            #expect(c.animation?.to == c.focusCamera(for: a))
+            #expect(!c.viewPlaced)
+            // A view you'd placed yourself comes back placed, so its window, cut off, isn't glided to.
+            c.cancelAnimation()
+            c.isActive = true
+            a.canvasFrame.origin = CGPoint(x: 0, y: 0)
+            c.returnFrame = a.canvasFrame
+            c.returnPlaced = true
+            c.viewPlaced = false
+            c.exit()
+            #expect(c.animation?.to == c.returnCamera)
+            #expect(c.viewPlaced)
         }
     }
 

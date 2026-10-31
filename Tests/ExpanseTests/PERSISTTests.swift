@@ -498,12 +498,11 @@ struct PERSISTTests {
         let c = Self.synced([Fake.window(id: Self.farID + 1, canvas: Self.rect(0, 40))])
         c.save()
         #expect(LayoutStore.snapshots().count == 1)
-        for _ in 0..<5 {
+        // Twenty rounds: the same layout used to encode differently now and then (keys unsorted).
+        for _ in 0..<20 {
             try Self.fifteenMinutesOn(c)
-            withKnownIssue("save() compares JSONEncoder output made without .sortedKeys, whose key order varies, so an unchanged layout can count as changed and be saved again, with a snapshot", isIntermittent: true) {
-                c.save()
-                #expect(LayoutStore.snapshots().count == 1)
-            }
+            c.save()
+            #expect(LayoutStore.snapshots().count == 1)
             // Back to one, for the next round.
             for s in LayoutStore.snapshots().dropFirst() { try FileManager.default.removeItem(at: s.url) }
         }

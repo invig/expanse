@@ -2,23 +2,32 @@
 
 What we might build next. New requests go in as they come up, and finished work moves to Done.
 
+## Not released yet
+
+Fixed or built since 0.1.34, for the next release's notes:
+
+- **Groups of windows as places** (Next up 7).
+- **Esc and ⌥` go back to the window you were in**, however much you moved around zoomed out
+  (NAV-17).
+- **Fixes the regression tests found** (31 Oct): an unchanged layout no longer counts as changed
+  and pushes out an older snapshot (PERSIST-21); Welcome from the panel while zoomed out no longer
+  opens behind a window (UI-11); pictures come back after replayd crashes while you're zoomed out,
+  without moving the view (CAPTURE-21); the end of a drag in the 20s after a display change is
+  followed (DISPLAY-01); a window nearly the screen's width is centred by the snap after a scroll
+  (NAV-53); an `expanse://pan` link with a bad number is ignored, not half followed (SEC-01).
+- **Steadier with a busy window server** (31 Oct, found running the regression tests in the VM):
+  while the canvas is up, the check for dialogs reads the window list off the main thread (in the
+  VM each read took up to a second, every half second, and Expanse froze for up to 10s); and
+  zoomed out, only streams that stopped are restarted after a scan, not every start that timed
+  out (which piled requests onto macOS's capture service). A display change while zoomed out
+  keeps the sizes it fitted windows to (a slow scan from before the fit put the old ones back).
+  A slow hop's start is now logged in parts (`slow: glide prep`), and opening the canvas logs
+  `canvas up`. A window dragged on the canvas ends where you let go, even if the last moves were
+  dropped; and a window a scan catches on its way into the Dock comes back to its own spot.
+
 ## Bugs
 
-1. **A layout that hasn't changed is saved, and snapshotted, as if it had** (found by the
-   regression tests, 31 Oct; PERSIST-21). The check compares JSON whose key order varies between
-   encodes; once the newest snapshot is 15 minutes old, an unchanged layout pushes out an older
-   one. Fix: `.sortedKeys` on that encoder.
-2. **Welcome from the panel while zoomed out opens behind a window** (found by the end-to-end
-   tests, 31 Oct; UI-11). Leaving the canvas hands focus back after the walkthrough has opened.
-   Fix: show it from `exit(then:)`.
-3. **Pictures stay frozen after replayd crashes while zoomed out** (end-to-end, 31 Oct;
-   CAPTURE-21). Nothing restarts the streams until the camera moves.
-4. **Leaving the canvas can glide away from where you were looking** (end-to-end, 31 Oct;
-   NAV-17). The hand-back focus goes to the front window in view; if it's cut off, auto-centre
-   glides to it.
-5. **The end of a drag in the 20s after a display change isn't followed** (end-to-end, 31 Oct;
-   DISPLAY-01). The canvas spot ends a few points short of the window.
-6. **To check** (found writing the regression tests, 30–31 Oct; not confirmed): Restore all
+1. **To check** (found writing the regression tests, 30–31 Oct; not confirmed): Restore all
    windows while zoomed out doesn't update the windows' spots on the canvas; `expanse://fit` and
    `zoom` move the view at 100% without opening the canvas; capture may spin every 10ms while
    replayd is stuck; the Expanse tile may point at a full-screen Space just after a window goes
@@ -48,14 +57,24 @@ in Copy Logs for a Bug Report).
    centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
    is on (Accessibility › Display), which Expanse doesn't follow yet.
 6. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 490 unit tests (`scripts/test.sh`, about a minute, all passing), and 223
+   has a test. 503 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 229
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
-   `--all` adds the 84 that need you). A new fix adds its case and its test.
-   - End-to-end, 31 Oct: in the last full run 119 automatic cases passed. Each of the rest has
-     since been fixed (most were the case, not Expanse) and passes on its own, or shows a known
-     bug: UI-11, CAPTURE-21, DISPLAY-01, NAV-17 (Bugs above). 9 skip: they need a Developer ID
-     release, a longer `--timeout`, or a Dock that hides. SETUP-07 became a guided case. The 54
-     guided and 30 look cases haven't been run yet.
+   `--all` adds the 85 that need you). A new fix adds its case and its test.
+   - End-to-end, 1 Nov: in the last full run 128 of the 144 automatic cases passed, NAV-49 showed
+     its known issue (typing may go to the wrong window after a zoom; to check on a Mac), and 12
+     skipped (a Developer ID release, a longer `--timeout`, a Dock that hides, or something
+     covering the screen). 3 failed: TRACK-21 (and UI-23/24 skipped) because macOS's
+     screen-recording prompt was up in the VM, and UI-34 on a test timing; with the prompt
+     answered and that fixed, all four pass. SPACES-23 fails now and then (see the README's
+     questions). The flaky ones from before are fixed:
+     timing limits are noted rather than failed in a VM, and the runner no longer lets windows
+     from earlier cases, or a notice over the screen, get in the way.
+   - The 54 guided and 31 look cases haven't been run yet.
+
+7. **Groups of windows as places** (asked 31 Oct). Built 31 Oct (Not released yet, above):
+   windows a gap or so apart that fit the screen together are one place. A hop to one frames the
+   group, hops inside a group on screen only move focus, a click zoomed out or ⌃⌥C frames it, and
+   hovering it zoomed out outlines it (NAV-55 to NAV-60).
 
 ## In progress elsewhere
 

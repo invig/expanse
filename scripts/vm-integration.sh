@@ -22,7 +22,8 @@ if ! tart list | grep -q "^local *$VM .*running"; then
   echo "Starting $VM…"
   tart run "$VM" > /dev/null 2>&1 &
 fi
-IP="$(tart ip "$VM" --wait 120)"
+# The DHCP lease file sometimes loses track of the VM; the ARP table still has it.
+IP="$(tart ip "$VM" --wait 120 2>/dev/null || tart ip "$VM" --resolver arp)"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$VM_USER@$IP")
 until "${SSH[@]}" true 2>/dev/null; do sleep 3; done
 
@@ -34,6 +35,9 @@ tar -C build -czf - Expanse.app ExpanseTests.app | "${SSH[@]}" 'tar -C ~/Applica
 # CanvasController): 8 for the run, as docs/how-it-works.md suggests. Both put back after.
 SLOWDOWN="$("${SSH[@]}" 'defaults read com.invignation.expanse animationSlowdown 2>/dev/null' || true)"
 BUDGET="$("${SSH[@]}" 'defaults read com.invignation.expanse streamBudget 2>/dev/null' || true)"
+# Expanse Tests' closed windows from earlier runs out of Expanse's saved layout (see
+# forgetOwnWindowsInExpanseLayout in Harness.swift), with Expanse not running yet.
+"${SSH[@]}" '~/Applications/ExpanseTests.app/Contents/MacOS/ExpanseIntegration --forget-own-windows'
 "${SSH[@]}" 'defaults write com.invignation.expanse debugURLCommands -bool true; defaults delete com.invignation.expanse animationSlowdown 2>/dev/null; defaults write com.invignation.expanse streamBudget -int 8; open ~/Applications/Expanse.app; sleep 3'
 restore_slowdown() {
   [[ -n "$SLOWDOWN" ]] && "${SSH[@]}" "defaults write com.invignation.expanse animationSlowdown -float $SLOWDOWN" || true
@@ -47,7 +51,7 @@ ARGS=$(printf ' %q' "$@")
   (tail -f ~/ExpanseTestsReport/progress.log & echo \$! > /tmp/tail.pid); \
   open -W -n ~/Applications/ExpanseTests.app --args --out ~/ExpanseTestsReport --expanse ~/Applications/Expanse.app$ARGS; \
   sleep 0.5; kill \$(cat /tmp/tail.pid)"
-mkdir -p build/integration-vm
+rm -rf build/integration-vm; mkdir -p build/integration-vm
 scp -q -o BatchMode=yes "$VM_USER@$IP:ExpanseTestsReport/*" build/integration-vm/
 echo "Report: build/integration-vm/report.md"
 ! grep -q "| FAILED |" build/integration-vm/report.md

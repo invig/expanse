@@ -160,9 +160,7 @@ import ScreenCaptureKit
         #expect(c.camera == before)
         open(d, "expanse://pan?dx=nan&dy=1")
         #expect(c.camera.origin.x == before.origin.x && c.camera.origin.y.isFinite)
-        withKnownIssue("pan?dx=nan&dy=1 still pans by dy (1 point): only the nan is dropped") {
-            #expect(c.camera == before)
-        }
+        #expect(c.camera == before)
         // A finite pan still pans.
         c.camera = before
         open(d, "expanse://pan?dx=30&dy=0")

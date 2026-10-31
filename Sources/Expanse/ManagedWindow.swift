@@ -31,6 +31,12 @@ final class ManagedWindow {
     var cameBackAt: CFTimeInterval = 0
     /// When Expanse started tracking it.
     let addedAt = CACurrentMediaTime()
+    /// When a drag of yours last moved it (CACurrentMediaTime): the move that lands just after you
+    /// let go is still the drag (see CanvasController.realWindowChanged).
+    var lastDraggedAt: CFTimeInterval = 0
+    /// Where it was before a window scan last saw it somewhere else, and when: if it's gone a moment
+    /// later, that was it on its way out (see CanvasController.remove).
+    var followedFrom: (origin: CGPoint, at: CFTimeInterval)?
     /// When its app last changed its size (see sizesItself, CanvasController.resizedItself).
     var resizedItselfAt: CFTimeInterval = 0
     /// The size the user chose. On a small screen the real window may be shrunk to fit.
@@ -104,6 +110,8 @@ final class ManagedWindow {
     /// Real window moves made so far (main thread), so a window scan can tell its frames are out
     /// of date.
     static var moves = 0
+    /// The same for resizes: a scan from before one has the old size, zoomed out too.
+    static var resizes = 0
 
     /// Moves the real window to `point` (global CG coords) and records where it landed.
     func place(at point: CGPoint) {

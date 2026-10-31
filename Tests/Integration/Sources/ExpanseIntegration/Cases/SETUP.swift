@@ -132,8 +132,7 @@ import Security
         },
         // Guided: a copy opened by Expanse Tests (even through `open -n`) counts as its request, and macOS hands
         // the front back to it as the copy quits; opened from Finder, the Dock or Spotlight, it doesn't.
-        Case("SETUP-07", "A second copy quits and shows the running one's welcome window", .guided,
-             known: "zoomed out, the welcome window opens before leaving the canvas hands focus back to a window, which covers it (as UI-11)") { t in
+        Case("SETUP-07", "A second copy quits and shows the running one's welcome window", .guided) { t in
             try await t.setupClosingUp {
                 try t.setupNeedsAX()
                 let a = try await t.window("SETUP-07 A")

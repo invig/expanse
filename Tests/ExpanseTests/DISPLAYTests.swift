@@ -125,6 +125,33 @@ struct DISPLAYTests {
         }
     }
 
+    @Test("DISPLAY-01 The end of your drag, just after you let go, is followed too (logic)")
+    func display01b() {
+        let w = Fake.window(id: 4101, canvas: CGRect(x: 100, y: 100, width: 600, height: 400))
+        let c = TestCanvas.make(windows: [w])
+        defer { Self.finish(c) }
+        // In the 20s after a display change.
+        c.suspendTracking = true
+        c.settleUntil = Date().addingTimeInterval(20)
+        let element = AXUIElementCreateApplication(Fake.firstPID)
+        w.lastPlaced = CGPoint(x: 100, y: 133)
+        func moved(to p: CGPoint, dragging: Bool) {
+            c.realWindowChanged(w, element, userDragging: dragging, size: w.canvasFrame.size, position: p, inFullScreenSpace: false)
+        }
+        // Your drag, the button down: followed.
+        moved(to: CGPoint(x: 260, y: 223), dragging: true)
+        #expect(w.canvasFrame.origin == c.canvasPoint(forGlobal: CGPoint(x: 260, y: 223)))
+        // Its last move lands just after you let go: followed too, so the spot isn't left short.
+        moved(to: CGPoint(x: 292, y: 241), dragging: false)
+        #expect(w.canvasFrame.origin == c.canvasPoint(forGlobal: CGPoint(x: 292, y: 241)))
+        // A move a while later, the button up, is macOS's: not followed.
+        w.lastDraggedAt = CACurrentMediaTime() - 1
+        let kept = w.canvasFrame.origin
+        moved(to: CGPoint(x: 700, y: 500), dragging: false)
+        #expect(w.canvasFrame.origin == kept)
+        c.reassertWork?.cancel()
+    }
+
     // MARK: DISPLAY-02
 
     @Test("DISPLAY-02 After the screen changes size, the window you were in is centred")

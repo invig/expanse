@@ -33,6 +33,8 @@ to see everything at once, then click a window to fly to it, ready to use.
 - **See everything at once.** Every window, live, laid out the way you arranged it.
 - **Move around by direction.** <kbd>⌃</kbd> + arrow keys hop to the next window to the left,
   right, above or below.
+- **Groups of windows stay together.** Arrange a few side by side so they fit the screen, and
+  Expanse treats them as one place: hops, clicks and centring show the whole group.
 - **Arrange like a design tool.** Drag windows around; they snap into neat, even gaps.
 - **At home on a laptop or a big display.** On a smaller screen the layout tightens up, and plugging
   back in puts it back exactly.
@@ -63,12 +65,12 @@ A short walkthrough gets you set up in about a minute:
 | Do this | To |
 |---|---|
 | Rest the pointer in a screen corner, or press <kbd>⌥</kbd> <kbd>`</kbd> | Zoom out to every window (do it again to go back) |
-| Click a window | Glide to it and start using it |
+| Click a window | Glide to it (and the windows grouped with it) and start using it |
 | <kbd>⌃</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> | Hop to the next window in that direction |
 | Pinch, or scroll with two fingers | Zoom and move around the canvas |
 | Drag a window while zoomed out | Move it; it snaps into place |
 | <kbd>T</kbd> | Tidy up: each group of windows lined up and evenly spaced, where it is |
-| <kbd>Esc</kbd> | Back to 100% |
+| <kbd>Esc</kbd> | Back to 100%, to the window you were in |
 
 <details>
 <summary><strong>All shortcuts</strong></summary>

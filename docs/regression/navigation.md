@@ -178,16 +178,18 @@
 - **Expected:** Each arrow highlights the nearest window that way (accent border, label "App — Title") and the view pans to centre it without changing zoom. Return glides into the highlighted window at 100%, with focus. With nothing highlighted, Return dives into the front window.
 - **Automate:** unit: CanvasController.nearest(_:from:in:) (the key handling stays manual).
 
-## NAV-17 After moving around zoomed out, leaving goes to where you are
+## NAV-17 After moving around zoomed out, leaving goes back to the window you were in
 - **Type:** Feature
 - **Area:** NAV
-- **Commits:** 0cdf466 (0.1.0), 2b994e0 (0.1.0)
-- **Setup:** At 100%.
+- **Commits:** 0cdf466 (0.1.0), 2b994e0 (0.1.0), unreleased (31 Oct)
+- **Setup:** At 100%, in a window.
 - **Steps:**
   1. Press ⌥`, then pan with two fingers (or pinch, ⌘-scroll, press 0, 1, - or =, or click the minimap).
-  2. Press Esc.
-- **Expected:** Back at 100% centred on the middle of the view you were looking at, not the view you started from.
-- **Automate:** manual: needs the canvas.
+  2. Press Esc (or ⌥` again).
+  3. Again, but drag the window you were in somewhere else on the canvas before pressing Esc.
+- **Expected:** Step 2: back at 100% on the window you were in, exactly as you left it, and it has the keyboard: you didn't pick anywhere else. Step 3: that window, centred where it is now. Picking a window (a click, Return) still goes to it.
+- **Automate:** manual: needs the canvas. The camera it goes back to is unit-tested (NAV-17 tests).
+- **Note:** Until 31 Oct (2b994e0 on), leaving after moving around went to the middle of the view you were looking at, and could then glide on to a window cut off at the screen's edge. Changed at your request: leaving without picking is going back.
 
 ## NAV-18 Scrolling or pinching on the bare desktop opens the canvas
 - **Type:** Feature
@@ -616,3 +618,69 @@
 - **Expected:** Neither moves the view after the scroll; ⌘-scroll zooming doesn't snap either.
 - **Check in log:** No `scroll ended: view snapped` line.
 - **Automate:** unit: `snappedCamera()` returns the camera unchanged when no shown window is cut off; `scrollEnded` only runs at scale 1.
+
+## NAV-55 Windows arranged to fit the screen together are a group
+- **Type:** Feature
+- **Area:** NAV
+- **Commits:** unreleased (31 Oct)
+- **Setup:** At 100%. Two or three windows side by side (or one above another), snapped a gap apart, together no wider or taller than the screen. Another window on its own elsewhere.
+- **Steps:**
+  1. ⌥`, and hover each window.
+  2. Move one of the group a little more than 40pt away from its neighbour; hover again.
+- **Expected:** Step 1: the arranged windows count as one group (see NAV-60); the window on its own doesn't. Step 2: they're no longer a group. Windows 40pt apart or less (directly or through a neighbour) whose outline fits the screen are a group; a cluster too big for the screen isn't one at all.
+- **Automate:** unit: `CanvasController.screenGroups(_:fitting:)`, `screenGroup(of:)` and `viewCamera(for:)`.
+
+## NAV-56 A hop to a window in a group frames the whole group
+- **Type:** Feature
+- **Area:** NAV
+- **Commits:** unreleased (31 Oct)
+- **Setup:** As NAV-55, in the window on its own, the group out of view to its right.
+- **Steps:**
+  1. ⌃→.
+- **Expected:** The view glides to the group, centred on it as a whole, every window of it in view; the window the hop reached (the nearest that way) has the keyboard.
+- **Check in log:** `glide to <App>[<id>] (group of 2)`.
+- **Automate:** manual: a real glide. The camera is unit-tested (NAV-56 tests).
+
+## NAV-57 Hops between the windows of a group on screen only move focus
+- **Type:** Feature
+- **Area:** NAV
+- **Commits:** unreleased (31 Oct)
+- **Setup:** As NAV-55, the group framed, in its left window. Auto-centre on.
+- **Steps:**
+  1. ⌃→, then ⌃←.
+  2. ⌃→ from the group's right-hand window, towards a window beyond the group.
+- **Expected:** Step 1: focus moves between the group's windows and the view doesn't move. Step 2: the hop leaves the group, gliding to the next window (framing its group, if it's in one).
+- **Automate:** manual: real focus. The rule is unit-tested (`hopStaysInGroup`).
+
+## NAV-58 Clicking a window in a group zoomed out zooms to the group
+- **Type:** Feature
+- **Area:** NAV
+- **Commits:** unreleased (31 Oct)
+- **Setup:** As NAV-55, zoomed out.
+- **Steps:**
+  1. Click a window of the group (or hover it and press Return).
+  2. ⌥`, then click the window on its own.
+- **Expected:** Step 1: back at 100% with the whole group framed, the window clicked in front with the keyboard. Step 2: that window centred, as before.
+- **Automate:** manual: real clicks on the canvas. The camera is unit-tested (NAV-58 test).
+
+## NAV-59 ⌃⌥C frames the group of the window you're in
+- **Type:** Feature
+- **Area:** NAV
+- **Commits:** unreleased (31 Oct)
+- **Setup:** As NAV-55, in a window of the group; pan at 100% so the group is half off screen.
+- **Steps:**
+  1. ⌃⌥C.
+  2. ⌥`, pan, and ⌃⌥C again.
+- **Expected:** Both times: the group framed at 100%, your window still with the keyboard. A window on its own is centred, as before (NAV-43, NAV-44).
+- **Automate:** manual: real focus and glides. The camera is unit-tested (NAV-59 test).
+
+## NAV-60 Zoomed out, hovering a window in a group outlines the group
+- **Type:** Feature
+- **Area:** NAV
+- **Commits:** unreleased (31 Oct)
+- **Setup:** As NAV-55, zoomed out.
+- **Steps:**
+  1. Hover a window of the group, then the window on its own.
+  2. Select two windows (⇧-click), and hover one.
+- **Expected:** Step 1: a soft accent outline around the whole group (12pt outside it, rounded), alongside the hovered window's own outline; none for the window on its own. Step 2: only the selection's dashed box. At 100% nothing is drawn.
+- **Automate:** unit: `CanvasView.render` sets `groupOutline`'s path (NAV-60 test); manual for how it looks.

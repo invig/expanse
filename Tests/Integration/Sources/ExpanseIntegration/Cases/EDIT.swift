@@ -281,9 +281,8 @@ import AppKit
             let upMark = t.log.mark()
             drag.release()
             let during = Array(t.log.lines(since: mark).prefix(max(0, upMark - mark)))
-            if let slow = during.first(where: { $0.contains("slow: drag step took") || $0.contains("ms between drag events") }) {
-                throw Failure("the drag had a hitch: \(slow)")
-            }
+            let slow = during.first { $0.contains("slow: drag step took") || $0.contains("ms between drag events") }
+            try t.expectTiming(slow == nil, "the drag had a hitch: \(slow ?? "")")
             let taken: (String) -> Bool = { $0.hasPrefix("tracking ") && $0.contains("[\(added)]") }
             try t.expect(!during.contains(where: taken), "the window that opened mid-drag was taken on during the drag: window scans should wait until it ends")
             guard await t.log.wait(since: upMark, timeout: 10, taken) != nil else {
@@ -532,13 +531,10 @@ fileprivate extension Ctx {
         }
     }
 
-    /// Dived into: centred on screen at 100% (top-aligned if taller than the screen).
+    /// Dived into: at 100% on it, centred (top-aligned if taller than the screen), or its group
+    /// framed (ExpanseState.isViewOn).
     func editCentred(_ w: TestWindow, in vp: CGRect) async throws {
-        try await until("\(w.title) centred on screen", timeout: 5) {
-            guard let r = w.real else { return false }
-            let y = r.height > vp.height ? abs(r.minY - vp.minY) : abs(r.midY - vp.midY)
-            return abs(r.midX - vp.midX) <= 2 && y <= 2
-        }
+        try await until("\(w.title) centred on screen, or its group framed", timeout: 5) { try await self.settle().isViewOn(w.id) }
     }
 
     /// The windows that move with `probe` when it's dragged 30 points down and back (holding ⌘,

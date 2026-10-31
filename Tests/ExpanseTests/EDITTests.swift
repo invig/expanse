@@ -191,6 +191,18 @@ import Carbon.HIToolbox
         #expect(c.view.guides.path == nil, "guides vanish when you let go")
     }
 
+    @Test("EDIT-04 Letting go ends the drag where the pointer is, even if the last moves never came (logic)") func edit04b() {
+        let a = Fake.window(id: 1, canvas: Self.r(0, 0, 600, 400))
+        let b = Fake.window(id: 2, canvas: Self.r(700, 450, 400, 300))
+        let c = Self.zoomedOut([a, b])
+        let start = Self.view(c, CGPoint(x: 900, y: 600))
+        c.view.mouseDown(with: Self.mouse(.leftMouseDown, start, c))
+        c.view.mouseDragged(with: Self.mouse(.leftMouseDragged, CGPoint(x: start.x + 50, y: start.y), c, .command))
+        // The window server dropped the rest of the moves; the button comes up 150pt further on.
+        c.view.mouseUp(with: Self.mouse(.leftMouseUp, CGPoint(x: start.x + 200, y: start.y), c, .command))
+        #expect(b.canvasFrame.origin == CGPoint(x: 700 + 200 / c.camera.scale, y: 450), "B ends under the pointer")
+    }
+
     // MARK: EDIT-05 Clicking or dragging a window brings it to the front of the canvas
 
     @Test("EDIT-05 bringToFront puts the window last in windows and its picture on top") func edit05a() {

@@ -302,6 +302,7 @@
   1. Minimise a window, click it in the Dock, and press ⌥` at once.
 - **Expected:** It's on the canvas at its spot right away; restoring it triggers a scan.
 - **Automate:** manual: real minimise and restore.
+- **Note:** Since 31 Oct (not released yet) a window a scan catches on its way into the Dock (followed as if moved, then gone) comes back to its spot from before, not where the scan saw it.
 
 ## TRACK-26 A scan during a glide doesn't drag windows back
 - **Type:** Bug fix
@@ -314,7 +315,7 @@
   2. Press ⌥`.
 - **Expected:** Every window is at its canvas spot. No `follow … found at` lines for windows Expanse has just moved.
 - **Automate:** unit: the staleness check in CanvasController.sync (scan input's move count and camera; needs a seam).
-- **Note:** Since af8eff8 an out-of-date scan still takes on new windows, as well as dropping closed ones; another scan follows.
+- **Note:** Since af8eff8 an out-of-date scan still takes on new windows, as well as dropping closed ones; another scan follows. Since 31 Oct (not released yet) a scan is also out of date if Expanse resized a window while it ran, zoomed out too: fitting the layout to a new screen while zoomed out, a slow scan from before the fit put the old sizes back (DISPLAY-18 in the VM).
 
 ## TRACK-27 Switching apps quickly doesn't pull you back
 - **Type:** Bug fix

@@ -24,7 +24,7 @@ import AppKit
             t.link("focus", ["id": source])
             try await t.until("the fixture's window centred, at 100%", timeout: 10) {
                 let s = try await t.settle()
-                return !s.active && placeCentred(source, in: s.viewport)
+                return !s.active && s.isViewOn(source)
             }
             let s1 = try await t.settle()
             let from = try s1.placeFrame(source)
@@ -41,9 +41,9 @@ import AppKit
             try t.expect(!s1.visibleCanvas.contains(r), "with the screen full, the new window's spot should be off screen (\(r) is in view \(s1.visibleCanvas))")
             try await t.until("the view to glide to the new window and centre it at 100%", timeout: 10) {
                 let s = try await t.settle()
-                return !s.active && placeCentred(new, in: s.viewport)
+                return !s.active && s.isViewOn(new)
             }
-            try await t.placeFocused(f, title: "PLACE-04 2")
+            try await t.placeFocused(f, title: f.title(2))
             let s2 = try await t.settle()
             let landed = try s2.placeFrame(new)
             try t.expectNear(landed.origin, placed.spot, within: 2, "the new window on the canvas")
@@ -81,13 +81,13 @@ import AppKit
             guard let new = f.windows.first(where: { !known.contains($0) }) else { throw Failure("the fixture didn't open a second window") }
             try await t.until("the view to end centred on the new window, at 100%", timeout: 15) {
                 let s = try await t.settle()
-                return !s.active && s.window(new) != nil && placeCentred(new, in: s.viewport)
+                return !s.active && s.window(new) != nil && s.isViewOn(new)
             }
             try await t.expectLog("glide to \(app)[\(new)]", since: mark)
-            try await t.placeFocused(f, title: "PLACE-05 2")
+            try await t.placeFocused(f, title: f.title(2))
             try await t.pause(1)
             let s = try await t.settle()
-            try t.expect(!s.active && placeCentred(new, in: s.viewport), "the view should stay on the new window (nothing should glide away again)")
+            try t.expect(!s.active && s.isViewOn(new), "the view should stay on the new window (nothing should glide away again)")
         },
 
         Case("PLACE-12", "A new window opens beside its own app's window") { t in
@@ -265,13 +265,6 @@ private func placeClearSpot(_ s: ExpanseState) -> CGPoint {
     let all = s.windows.map(\.canvas).reduce(CGRect.null) { $0.union($1) }
     guard !all.isNull else { return .zero }
     return CGPoint(x: (all.maxX + 3000).rounded(), y: (all.minY - 3000).rounded())
-}
-
-/// Centred on screen at 100% (top-aligned if taller than the screen), by the window server.
-private func placeCentred(_ id: CGWindowID, in vp: CGRect) -> Bool {
-    guard let r = realFrame(id) else { return false }
-    let y = r.height > vp.height ? abs(r.minY - vp.minY) : abs(r.midY - vp.midY)
-    return abs(r.midX - vp.midX) <= 2 && y <= 2
 }
 
 /// Whether `r` is one of the spots along an edge of `a` that a new window from it is tried in:

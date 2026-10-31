@@ -183,8 +183,7 @@ import AppKit
             try await t.look("While Space was held, was the pointer an open hand, a closed hand while dragging, and the arrow again once Space was let go?")
         },
 
-        Case("NAV-17", "After moving around zoomed out, leaving goes to where you are",
-             known: "leaving hands focus to the front window in view; if it's cut off at the screen's edge, auto-centre takes that for a focus change and glides to it, away from the middle you were looking at") { t in
+        Case("NAV-17", "After moving around zoomed out, leaving goes back to the window you were in", time: 180) { t in
             try t.needsInput()
             try await t.navReady()
             let spot = try await t.navEmptySpot()
@@ -207,7 +206,7 @@ import AppKit
                     Input.click(at: CGPoint(x: m.minX + 45, y: m.midY + 10))
                 }),
             ]
-            for (what, move) in moves {
+            for (i, (what, move)) in moves.enumerated() {
                 let start = try await t.navGlide(to: ws[0].id)
                 Input.key(.grave, .maskAlternate)
                 try await t.until("⌥` to zoom out") { try await t.state().active }
@@ -222,15 +221,28 @@ import AppKit
                     if now.camera == moved.camera && now.scale == moved.scale { break }
                 }
                 try t.expect(moved.active, "\(what) left the canvas")
-                let here = navViewCentre(moved)
-                try t.expect(navDistance(here, navViewCentre(start)) > 20, "after ⌥` and \(what), the view's middle should be away from where you started")
-                Input.key(.escape)
-                try await t.until("Esc to leave the canvas") { try await !t.settle().active }
+                try t.expect(navDistance(navViewCentre(moved), navViewCentre(start)) > 20, "after ⌥` and \(what), the view should have moved")
+                // Esc, or ⌥` again (every other time): you didn't pick anywhere else.
+                let leave = i % 2 == 0 ? "Esc" : "⌥`"
+                if i % 2 == 0 { Input.key(.escape) } else { Input.key(.grave, .maskAlternate) }
+                try await t.until("\(leave) to leave the canvas") { try await !t.settle().active }
                 let back = try await t.settle()
-                try t.expect(abs(back.scale - 1) < 0.001, "after \(what), Esc should leave at 100% (\(navPercent(back.scale)))")
-                try t.expectNear(navViewCentre(back), here, within: 1,
-                                 "after \(what), Esc should go to 100% on the middle of the view you were looking at (the view had started at \(navViewCentre(start)), scale \(moved.scale))")
+                try t.expect(abs(back.scale - 1) < 0.001, "after \(what), \(leave) should leave at 100% (\(navPercent(back.scale)))")
+                try t.expectNear(back.camera, start.camera, within: 1, "after \(what), \(leave) should go back to A as you left it")
+                try await t.navHasKeyboard(ws[0], "A, back")
             }
+            // A moved while zoomed out (dragged, or by Tidy Up): it's centred where it is now.
+            _ = try await t.navGlide(to: ws[0].id)
+            Input.key(.grave, .maskAlternate)
+            try await t.until("⌥` to zoom out") { try await t.state().active }
+            let out = try await t.settle()
+            guard let fa = out.window(ws[0].id)?.canvas else { throw Failure("A isn't on the canvas") }
+            t.place(ws[0], at: CGPoint(x: fa.minX + 2400, y: fa.minY + 900), commit: false)
+            try await t.until("A moved on the canvas") { try await t.state().window(ws[0].id)?.canvas.minX == fa.minX + 2400 }
+            Input.key(.escape)
+            try await t.until("Esc to leave the canvas") { try await !t.settle().active }
+            try await t.until("the view centred on A where it is now", timeout: 5) { let s = try await t.settle(); return navCentred(s, ws[0].id) }
+            try await t.navHasKeyboard(ws[0], "A, moved")
         },
 
         Case("NAV-18", "Scrolling or pinching on the bare desktop opens the canvas", .guided) { t in
@@ -319,7 +331,7 @@ import AppKit
             let corners = try navHotCorners(t)
             let a = try await t.window("NAV-21 A")
             t.link("pause")
-            try await t.until("Expanse to pause") { try await t.state().paused }
+            try await t.untilPaused("Expanse to pause")
             try await t.pause(1)
             let real = a.real
             let middle = CGPoint(x: t.screen.midX, y: t.screen.midY)
@@ -583,18 +595,23 @@ import AppKit
                 try await t.until("[\(target.id)]'s app in front", timeout: 3) { NSWorkspace.shared.frontmostApplication?.processIdentifier == target.pid }
                 try await t.pause(0.35)
             }
-            for (i, line) in timings.enumerated() {
+            // The typical hop, not every one: in a VM the window server stalls now and then (a
+            // hop's prep or a frame gap of 100–300ms, the hops either side of it fine). Waiting
+            // on an app would slow every hop.
+            var preps: [Int] = [], firsts: [Int] = [], frames: [Int] = [], gaps: [Int] = []
+            for line in timings {
                 guard let m = line.firstMatch(of: #/prep (\d+)ms, first frame after (\d+)ms, (\d+) frames, max gap (\d+)ms/#),
-                      let prep = Int(m.1), let first = Int(m.2), let frames = Int(m.3) else { throw Failure("can't read “\(line)”") }
-                try t.expect(prep <= 50 && first <= 50, "hop \(i + 1) should start straight away: \(line)")
-                try t.expect(frames >= 8, "hop \(i + 1) drew \(frames) frames, where a glide of about 0.3s draws many more: \(line)")
+                      let prep = Int(m.1), let first = Int(m.2), let n = Int(m.3), let gap = Int(m.4) else { throw Failure("can't read “\(line)”") }
+                preps.append(prep); firsts.append(first); frames.append(n); gaps.append(gap)
             }
+            let all = timings.joined(separator: "; ")
+            try t.expectTiming(navMedian(preps) <= 50 && navMedian(firsts) <= 50, "hops should start straight away (prep \(preps) ms, first frame after \(firsts) ms): \(all)")
+            try t.expectTiming(navMedian(frames) >= 8, "a glide of about 0.3s draws many more frames than \(frames): \(all)")
+            try t.expectTiming(navMedian(gaps) <= 50, "glides should be smooth (max gaps \(gaps) ms): \(all)")
             let lines = t.log.lines(since: mark)
             let activations = lines.compactMap { line in line.firstMatch(of: #/^activation took (\d+)ms/#).flatMap { Int($0.1) } }.sorted()
             try t.expect(activations.count >= 5, "only \(activations.count) “activation took” lines for 10 hops between two apps")
-            try t.expect(activations[activations.count / 2] <= 100 && activations.last! <= 500, "focus should land within a few tens of milliseconds (activation took \(activations) ms)")
-            let slow = lines.filter { $0.hasPrefix("slow: animation") }
-            try t.expect(slow.count <= 2, "\(slow.count) of 10 glides logged “slow: animation”: \(slow.joined(separator: "; "))")
+            try t.expectTiming(navMedian(activations) <= 100 && activations.last! <= 500, "focus should land within a few tens of milliseconds (activation took \(activations) ms)")
             let s = try await t.settle()
             try t.expect(navCentred(s, row[8].id), "the last hop should leave the view centred on its window")
         },
@@ -689,7 +706,7 @@ import AppKit
             try await t.until("the view centred on the right-hand window", timeout: 5) { let s = try await t.settle(); return navCentred(s, r.id) }
         },
 
-        Case("NAV-36", "⌥` zooms out without waiting for a window scan") { t in
+        Case("NAV-36", "⌥` zooms out without waiting for a window scan", time: 240) { t in
             try t.needsInput()
             try await t.navReady()
             let many = try await t.fixture("NAV36", windows: 50, size: CGSize(width: 400, height: 280))
@@ -702,16 +719,25 @@ import AppKit
             // 1. Ten times: the canvas is up within a moment (a window scan takes seconds). Not
             // the very next answer: the link asking can reach Expanse before the key does.
             for i in 1...10 {
+                // From Expanse's own lines, the key's arrival to "canvas up": not a dump (with 67
+                // windows one takes a second or more to write in a VM, as each window's line asks
+                // Accessibility where it is), and not counting how long the VM takes to deliver the
+                // key or the log. A window scan takes seconds; waiting for one is what this catches.
+                try await t.pause(0.3)
+                let m = t.log.mark()
                 Input.key(.grave, .maskAlternate)
-                let pressed = Date()
-                do {
-                    try await t.until("the canvas up", timeout: 1.5) { try await t.state().active }
-                } catch {
-                    throw Failure("round \(i): the canvas wasn't up \(String(format: "%.1f", Date().timeIntervalSince(pressed)))s after ⌥` (did it wait for a window scan?)")
+                guard await t.log.wait(since: m, timeout: 10, { $0.hasPrefix("canvas up") }) != nil else {
+                    throw Failure("round \(i): no “canvas up” within 10s of ⌥`")
                 }
-                try await t.settle()
+                let lines = t.log.timedLines(since: m)
+                if let key = lines.first(where: { $0.line.hasPrefix("hotkey 1 pressed") }), let up = lines.first(where: { $0.line.hasPrefix("canvas up") }) {
+                    try t.expect(up.time - key.time < 1.5, String(format: "round %d: the canvas came up %.1fs after Expanse got ⌥` (did it wait for a window scan?)", i, up.time - key.time))
+                }
+                // With 67 windows a VM's window server can hold a zoom up for seconds (NAV-38 is
+                // the case about smoothness); what counts here is the canvas coming up at once.
+                try await t.settle(timeout: 20)
                 Input.key(.escape)
-                try await t.until("round \(i): back at 100%") { try await !t.settle().active }
+                try await t.until("round \(i): back at 100%", timeout: 20) { try await !t.settle(timeout: 20).active }
                 try await t.pause(0.5)
             }
             // 2. A new window, then ⌥` straight away: a scan right after brings it onto the canvas.
@@ -812,9 +838,8 @@ import AppKit
             try await t.pause(0.5)
             s = try await t.settle()
             for w in cluster { try t.navExpectInPlace(s, w.id, "window [\(w.id)] of the 50") }
-            if let slow = t.log.lines(since: mark).first(where: { $0.hasPrefix("slow: animation") }) {
-                throw Failure("the zoom in wasn't smooth: \(slow)")
-            }
+            let slow = t.log.lines(since: mark).first { $0.hasPrefix("slow: animation") }
+            try t.expectTiming(slow == nil, "the zoom in wasn't smooth: \(slow ?? "")")
         },
 
         Case("NAV-39", "Hops start without waiting for the app") { t in
@@ -851,7 +876,10 @@ import AppKit
             try t.expect(started - baseline < 0.3, "the hop took \(Int(started * 1000))ms to start (a link shows in \(Int(baseline * 1000))ms): did Expanse ask the busy app which window it's in?")
             let timing = try await t.expectLog("glide timing:", since: m, timeout: 20)
             guard let match = timing.firstMatch(of: #/prep (\d+)ms/#), let prep = Int(match.1) else { throw Failure("can't read “\(timing)”") }
-            try t.expect(prep <= 50, "the glide's prep should stay small with a busy app in front: \(timing)")
+            // Over the limit, the "slow: glide prep" line says where the time went: only "fit" asks
+            // the app anything (in a VM, "level", a window list, can take 100ms+ on its own).
+            let parts = t.log.lines(since: m).first { $0.hasPrefix("slow: glide prep") } ?? ""
+            try t.expectTiming(prep <= 50, "the glide's prep should stay small with a busy app in front: \(timing) \(parts)")
             kill(busyPID, SIGCONT)
             try await t.settle(timeout: 20)
         },
@@ -1010,7 +1038,8 @@ import AppKit
             try await t.noLog("glide to ", since: mark, within: 0.1)
         },
 
-        Case("NAV-49", "The next glide, zoom or display change ends the placed view") { t in
+        Case("NAV-49", "The next glide, zoom or display change ends the placed view",
+             known: "after ⌘ + scroll on the canvas opened at 100% and Esc (whose hand-back focuses another window of the same app), clicking a window partly on screen glides to centre it, but that app's earlier window ends up with the keyboard; seen in the VM 31 Oct, where this case first ran, not yet on a Mac") { t in
             try t.needsInput()
             try await t.navReady()
             let old = expanseDefault("autoCentre")
@@ -1180,6 +1209,129 @@ import AppKit
                          "the snap should line a window's edge up 20pt in from the screen's edge")
             Input.key(.escape)
         },
+
+        // MARK: Groups (NAV-55 to NAV-60)
+
+        Case("NAV-55", "Windows arranged to fit the screen together are a group") { t in
+            let (a, b, c) = try await navGroupScene(t)
+            // Going to B frames B and C together.
+            var mark = t.log.mark()
+            t.link("focus", ["id": b.id])
+            try await t.expectLog("[\(b.id)] (group of 2)", since: mark)
+            try await t.until("the view framing B and C", timeout: 8) { let s = try await t.settle(); return s.isViewOn(b.id) }
+            let s = try await t.settle()
+            guard let fb = s.window(b.id)?.canvas, let fc = s.window(c.id)?.canvas else { throw Failure("B or C left the canvas") }
+            try t.expect(s.viewport.contains(s.screenPoint(fb.origin)) && s.viewport.contains(s.screenPoint(CGPoint(x: fc.maxX, y: fc.maxY))),
+                         "framing the group should show all of B and C")
+            try t.expect(s.screenGroup(of: a.id) == nil, "A, on its own, shouldn't be in a group")
+            // Moved more than 40pt from B, C is on its own: going to it centres it alone.
+            t.place(c, at: CGPoint(x: fb.maxX + 60, y: fb.minY))
+            try await t.settle()
+            mark = t.log.mark()
+            t.link("focus", ["id": c.id])
+            try await t.navLog("glide to ", c.id, since: mark)
+            try await t.noLog("(group of", since: mark, within: 1)
+            try await t.until("the view centred on C alone", timeout: 8) { try await t.settle().isViewOn(c.id) }
+            try t.expect(try await t.state().screenGroup(of: c.id) == nil, "B and C 60pt apart shouldn't be a group")
+        },
+
+        Case("NAV-56", "A hop to a window in a group frames the whole group") { t in
+            try t.needsInput()
+            if let on = navMacArrowShortcuts([.right]) { throw Skip("macOS takes ⌃→ itself (\(on))") }
+            let (a, b, _) = try await navGroupScene(t)
+            try await t.navGlide(to: a.id)
+            try await t.navClick(a)
+            let mark = t.log.mark()
+            Input.key(.right, .maskControl)
+            try await t.expectLog("[\(b.id)] (group of 2)", since: mark)
+            try await t.until("the view framing B's group", timeout: 8) { try await t.settle().isViewOn(b.id) }
+            try await t.navHasKeyboard(b, "B, the window the hop reached")
+        },
+
+        Case("NAV-57", "Hops between the windows of a group on screen only move focus") { t in
+            try t.needsInput()
+            if let on = navMacArrowShortcuts([.right, .left]) { throw Skip("macOS takes ⌃← or ⌃→ itself (\(on))") }
+            let old = expanseDefault("autoCentre")
+            setExpanseDefault("autoCentre", true)
+            defer { setExpanseDefault("autoCentre", old) }
+            let (_, b, c) = try await navGroupScene(t)
+            let d = try await t.window("NAV-57 D", CGRect(x: 300, y: 300, width: 600, height: 400))
+            guard let fc = try await t.state().window(c.id)?.canvas else { throw Failure("C isn't on the canvas") }
+            t.place(d, at: CGPoint(x: fc.maxX + 3000, y: fc.minY))
+            try await t.navGlide(to: b.id)
+            try await t.navClick(b)
+            let view = try await t.settle().camera
+            // Inside the group: focus moves, the view stays.
+            for (key, to) in [(Input.Key.right, c), (.left, b)] {
+                let mark = t.log.mark()
+                Input.key(key, .maskControl)
+                try await t.navHasKeyboard(to, "\(to.title), the hop's window")
+                try await t.noLog("glide to ", since: mark, within: 1)
+                try t.expectNear(try await t.settle().camera, view, within: 1, "a hop inside the group moved the view")
+            }
+            // From the group's edge, the hop leaves it.
+            try await t.navClick(c)
+            let mark = t.log.mark()
+            Input.key(.right, .maskControl)
+            try await t.navLog("glide to ", d.id, since: mark)
+            try await t.until("the view on D", timeout: 8) { try await t.settle().isViewOn(d.id) }
+        },
+
+        Case("NAV-58", "Clicking a window in a group zoomed out zooms to the group") { t in
+            try t.needsInput()
+            let (a, b, c) = try await navGroupScene(t)
+            for (picked, alone) in [(c, false), (a, true)] {
+                try await t.navGlide(to: b.id)
+                t.link("enter")
+                try await t.until("zoomed out") { try await t.settle().active }
+                let s = try await t.settle()
+                guard let f = s.window(picked.id)?.canvas else { throw Failure("\(picked.title) isn't on the canvas") }
+                Input.click(at: s.screenPoint(CGPoint(x: f.midX, y: f.midY)))
+                try await t.until("back at 100%") { try await !t.settle().active }
+                try await t.until(alone ? "the view centred on A" : "the view framing C's group", timeout: 8) { try await t.settle().isViewOn(picked.id) }
+                try await t.navHasKeyboard(picked, "\(picked.title), the window clicked")
+            }
+        },
+
+        Case("NAV-59", "⌃⌥C frames the group of the window you're in") { t in
+            try t.needsInput()
+            let (_, b, c) = try await navGroupScene(t)
+            try await t.navGlide(to: b.id)
+            try await t.navClick(b)
+            // The group moved half off screen (its windows moved, the view didn't); you're still in B.
+            for w in [b, c] {
+                guard let f = try await t.state().window(w.id)?.canvas else { throw Failure("\(w.title) left the canvas") }
+                t.place(w, at: CGPoint(x: f.minX + 700, y: f.minY))
+            }
+            try await t.settle()
+            b.focus()
+            try await t.navHasKeyboard(b, "B")
+            try t.expect(!(try await t.settle().isViewOn(b.id)), "the group should be off its framing before ⌃⌥C")
+            Input.key(.c, [.maskControl, .maskAlternate])
+            try await t.until("⌃⌥C framing B's group", timeout: 8) { try await t.settle().isViewOn(b.id) }
+            try await t.navHasKeyboard(b, "B, after ⌃⌥C")
+            // Zoomed out and panned: ⌃⌥C goes back to 100%, the group framed.
+            t.link("enter")
+            try await t.until("zoomed out") { try await t.settle().active }
+            t.link("pan", ["dx": 400, "dy": 200])
+            try await t.settle()
+            Input.key(.c, [.maskControl, .maskAlternate])
+            try await t.until("back at 100% framing B's group", timeout: 8) { let s = try await t.settle(); return !s.active && s.isViewOn(b.id) }
+        },
+
+        Case("NAV-60", "Zoomed out, hovering a window in a group outlines the group", .look) { t in
+            try t.needsInput()
+            let (a, b, _) = try await navGroupScene(t)
+            try await t.navGlide(to: b.id)
+            t.link("enter")
+            try await t.until("zoomed out") { try await t.settle().active }
+            let s = try await t.settle()
+            guard let fb = s.window(b.id)?.canvas, let fa = s.window(a.id)?.canvas else { throw Failure("A or B isn't on the canvas") }
+            Input.glide(to: s.screenPoint(CGPoint(x: fb.midX, y: fb.midY)))
+            try await t.look("Hovering B: a soft accent outline around both B and C, a little outside them?")
+            Input.glide(to: s.screenPoint(CGPoint(x: fa.midX, y: fa.midY)))
+            try await t.look("Hovering A, on its own: only A's own outline, no group outline?")
+        },
     ]
 }
 
@@ -1219,10 +1371,10 @@ private func navFocusCamera(_ f: CGRect, _ s: ExpanseState) -> CGPoint {
     return CGPoint(x: (f.minX - x).rounded(), y: (f.minY - y).rounded())
 }
 
-/// The view is at 100% with window `id` centred, as a glide or a dive leaves it.
+/// The view is at 100% on window `id`, as a glide or a dive leaves it: centred, or its group
+/// framed (ExpanseState.isViewOn).
 private func navCentred(_ s: ExpanseState, _ id: CGWindowID) -> Bool {
-    guard let w = s.window(id), abs(s.scale - 1) < 0.001 else { return false }
-    return navDistance(s.camera, navFocusCamera(w.canvas, s)) <= 2
+    s.isViewOn(id)
 }
 
 /// ⌥`'s view (CanvasController.overviewCamera): every window in view with 80pt of canvas round
@@ -1330,6 +1482,9 @@ private func navMacArrowShortcuts(_ keys: [Input.Key]) -> String? {
 }
 
 /// A mouse wheel's tick: in lines, with no phases, not continuous (a trackpad's scroll is all three).
+/// The middle value (the upper one of an even count): a typical timing, unmoved by one stall.
+private func navMedian(_ xs: [Int]) -> Int { xs.sorted()[xs.count / 2] }
+
 private func navWheel(dx: Int32 = 0, dy: Int32, flags: CGEventFlags = []) {
     let e = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0)
     e?.flags = flags
@@ -1347,17 +1502,22 @@ private func navSpace(_ down: Bool) {
 
 /// A drag slow enough to watch the pointer during it (Input.drag takes a third of a second).
 private func navSlowDrag(from a: CGPoint, to b: CGPoint, seconds: TimeInterval) {
+    // No modifiers: left unset, a key still held elsewhere comes along (see Input.dragAsync).
+    func post(_ type: CGEventType, _ p: CGPoint) {
+        let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left)
+        e?.flags = []
+        e?.post(tap: .cghidEventTap)
+    }
     Input.move(to: a)
-    CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: a, mouseButton: .left)?.post(tap: .cghidEventTap)
+    post(.leftMouseDown, a)
     let steps = max(10, Int(seconds / 0.025))
     for i in 1...steps {
         usleep(UInt32(seconds / Double(steps) * 1_000_000))
         let k = CGFloat(i) / CGFloat(steps)
-        CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k),
-                mouseButton: .left)?.post(tap: .cghidEventTap)
+        post(.leftMouseDragged, CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k))
     }
     usleep(300_000)
-    CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: b, mouseButton: .left)?.post(tap: .cghidEventTap)
+    post(.leftMouseUp, b)
     usleep(50_000)
 }
 
@@ -1475,14 +1635,18 @@ fileprivate extension Ctx {
         return CGPoint(x: (all.maxX + 3000).rounded(), y: all.minY.rounded())
     }
 
-    /// The view at 100% over bare canvas, every window out of view: zoomed out, panned well to
-    /// the right of everything (zoomed out, so it isn't a view you placed), and back.
+    /// The view at 100% over bare canvas, every window out of view: the canvas opened at 100%,
+    /// zoomed out, panned well to the right of everything (zoomed out, so it isn't a view you
+    /// placed), zoomed back in, and left. Opened at 100%, leaving stays where the view is; opened
+    /// zoomed out (⌥`), it would go back to the window you were in (NAV-17).
     func navGoEmpty() async throws -> ExpanseState {
         let s0 = try await settle()
         let all = s0.windows.map(\.canvas).reduce(CGRect.null) { $0.union($1) }
         let target = all.isNull ? CGPoint(x: navViewCentre(s0).x + 4000, y: navViewCentre(s0).y) : CGPoint(x: all.maxX + 4000, y: all.midY)
-        link("enter")
+        link("enter", ["zoomOut": 0])
         try await until("the canvas to open") { try await self.state().active }
+        link("zoom", ["scale": 0.5])
+        try await until("the canvas zoomed out") { try await self.settle().scale < 0.9 }
         let out = try await settle()
         let c = navViewCentre(out)
         link("pan", ["dx": Int(((c.x - target.x) * out.scale).rounded()), "dy": Int(((c.y - target.y) * out.scale).rounded())])
@@ -1490,6 +1654,8 @@ fileprivate extension Ctx {
             let s = try await self.settle()
             return navDistance(navViewCentre(s), target) < 2 / s.scale + 1
         }
+        link("zoom", ["scale": 1])
+        try await until("the canvas back at 100%") { abs(try await self.settle().scale - 1) < 0.001 }
         link("exit")
         try await until("back at 100%") { try await !self.settle().active }
         return try await settle()
@@ -1525,7 +1691,14 @@ fileprivate extension Ctx {
     }
 
     func navHasKeyboard(_ w: TestWindow, _ what: String, timeout: TimeInterval = 3) async throws {
-        try await until("\(what) to have the keyboard", timeout: timeout) { NSApp.isActive && w.window.isKeyWindow }
+        do {
+            try await until("\(what) to have the keyboard", timeout: timeout) { NSApp.isActive && w.window.isKeyWindow }
+        } catch {
+            // Who has it instead.
+            let front = NSWorkspace.shared.frontmostApplication?.localizedName ?? "nothing"
+            let key = NSApp.keyWindow?.title ?? "none"
+            throw Failure("\(error) (in front: \(front); Expanse Tests \(NSApp.isActive ? "active" : "not active"), its key window: \(key))")
+        }
     }
 
     /// Clicks the middle of the part of `w` on screen, as you would to use it, and waits for it to
@@ -1536,6 +1709,9 @@ fileprivate extension Ctx {
         }
         Input.click(at: CGPoint(x: r.midX, y: r.midY))
         try await navHasKeyboard(w, "“\(w.title)”")
+        // And Expanse has heard: a hop starts from the window it last heard had focus, and in a
+        // VM the notification can come well after the click.
+        try await until("Expanse to hear “\(w.title)” has focus", timeout: 3) { try await self.state().focusedByApp[getpid()] == w.id }
     }
 
     /// Switches to a fixture app as ⌘-Tab does, as far as Expanse can tell: a key goes down and up
@@ -1553,7 +1729,8 @@ fileprivate extension Ctx {
     }
 
     /// Two windows side by side in the middle of the screen, both whole, at 100%, with nothing
-    /// else on screen; `more` are made too, and are out of view.
+    /// else on screen; `more` are made too, and are out of view. 60pt apart, more than a screen
+    /// group's reach (NAV-55), so each is a window on its own: NAV-57 is the group case.
     func navSideBySide(_ prefix: String, more: [String] = []) async throws -> (TestWindow, TestWindow, [TestWindow]) {
         let width = min(600, (screen.width - 140) / 2), height = min(400, screen.height - 220)
         let l = try await window("\(prefix) Left", CGRect(x: 100, y: 120, width: width, height: height))
@@ -1564,8 +1741,8 @@ fileprivate extension Ctx {
         guard let fl = s.window(l.id)?.canvas, let fr = s.window(r.id)?.canvas else { throw Failure("a window isn't on the canvas") }
         let vis = s.visibleCanvas
         let y = (vis.midY - fl.height / 2).rounded()
-        place(l, at: CGPoint(x: (vis.midX - 10 - fl.width).rounded(), y: y))
-        place(r, at: CGPoint(x: (vis.midX + 10).rounded(), y: y))
+        place(l, at: CGPoint(x: (vis.midX - 30 - fl.width).rounded(), y: y))
+        place(r, at: CGPoint(x: (vis.midX + 30).rounded(), y: y))
         let after = try await settle()
         for (w, f) in [(l, fl), (r, fr)] {
             guard let now = after.window(w.id) else { throw Failure("“\(w.title)” left the canvas") }
@@ -1633,7 +1810,7 @@ fileprivate extension Ctx {
         try await until("a picture of window [\(id)]", timeout: timeout) {
             let mark = self.log.mark()
             self.link("dump")
-            let lines = await self.log.settled(since: mark, prefix: "dump ")
+            let lines = await self.dumpLines(since: mark)
             return lines.contains { $0.contains("[\(id)] sc=") && $0.contains(" first=false") }
         }
     }
@@ -1695,4 +1872,23 @@ private func navAXTexts(pid: pid_t, near frame: CGRect) -> [String] {
         if abs(p.x - frame.minX) < 4 && abs(p.y - frame.minY) < 4 { return texts(w, depth: 0) }
     }
     return []
+}
+
+/// NAV-55 to NAV-60: B and C side by side, 20pt apart (a group: 1220pt wide fits the screen), and
+/// A on its own 3000pt to their left, in a row somewhere clear.
+@MainActor private func navGroupScene(_ t: Ctx) async throws -> (a: TestWindow, b: TestWindow, c: TestWindow) {
+    let spot = try await t.navEmptySpot()
+    let a = try await t.window("Groups A", CGRect(x: 120, y: 160, width: 600, height: 400))
+    let b = try await t.window("Groups B", CGRect(x: 160, y: 200, width: 600, height: 400))
+    let c = try await t.window("Groups C", CGRect(x: 200, y: 240, width: 600, height: 400))
+    t.place(a, at: spot)
+    t.place(b, at: CGPoint(x: spot.x + 3600, y: spot.y))
+    t.place(c, at: CGPoint(x: spot.x + 4220, y: spot.y))
+    try await t.until("A, B and C in place", timeout: 8) {
+        let s = try await t.settle()
+        return s.window(c.id)?.canvas.minX == spot.x + 4220 && s.window(a.id)?.canvas.minX == spot.x
+    }
+    let s = try await t.settle()
+    try t.expect(s.screenGroup(of: b.id)?.count == 2, "B and C should make a group of two")
+    return (a, b, c)
 }

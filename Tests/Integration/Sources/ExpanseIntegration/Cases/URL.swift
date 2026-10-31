@@ -11,7 +11,7 @@ import AppKit
             t.link("toggle")
             try await t.until("back at 100%") { let s = try await t.state(); return !s.active && s.idle }
             t.link("pause")
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             t.link("toggle")
             try await t.until("toggle to resume") { try await !t.state().paused }
         },
@@ -82,7 +82,7 @@ import AppKit
         Case("URL-09", "expanse://pause and expanse://resume") { t in
             try await t.window("URL-09 A")
             t.link("pause")
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             let mark = t.log.mark()
             t.link("pause")
             try await t.noLog("paused", since: mark + 1, within: 2)
@@ -220,7 +220,7 @@ import AppKit
             try await t.until("A parked") { try await t.state().window(a.id)?.parked == true }
             t.link("poweroff")
             try await t.expectLog("logging out or restarting")
-            try await t.until("paused, windows back") { try await t.state().paused }
+            try await t.untilPaused("paused, windows back")
             try await t.until("A back on screen") { a.real.map { t.screen.intersects($0.insetBy(dx: 40, dy: 40)) } ?? false }
             t.link("resume")
             try await t.until("resumed") { try await !t.state().paused }

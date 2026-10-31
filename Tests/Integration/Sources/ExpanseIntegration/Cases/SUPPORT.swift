@@ -134,7 +134,7 @@ import AppKit
             guard await t.log.wait(since: mark, timeout: 8, { $0.hasPrefix("dump viewport=") }) != nil else {
                 throw Failure("Expanse didn't answer expanse://dump")
             }
-            let lines = await t.log.settled(since: mark, prefix: "dump ")
+            let lines = await t.dumpLines(since: mark)
             let s1 = supportListedWindows(excluding: expanse)
             let state = ExpanseState(lines: lines)
             try t.expect(state.window(mine.id) != nil && !state.unmanaged.contains { $0.id == mine.id },
@@ -200,8 +200,8 @@ import AppKit
             try await t.pause(0.5)
             let report = NSPasteboard.general.string(forType: .string) ?? ""
             let copied = "Copied. For more, turn on Detailed Logging and try again."
-            // The toast follows the clipboard by a moment.
-            try? await t.until("the toast “\(copied)”", timeout: 3) { toasts.saw(copied) }
+            // The toast follows the clipboard by a moment (seconds in a busy VM).
+            try? await t.until("the toast “\(copied)”", timeout: 10) { toasts.saw(copied) }
             try t.expect(toasts.saw(copied), "no toast “\(copied)” (saw \(toasts.texts))")
             // The summary, as SUPPORT-05 has it.
             let head = report.split(separator: "\n", omittingEmptySubsequences: false).prefix(7).map(String.init)

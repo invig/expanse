@@ -47,6 +47,7 @@
   2. Let go of ⌘ mid-drag.
 - **Expected:** With ⌘ held, B follows the pointer exactly, no snaps, no guide lines. Releasing ⌘ mid-drag brings snapping back from the next movement.
 - **Automate:** manual: modifier flags on drag events.
+- **Note:** Since 31 Oct (not released yet) letting go ends the drag where the pointer is, even if the last moves never arrived (a busy window server drops them; the VM did).
 
 ## EDIT-05 Clicking or dragging a window brings it to the front of the canvas
 - **Type:** Feature

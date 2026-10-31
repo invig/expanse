@@ -6,6 +6,8 @@ import Foundation
 final class LogTail: @unchecked Sendable {
     private let lock = NSLock()
     private var lines: [String] = []
+    /// When each line was written (the time of day from `log stream`), for `transcript(since:)`.
+    private var times: [String] = []
     private var process: Process?
 
     func start() throws {
@@ -27,7 +29,9 @@ final class LogTail: @unchecked Sendable {
                 // The first line is a "Filtering the log data…" header, not JSON.
                 guard let json = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                       let message = json["eventMessage"] as? String else { continue }
-                self?.append(message)
+                // "2026-10-31 05:04:07.403000+0000": keep 05:04:07.403.
+                let time = (json["timestamp"] as? String).map { String($0.dropFirst(11).prefix(12)) } ?? ""
+                self?.append(message, at: time)
             }
         }
         try p.run()
@@ -36,8 +40,8 @@ final class LogTail: @unchecked Sendable {
 
     func stop() { process?.terminate() }
 
-    private func append(_ line: String) {
-        lock.lock(); lines.append(line); lock.unlock()
+    private func append(_ line: String, at time: String) {
+        lock.lock(); lines.append(line); times.append(time); lock.unlock()
     }
 
     /// Where the log is up to now.
@@ -50,6 +54,25 @@ final class LogTail: @unchecked Sendable {
     func lines(since mark: Int) -> [String] {
         lock.lock(); defer { lock.unlock() }
         return mark < lines.count ? Array(lines[mark...]) : []
+    }
+
+    /// Lines since `mark` with the time each was written, in seconds since midnight (Expanse's
+    /// clock, so the gap between two lines doesn't include how long the log took to get here).
+    func timedLines(since mark: Int) -> [(time: TimeInterval, line: String)] {
+        lock.lock(); defer { lock.unlock() }
+        guard mark < lines.count else { return [] }
+        return (mark..<lines.count).map { i in
+            let parts = times[i].split(separator: ":").compactMap { Double($0) }
+            let t = parts.count == 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : 0
+            return (t, lines[i])
+        }
+    }
+
+    /// Every line since `mark`, each with the time it was written: what's kept of a failed case.
+    func transcript(since mark: Int) -> String {
+        lock.lock(); defer { lock.unlock() }
+        guard mark < lines.count else { return "" }
+        return (mark..<lines.count).map { "\(times[$0]) \(lines[$0])" }.joined(separator: "\n") + "\n"
     }
 
     /// The first line since `mark` that `match` accepts, waiting up to `timeout` for it.

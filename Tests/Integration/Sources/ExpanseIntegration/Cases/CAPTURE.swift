@@ -135,10 +135,12 @@ import AppKit
             // 1: leave, and zoom out again (as ⌥` does) within 5 s.
             var mark = t.log.mark()
             t.link("exit")
-            try await t.until("back at 100%", timeout: 8) { let s = try await t.state(); return !s.active && s.idle }
-            try await t.pause(1)
-            let lingering = Set(try await t.state().windows.filter(\.capturing).map(\.id))
-            try t.expect(!lingering.isEmpty, "a second after leaving the canvas no window out of view still streamed (streams linger 5 s)")
+            // Straight away: with nearly 40 windows a dump takes a second or more to write in a VM,
+            // and the streams only linger 5 s.
+            var back = try await t.state()
+            try await t.until("back at 100%", timeout: 8) { back = try await t.state(); return !back.active && back.idle }
+            let lingering = Set(back.windows.filter(\.capturing).map(\.id))
+            try t.expect(!lingering.isEmpty, "just after leaving the canvas no window out of view still streamed (streams linger 5 s)")
             t.link("enter")
             let again = try await t.capturePics()
             try t.expect(again.state.active, "the canvas didn't open again")
@@ -194,7 +196,7 @@ import AppKit
                 return false
             }
             let took = (pictured ?? Date()).timeIntervalSince(opened)
-            try t.expect(took <= 2.5, String(format: "the new window's first picture took %.1f s (about a second expected)", took))
+            try t.expectTiming(took <= 2.5, String(format: "the new window's first picture took %.1f s (about a second expected)", took))
             try t.expect(!streamedFirst, "a stream started for the new window before its first picture (that should be a snapshot)")
             try t.expect(replayd.count(.picture, since: rmark) >= 1, "replayd was asked for no picture after the window opened (its first should be a snapshot)")
             let s = try await t.state()
@@ -305,8 +307,7 @@ import AppKit
                              + "and do the clocks in the two “CAPTURE-16 Clock” windows on the canvas keep ticking?")
             try await t.ask("Stop the recording or screen share (you can discard the recording). Then click Done.")
         },
-        Case("CAPTURE-21", "Live pictures recover after replayd crashes",
-             known: "zoomed out, streams replayd's crash stopped stay stopped until the camera moves: a stopped stream only asks for a scan, and askAgain's updateStreamingSoon returns while the canvas is up") { t in
+        Case("CAPTURE-21", "Live pictures recover after replayd crashes") { t in
             let ids = try await t.captureFixtures("CAPTURE-21", windows: 8)
             try await t.captureGrid(ids, columns: 4)
             _ = try await t.captureView(ids)
@@ -403,7 +404,7 @@ import AppKit
             try await t.captureNoStreamsOnScreen("the display changing back")
             try await t.look("Both times, did the windows come back in place with no purple badge on any window on screen?")
         },
-        Case("CAPTURE-26", "streamBudget lowers the number of live window streams") { t in
+        Case("CAPTURE-26", "streamBudget lowers the number of live window streams", time: 300) { t in
             let ids = try await t.captureFixtures("CAPTURE-26", windows: 18)
             try await t.captureGrid(ids, columns: 6)
             let old = expanseDefault("streamBudget")
@@ -431,9 +432,12 @@ import AppKit
                     guard let line = t.log.lines(since: mark).compactMap(captureCountLine).last else {
                         throw Failure("with streamBudget \(value): no “capturing N of M windows” line")
                     }
-                    // Only windows in view queue for one (minus any the panels cover), so not every other one.
-                    try t.expect(line.snapshots > 0,
-                                 "with streamBudget \(value): “\(line.snapshots) more by snapshot”: the windows in view without a stream should get one-off pictures")
+                    // Only windows in view queue for one, minus any the panels cover: with a budget
+                    // of 16 for 18 windows, every one in view may have a stream, and none queue.
+                    if expected <= ids.count / 2 {
+                        try t.expect(line.snapshots > 0,
+                                     "with streamBudget \(value): “\(line.snapshots) more by snapshot”: the windows in view without a stream should get one-off pictures")
+                    }
                 }
             } catch {
                 failure = error
@@ -452,8 +456,13 @@ import AppKit
             let streaming = try await t.state().windows.filter { ids.contains($0.id) && $0.capturing }
             let mark = t.log.mark()
             try captureSignalReplayd("KILL")   // replayd ignores TERM; launchd starts a new one
+            // A running stream stops; one still starting (capturing counts those too) never gets an
+            // answer, and its start times out instead (CAPTURE-21). Either way it's let go.
             for w in streaming {
-                try await t.expectLog("\(w.app)[\(w.id)]: its capture stopped; checking it's still open", since: mark, timeout: 15)
+                let stopped = "\(w.app)[\(w.id)]: its capture stopped; checking it's still open", timedOut = "stream start for \(w.id) timed out"
+                guard await t.log.wait(since: mark, timeout: 15, { $0.hasPrefix(stopped) || $0.hasPrefix(timedOut) }) != nil else {
+                    throw Failure("no “\(stopped)” (or “\(timedOut)”) after replayd restarted")
+                }
             }
             try await t.pause(15)
             let s = try await t.state()
@@ -724,7 +733,7 @@ import AppKit
             try await t.ask("Make the video full screen. Then click Done, and leave the Mac alone until Expanse Tests asks again.")
             try await quiet("At 100% with the video full screen")
             t.link("pause")
-            try await t.until("Expanse to pause", timeout: 8) { try await t.state().paused }
+            try await t.untilPaused("Expanse to pause")
             try await quiet("Paused")
             // Asked before resuming: taking the windows on again takes their first pictures.
             try await t.look("While Expanse Tests waited (the three spells of 80 seconds), did the video play without a single blink?")
@@ -758,7 +767,7 @@ import AppKit
             try await t.until("back at 100%", timeout: 8) { let s = try await t.state(); return !s.active && s.idle }
             // 3: paused, a Space change takes no picture.
             t.link("pause")
-            try await t.until("Expanse to pause", timeout: 8) { try await t.state().paused }
+            try await t.untilPaused("Expanse to pause")
             try await t.pause(1)
             mark = replayd.mark()
             try await t.ask("Switch to another Space and back again (with Mission Control, or a four-finger swipe). Then click Done.")
@@ -1060,7 +1069,7 @@ fileprivate extension Ctx {
         guard await log.wait(since: mark, timeout: 8, { $0.hasPrefix("dump viewport=") }) != nil else {
             throw Failure("Expanse didn't answer expanse://dump")
         }
-        let lines = await log.settled(since: mark, prefix: "dump ")
+        let lines = await dumpLines(since: mark)
         var pics: [CGWindowID: CapturePic] = [:]
         for line in lines {
             guard let m = line.firstMatch(of: #/^dump .*\[(\d+)\] sc=.* capturing=(true|false) first=(true|false) pic=(\d+) /#),

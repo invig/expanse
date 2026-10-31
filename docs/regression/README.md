@@ -1,13 +1,14 @@
 # Regression tests
 
-Every feature Expanse has, and every bug it has fixed, as a test case: 439 cases from all 174
-commits, 0.1.0 to 0.1.34 (26–30 Oct 2026). A bug fix's case says what went wrong **before** the
-fix and what must happen **now**, so a later change can't quietly bring it back. Every case has a
-test: unit tests for the logic, and end-to-end cases that drive the real app (see Running them).
+Every feature Expanse has, and every bug it has fixed, as a test case: 445 cases, from all 174
+commits from 0.1.0 to 0.1.34 (26–30 Oct 2026) and the changes since. A bug fix's case says what
+went wrong **before** the fix and what must happen **now**, so a later change can't quietly bring
+it back. Every case has a test: unit tests for the logic, and end-to-end cases that drive the real
+app (see Running them).
 
 | Area | What it covers | Cases | Bug fixes |
 |---|---|---|---|
-| [NAV](navigation.md) | Canvas, zoom and navigation | 54 | 12 |
+| [NAV](navigation.md) | Canvas, zoom and navigation | 60 | 12 |
 | [EDIT](arranging.md) | Arranging windows on the canvas | 26 | 3 |
 | [PLACE](new-windows.md) | New windows and where they go | 17 | 11 |
 | [TRACK](tracking.md) | Finding and following windows | 42 | 28 |
@@ -22,7 +23,7 @@ test: unit tests for the logic, and end-to-end cases that drive the real app (se
 | [UPDATE](updates-and-install.md) | Updates, release builds and install | 19 | 2 |
 | [URL](url-scripting.md) | expanse:// scripting | 27 | 0 |
 | [SEC](security.md) | Security hardening | 30 | 25 |
-| | **Total** | **439** | **188** |
+| | **Total** | **445** | **188** |
 
 [Coverage](coverage.md) lists every commit with the cases that test it, or why none does (docs
 only, a reverted experiment, an empty merge, a release commit).
@@ -33,26 +34,38 @@ Every case has a test (`scripts/test-coverage.sh` checks it): a unit test for ea
 **unit**, and an end-to-end case, a unit test of its logic, or both, for each case marked
 **manual**. A test's name starts with its case's ID.
 
-**Unit tests** (Tests/ExpanseTests, 490 of them, about a minute). Run them before every commit:
+**Unit tests** (Tests/ExpanseTests, 503 of them, about a minute and a half). Run them before every commit:
 ```bash
 scripts/test.sh
 ```
 `scripts/test.sh --filter NAV` runs one area. They never touch real windows, your layout, logs
 or the Keychain: windows are stand-ins, the display is pretend, and files go to temp folders.
 
-**End-to-end cases** (Tests/Integration, 223). An app, Expanse Tests, drives a running
+**End-to-end cases** (Tests/Integration, 229). An app, Expanse Tests, drives a running
 development build of Expanse with links, its own windows, other apps and real key and pointer
 events, and reads back what Expanse did from its log. They move real windows, so run them in the
 VM (expanse-demo), not on your desktop:
 ```bash
 scripts/vm-integration.sh
 ```
-That builds both apps, copies them into the VM, runs the 139 cases that need nobody, and copies
-the report back to build/integration-vm/. `--all` adds the 54 guided cases (it asks you to do
-something, such as lock the Mac or unplug a display, in a panel at the top of the screen, then
-checks the result) and the 30 look cases (it sets something up and asks whether it looks right).
-`--area NAV` or `--only NAV-03,URL-01` narrows it. A few long cases skip unless given time
-(`--timeout 800`); a few need a Developer ID release (`--release /path/to/Expanse.app`).
+That builds both apps, copies them into the VM, runs the 144 cases that need nobody, and copies
+the report back to build/integration-vm/, with Expanse's log for each failed case beside it
+(`NAV-17.log`: the VM keeps its detailed log only for minutes). `--all` adds the 54 guided cases
+(it asks you to do something, such as lock the Mac or unplug a display, in a panel at the top of
+the screen, then checks the result) and the 31 look cases (it sets something up and asks whether
+it looks right). `--area NAV` or `--only NAV-03,URL-01` narrows it, `--repeat 3` runs the chosen
+cases three times over (to tell a flaky case from a broken one), and `--keep-logs` keeps the log of
+every case, passed ones too. A few long cases skip unless given time (`--timeout 800`); a few need
+a Developer ID release (`--release /path/to/Expanse.app`).
+
+The VM's window server stalls now and then (a frame, an event or a call held up for 100ms to
+several seconds), so limits on smoothness and speed (`expectTiming`) don't fail a case there: a
+miss is noted in the report beside the pass, and the rest of the case still has to pass. Judge
+those on a Mac. Restart the VM before a full run (`tart stop expanse-demo`, then
+`tart run expanse-demo`): after an hour or two of cases its window server is slower still. Keep
+its window showing: now and then macOS asks again whether Expanse may record the screen ("bypass
+the system private window picker"), and until you click Allow its prompt sits in the middle of
+the screen and takes the cases' clicks. A heavy app on this Mac (a game) slows the VM too.
 
 One-time VM setup: this Mac's SSH key in the VM (`ssh-copy-id admin@<VM address>`, the
 image's password is admin); Expanse Tests switched on in the VM's System Settings › Privacy &
@@ -107,34 +120,19 @@ renumbered, so a case ID in a commit message stays valid.
 
 ## Known issues the tests record
 
-- **PERSIST-21:** a layout that hasn't changed can still count as changed, so it's saved again
-  and, once the newest snapshot is 15 minutes old, snapshotted, pushing out an older one.
-  `CanvasController.save()` compares JSON made without `.sortedKeys`, and the key order varies
-  between encodes (one value gave 6 different encodings in a run). Fix: `.sortedKeys`, as
-  `LayoutStore.write` has.
-- **NAV-53:** a window a little narrower than the screen isn't centred by the snap: it lands
-  12–20pt from an edge, as the shorter of the moves that leave nothing cut off.
-- **SEC-01:** `pan?dx=nan&dy=1` drops the nan but still pans by `dy`. The case expects the view
-  left alone.
-- **SEC-22:** a number that isn't finite can't be written in JSON; the nearest (`1e400`) makes
-  the whole layout file unreadable, so it's ignored (as SEC-21), not just that entry. Safe; the
-  case's wording needs changing.
-- **UI-11** (end-to-end): zoomed out, the panel's Welcome opens the walkthrough at once, then
-  leaving the canvas hands focus back to the window in view, which covers it.
-  `AppDelegate.showWelcome` calls `controller.exit()` and `Onboarding.show` together; showing it
-  from `exit(then:)` would wait. SETUP-07's zoomed-out half meets the same thing.
-- **CAPTURE-21** (end-to-end): zoomed out, when replayd crashes the pictures stay frozen until
-  the camera moves. A stopped stream only asks for a window scan, and `askAgain` →
-  `updateStreamingSoon` returns while the canvas is up, so nothing starts the streams again. (Seen
-  in the VM: six streams stopped, none restarted in 16s.)
-- **DISPLAY-01** (end-to-end): in the 20s after a display change, only moves made while the
-  mouse button is down count, and Expanse follows a drag at most every 100ms: the window's last
-  stretch, after you let go, isn't taken, so its canvas spot ends a little short of the real window
-  (26×15pt in the VM). Outside that time the final spot is caught (TRACK-21).
-- **NAV-17** (end-to-end): leaving the canvas hands focus to the front window in view; when that
-  one is cut off at the screen's edge, auto-centre takes Expanse's own hand-back for a focus change
-  and glides to it, away from the middle you were looking at. (`viewPlaced` stops this after you
-  move the view at 100%, not after moving it zoomed out.)
+The bugs the tests found when they were written (31 Oct) are fixed, and their cases now check the
+fix: PERSIST-21 (an unchanged layout counted as changed), UI-11 (Welcome behind a window),
+CAPTURE-21 (pictures frozen after replayd crashed), DISPLAY-01 (the end of a drag after a display
+change), NAV-53 (the snap and a nearly screen-wide window) and SEC-01 (a pan link with a bad
+number). SEC-22's wording was wrong, not the code. Mark a new one with `withKnownIssue` in a unit
+test, or `known:` on an end-to-end case, until it's fixed.
+
+- **NAV-49** (end-to-end, first run 31 Oct; it skipped before, for want of bare desktop): after
+  ⌘ + scroll on the canvas opened at 100% and Esc, whose hand-back focuses another window of the
+  same app, a click on a window partly on screen glides to centre it, but the app's earlier window
+  (B) ends up with the keyboard. Seen every time in the VM; not yet checked on a Mac, so it may be
+  a real "typing goes to the wrong window" bug or the VM. The hop step before it passes.
+
 - **SUPPORT-01** (catalogue wording): a glide's moves are logged as one `windows landed after
   …ms (apps)` line, not a `move …` line each (`commitAsync`); single moves still log `move`. The
   case checks for both.
@@ -158,6 +156,25 @@ What the first runs in the VM taught (Tests/Integration):
   goes to the nearest window, whoever's it is), and don't count on which window gets focus when
   one closes or an app hides.
 - replayd ignores SIGTERM: `killall -KILL replayd` is a restart (launchd starts a new one).
+- Two windows a gap apart that fit the screen together are a screen group (NAV-55): a hop
+  between them only moves focus, and going to one frames both. Put windows more than 40pt apart
+  when a case is about one window on its own.
+- Check a timing with `expectTiming`, and on the typical run of several (the median) where it
+  can, not every one: one stall in the VM shouldn't decide it, and waiting on an app slows every
+  run.
+- A case that goes round many times asks for longer than the default 90s: `Case(…, time: 180)`.
+- Set `flags` on every mouse event you post (`[]` for none): left unset, it can pick up modifier
+  flags from earlier keys, and a title-bar drag then doesn't move the window (TRACK-06, TRACK-21).
+- macOS's "App Running in Background" notice puts a Notification Center window over the whole
+  screen that takes clicks and drags; the runner closes it before the run and between cases.
+- Expanse keeps the saved spots of windows that haven't come back and, for three minutes after it
+  starts or resumes, gives them to windows of apps that have just launched, matched by app alone:
+  every fixture is Expanse Tests. So the VM script clears Expanse Tests' closed windows from
+  Expanse's layout before a run, and after a case that started or resumed Expanse the runner
+  starts it again without them.
+- After `expanse://pause`, wait with `untilPaused()`: pausing puts every window back through
+  Accessibility on Expanse's main thread, and in the VM, just after windows moved, that has taken
+  more than the 8s a dump is given.
 - Expanse logs "capturing N of M" only when the number changes: mark the log before what
   changes it.
 - A copy of an app that Expanse Tests opens counts as its request, so macOS hands the front back
@@ -185,12 +202,28 @@ yet:
 - **Capture while replayd is stuck:** zoomed out with more than 10 windows to stream,
   `updateStreaming` seems to schedule another pass every 10ms for as long as the stall lasts,
   since starts held back never count as running (CAPTURE-31/32).
-- **Pictures after replayd crashes, zoomed out:** `askAgain` → `updateStreamingSoon` returns
-  early while the canvas is open, so streams a crash killed may stay down until the camera moves
-  (CAPTURE-21 checks the catalogue's "pictures update again while staying zoomed out").
 - **The Expanse tile right after a window goes full screen:** `canvasDesktop` is the Space of
   the front-most window on the canvas, which can briefly be the new full-screen window, so the
   tile (and `space?name=expanse`) would point at the full-screen Space.
+- **A display change with many windows, on a slow window server:** each window macOS moves
+  costs the main thread Accessibility reads (`AX.position`, `AX.isFullScreen`) and a window-server
+  call for the Space (`Spaces.inFullScreenSpace`, in `realWindowChanged`). In the VM, with 67
+  windows, that added up to freezes of 1 to 10s (DISPLAY-10). Asking for the Space once per batch
+  of moves, not once per window, would cut most of it.
+- **A window shoved while another leaves full screen:** in SPACES-23 (VM, 1 Nov, once in several
+  runs) macOS moved a window that was half off the screen's left edge onto it as A came back from
+  full screen, and Expanse followed that as a move (`follow … moved to`), so the window's spot
+  changed. `movedByFullScreen` only covers the window going full screen itself.
+- **Pause and Quit hold Expanse up while apps are slow:** `restoreOriginals` moves every window
+  back with Accessibility calls on the main thread, one after another, so with a busy app (or
+  in a VM) Expanse answers nothing for seconds (URL-01 saw more than 8s). `commitAsync` already
+  moves windows off the main thread; pausing could too, apart from quitting, which has to wait.
+- **The window list on the main thread:** `canvasLevel` reads `CGWindowListCopyWindowInfo` to
+  keep the canvas under any dialog: at the start of every glide, and every 0.5s while the overlay
+  is up (`keepDialogsVisible`). On a Mac that's milliseconds; in the VM, with its window server
+  busy, it took 20ms to over 1s a call (`slow: glide prep … level Nms`), and a sample during
+  DISPLAY-10's 10s freeze found the main thread there 40% of the time. Reading the list on a
+  background queue and keeping the level up to date would take it off the main thread.
 - **Tidy Up before the layout is first fitted to a screen:** a window its app keeps a few points
   short of its chosen size (Terminal's rounding) makes its right-hand neighbour count as out of
   place, so Tidy moves the neighbour by the shortfall.

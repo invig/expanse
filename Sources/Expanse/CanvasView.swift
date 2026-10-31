@@ -20,6 +20,8 @@ final class CanvasView: NSView {
     private let guides = CAShapeLayer()
     private let marquee = CAShapeLayer()
     private let selectionBox = CAShapeLayer()
+    /// Around the screen group of the window you're hovering, zoomed out: what a click goes to.
+    private let groupOutline = CAShapeLayer()
     /// Windows picked with a selection box or ⇧-click; dragging one moves them all.
     private(set) var selected = Set<CGWindowID>()
     private var spaceHeld = false
@@ -67,7 +69,10 @@ final class CanvasView: NSView {
         selectionBox.strokeColor = NSColor.controlAccentColor.cgColor
         selectionBox.lineWidth = 1
         selectionBox.lineDashPattern = [5, 4]
-        for l in [marquee, selectionBox] {
+        groupOutline.fillColor = nil
+        groupOutline.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.45).cgColor
+        groupOutline.lineWidth = 1.5
+        for l in [marquee, selectionBox, groupOutline] {
             l.actions = ["path": NSNull()]
             root.addSublayer(l)
         }
@@ -86,7 +91,7 @@ final class CanvasView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         world.anchorPoint = .zero
-        for l in [world, labels, guides, marquee, selectionBox] { l.frame = bounds }
+        for l in [world, labels, guides, marquee, selectionBox, groupOutline] { l.frame = bounds }
         // Pinned exactly where the real desktop picture is: the top strip sits under the menu bar.
         wallpaper.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + menuBarHeight)
         minimapGlass.frame = CGRect(origin: CGPoint(x: bounds.maxX - Minimap.size.width - 16, y: 16), size: Minimap.size)
@@ -238,6 +243,12 @@ final class CanvasView: NSView {
             selectionBox.path = CGPath(roundedRect: flip(box), cornerWidth: 6, cornerHeight: 6, transform: nil)
         } else {
             selectionBox.path = nil
+        }
+        if c.isActive, picked.count < 2, let w = hovered, let group = c.screenGroup(of: w) {
+            let box = c.camera.toView(CanvasController.outline(of: group)).insetBy(dx: -12, dy: -12)
+            groupOutline.path = CGPath(roundedRect: flip(box), cornerWidth: 10, cornerHeight: 10, transform: nil)
+        } else {
+            groupOutline.path = nil
         }
         minimap.update(windows: c.windows.map(\.canvasFrame), viewport: c.camera.toCanvas(viewRect), scale: c.camera.scale)
         // Gliding at 100%, the overlay is over the real windows, showing their pictures for a
@@ -472,6 +483,14 @@ final class CanvasView: NSView {
     }
 
     override func mouseUp(with e: NSEvent) {
+        // Where you let go is where a window drag ends, even if the last moves before it never
+        // came: a busy window server drops them, and the window stopped short of the pointer.
+        if dragged {
+            switch drag {
+            case .window, .group: mouseDragged(with: e)
+            default: break
+            }
+        }
         lastDragEvent = 0
         showGuides([])
         marquee.path = nil
@@ -535,7 +554,6 @@ final class CanvasView: NSView {
         case kVK_Return:
             controller.exit(focus: hovered ?? controller.windows.last)
         case kVK_ANSI_0:
-            controller.cameraMovedByUser()
             controller.animate(to: controller.fitCamera())
         case kVK_ANSI_T:
             controller.tidy()
@@ -544,12 +562,10 @@ final class CanvasView: NSView {
         case kVK_ANSI_Minus:
             var t = controller.camera
             t.zoom(to: t.scale / 1.5, anchor: center)
-            controller.cameraMovedByUser()
             controller.animate(to: t, duration: 0.22)
         case kVK_ANSI_Equal:
             var t = controller.camera
             t.zoom(to: t.scale * 1.5, anchor: center)
-            controller.cameraMovedByUser()
             controller.animate(to: t, duration: 0.22)
         case kVK_ANSI_W where e.modifierFlags.contains(.command):
             // The selection if there is one, otherwise the window under the pointer.

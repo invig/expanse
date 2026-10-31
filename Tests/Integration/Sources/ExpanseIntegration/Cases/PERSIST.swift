@@ -86,7 +86,7 @@ import ApplicationServices
             let mark = t.log.mark()
             t.link("pause")
             try await t.persistExpectLine("paused", since: mark)
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             try await t.persistExpectBack(a.id, "the parked window", at: aAt)
             try await t.persistExpectBack(b.id, "the moved window", at: bAt)
             let s = try await t.state()
@@ -110,7 +110,7 @@ import ApplicationServices
             t.link("focus", ["id": ws[0].id])
             try await t.until("A in view") { try await t.settle().window(ws[0].id)?.parked == false }
             t.link("pause")
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             try await t.pause(0.5)
             let frames = ws.map(\.real)
             let mark = t.log.mark()
@@ -150,7 +150,7 @@ import ApplicationServices
             try await t.until("B parked") { try await t.state().window(ws[1].id)?.parked == true }
             let before = try await t.settle()
             t.link("pause")
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             try await t.pause(1)
             let mark = t.log.mark()
             t.link("resume")
@@ -178,8 +178,11 @@ import ApplicationServices
             let (m, mAt) = try await t.persistWindow("PERSIST-10 Minimised", CGRect(x: 180, y: 200, width: 500, height: 340))
             let (f, fid, fAt) = try await t.persistFixture("PERSIST-10 TextEdit")
             @MainActor func outOfView() async throws {
-                t.place(m, at: persistOrigin)
-                t.persistPlace(fid, at: CGPoint(x: persistOrigin.x + 700, y: persistOrigin.y))
+                // Clear of wherever the view is: an earlier case can leave it at persistOrigin.
+                let vis = try await t.state().visibleCanvas
+                let away = CGPoint(x: (vis.maxX + 3000).rounded(), y: vis.minY.rounded())
+                t.place(m, at: away)
+                t.persistPlace(fid, at: CGPoint(x: away.x + 700, y: away.y))
                 try await t.until("both parked", timeout: 10) {
                     let s = try await t.state()
                     return s.window(m.id)?.parked == true && s.window(fid)?.parked == true
@@ -201,7 +204,7 @@ import ApplicationServices
             // Pause.
             try await outOfView()
             t.link("pause")
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             try await shownAgain("pausing")
             t.link("resume")
             try await t.until("both back on the canvas", timeout: 10) {
@@ -254,7 +257,7 @@ import ApplicationServices
             let hop = try await t.persistLogIndex("navigate to", since: mark)
             let landed = try await t.persistLogIndex("glide timing:", since: hop)
             _ = try await t.persistExpectLine("paused", since: landed, timeout: 8)
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             try await expectAllBack("pausing during a hop")
         },
         Case("PERSIST-14", "Windows put back on Quit come back at full size") { t in
@@ -412,7 +415,7 @@ import ApplicationServices
             t.place(ws[0], at: CGPoint(x: persistOrigin.x, y: persistOrigin.y + 900))
             try await t.settle()
             t.link("pause")
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             try await t.pause(0.5)
             let frames = ws.map(\.real)
             let mark = t.log.mark()
@@ -614,7 +617,7 @@ import ApplicationServices
             t.link("poweroff")
             let began = try await t.persistLogIndex("logging out or restarting", since: mark)
             let start = Date()
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             let notice = try await t.persistLogIndex("still running: the logout was cancelled, so resuming", since: began, timeout: 200)
             let waited = Date().timeIntervalSince(start)
             try t.expect(waited > 170, "Expanse resumed by itself after \(Int(waited))s, not 3 minutes")
@@ -628,13 +631,13 @@ import ApplicationServices
             t.link("poweroff")
             _ = try await t.persistLogIndex("logging out or restarting", since: mark)
             let again = Date()
-            try await t.until("paused") { try await t.state().paused }
+            try await t.untilPaused("paused")
             try await t.pause(5)
             t.link("resume")
             try await t.until("resumed by you") { try await !t.state().paused }
             try await t.pause(2)
             t.link("pause")
-            try await t.until("paused by you") { try await t.state().paused }
+            try await t.untilPaused("paused by you")
             try await t.noLog("still running: the logout was cancelled", since: mark, within: max(185 - Date().timeIntervalSince(again), 1))
             let paused = try await t.state().paused
             try t.expect(paused, "the pause you made should stay after the 3 minutes")

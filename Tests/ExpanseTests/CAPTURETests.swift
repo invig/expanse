@@ -558,6 +558,39 @@ import ObjectiveC
         }
     }
 
+    @Test("CAPTURE-21 Zoomed out, a scan that's answered starts the streams replayd dropped (logic)")
+    func capture21() async throws {
+        // replayd held as stuck: a start is asked for (the capture wants it) but nothing starts.
+        try await withCapture { lab in
+            let ws = [window(1, CGRect(x: 0, y: 0, width: 800, height: 600)), window(2, CGRect(x: 900, y: 0, width: 800, height: 600))]
+            let c = lab.canvas(ws, zoomedOut: true)
+            c.camera = c.overviewCamera()
+            c.firstSync = false
+            #expect(ws.allSatisfy { !$0.capture.wanted && !$0.capture.isRunning })
+            let scan = { c.apply(ws.map { Fake.scWindow(id: $0.id, frame: $0.canvasFrame) }, ax: CanvasController.AXSnapshot()) }
+            // An ordinary scan, no stream having stopped: streaming isn't worked out again (in a
+            // VM, retrying starts that timed out on every scan stalled the window server).
+            scan()
+            #expect(ws.allSatisfy { !$0.capture.wanted })
+            // replayd restarted and dropped the streams (each stream's onStop); the scan that
+            // follows comes back, but the camera is still moving: the capture update at the end of
+            // its animation sees to it.
+            c.capturesStopped = true
+            c.animation = CanvasController.CameraAnimation(from: c.camera, to: c.camera, start: CACurrentMediaTime(), duration: 0.3)
+            scan()
+            #expect(ws.allSatisfy { !$0.capture.wanted })
+            #expect(c.capturesStopped)
+            c.animation = nil
+            // At rest.
+            scan()
+            lab.stopTimer(c)
+            #expect(ws.allSatisfy { $0.capture.wanted }, "every window in view should be asked to stream again, the camera unmoved")
+            #expect(!c.capturesStopped)
+            c.cancelAnimation()
+            c.isActive = false
+        }
+    }
+
     @Test("CAPTURE-07 Going straight back to the canvas reuses its pictures (logic)")
     func capture07() async throws {
         try await withCapture { lab in

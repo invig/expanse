@@ -13,12 +13,21 @@ import AppKit
 //   --out DIR         where the report goes (default ~/Library/Logs/ExpanseTests)
 //   --expanse PATH    the Expanse.app to relaunch when a case needs to (default: the running one)
 //   --timeout SECS    for each automatic case (default 90)
+//   --repeat N        run the chosen cases N times over (to tell a flaky case from a broken one)
+//   --keep-logs       keep Expanse's log for every case, not only the failed ones
+//   --forget-own-windows  take this app's closed windows out of Expanse's saved layout, then quit
+//                     (with Expanse not running; scripts/vm-integration.sh does it before each run)
 //
 // With --fixture NAME it's instead a stand-in app for a case: it opens windows and does what the
 // runner tells it (see Fixture in TestWindows.swift).
 
 let args = CommandLine.arguments
 func option(_ name: String) -> String? { args.firstIndex(of: name).flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil } }
+
+if args.contains("--forget-own-windows") {
+    forgetOwnWindowsInExpanseLayout()
+    exit(0)
+}
 
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
@@ -62,7 +71,8 @@ app.run()
         }
         if args.contains("--guided") { cases = cases.filter { $0.kind != .auto } }
         else if !args.contains("--all") && option("--only") == nil { cases = cases.filter { $0.kind == .auto } }
-        return cases
+        let times = max(1, Int(option("--repeat") ?? "1") ?? 1)
+        return Array(repeating: cases, count: times).flatMap { $0 }
     }
 
     private func run() async -> Int32 {
@@ -101,6 +111,7 @@ app.run()
             progress("\(error)")
             return 2
         }
+        closeBackgroundItemNotices()
         progress("Expanse Tests: \(cases.count) cases; Accessibility for input: \(Input.allowed ? "yes" : "no")")
         let timeout = Double(option("--timeout") ?? "90") ?? 90
         for c in cases {
@@ -113,8 +124,10 @@ app.run()
             t.begin()
             let began = Date()
             do {
-                try await withTimeout(c.kind == .auto ? timeout : 3600) { try await c.run(t) }
-                record(c, "passed", c.known.map { "the known issue didn't show (\($0)): fixed?" } ?? "", Date().timeIntervalSince(began))
+                try await withTimeout(c.kind == .auto ? max(timeout, c.time) : 3600) { try await c.run(t) }
+                let timing = t.notes.isEmpty ? "" : "in a VM, so not failed on: \(t.notes.joined(separator: "; "))"
+                record(c, "passed", c.known.map { "the known issue didn't show (\($0)): fixed?" } ?? timing, Date().timeIntervalSince(began))
+                if args.contains("--keep-logs") { keepLog(c, t) }
             } catch let s as Skip {
                 record(c, "skipped", s.description, Date().timeIntervalSince(began))
             } catch {
@@ -122,6 +135,8 @@ app.run()
                     record(c, "known", "\(known) — \(error)", Date().timeIntervalSince(began))
                 } else {
                     record(c, "FAILED", "\(error)", Date().timeIntervalSince(began))
+                    // Expanse's log in a VM keeps info lines only for minutes: keep the case's now.
+                    keepLog(c, t)
                 }
             }
         }
@@ -143,6 +158,14 @@ app.run()
             try await group.next()
             group.cancelAll()
         }
+    }
+
+    /// Expanse's log during case `c`, next to the report: a VM keeps its info lines only for
+    /// minutes. With --repeat, each run of a case keeps its own (NAV-36.log, NAV-36-2.log…).
+    private func keepLog(_ c: Case, _ t: Ctx) {
+        let runs = results.filter { $0.c.id == c.id }.count
+        let name = runs > 1 ? "\(c.id)-\(runs).log" : "\(c.id).log"
+        try? t.log.transcript(since: t.start).write(to: out.appendingPathComponent(name), atomically: true, encoding: .utf8)
     }
 
     private func record(_ c: Case, _ outcome: String, _ detail: String, _ seconds: Double) {
@@ -208,7 +231,7 @@ app.run()
     private func open() {
         let i = windows.count
         let offset = CGFloat(160 + 40 * i)
-        windows.append(TestWindow(title: "\(name) \(i + 1)", frame: CGRect(origin: CGPoint(x: offset, y: offset), size: size)))
+        windows.append(TestWindow(title: Fixture.title(name, i + 1), frame: CGRect(origin: CGPoint(x: offset, y: offset), size: size)))
     }
 
     private func handle(_ info: [String: String]) {

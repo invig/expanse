@@ -124,6 +124,11 @@ func isOnScreen(_ id: CGWindowID) -> Bool {
         }
     }
 
+    /// The title of the fixture's `number`th window (from 1).
+    func title(_ number: Int) -> String { Self.title(name, number) }
+
+    nonisolated static func title(_ name: String, _ number: Int) -> String { "\(name) \(number)" }
+
     var pid: pid_t? { app?.processIdentifier }
 
     /// Starts it with `count` windows of `size`, and waits until they're open.
@@ -134,7 +139,8 @@ func isOnScreen(_ id: CGWindowID) -> Bool {
         config.arguments = ["--fixture", name, "--windows", "\(count)", "--size", "\(Int(size.width))x\(Int(size.height))"]
         let seen = updates
         app = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config)
-        try await waitForUpdate(after: seen, "\(name) didn't open its windows")
+        // Fifty windows in a busy VM can take a while.
+        try await waitForUpdate(after: seen, timeout: 30, "\(name) didn't open its windows")
         // The window server lists new windows a moment after they're made.
         for _ in 0..<60 where !windows.allSatisfy({ realFrame($0) != nil }) { try await Task.sleep(nanoseconds: 50_000_000) }
     }
@@ -161,8 +167,9 @@ func isOnScreen(_ id: CGWindowID) -> Bool {
         windows = []
     }
 
-    private func waitForUpdate(after seen: Int, _ message: String) async throws {
-        for _ in 0..<100 {
+    private func waitForUpdate(after seen: Int, timeout: TimeInterval = 10, _ message: String) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
             if updates > seen { return }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
