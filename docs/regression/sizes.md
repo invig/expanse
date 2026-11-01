@@ -184,3 +184,64 @@
 - **Expected:** The script's resize happens, but it isn't taken as your size (TextEdit wasn't the app in front): gliding to the window puts it back to the size you chose.
 - **Check in log:** On the glide, `resize TextEdit[<id>] {600, 400} -> {<your size>}`.
 - **Automate:** manual: the rule sits in `realWindowChanged` and reads live input timing.
+
+## SIZE-15 Resizing a window by its edges zoomed out
+- **Type:** Feature
+- **Area:** SIZE
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Zoomed out, a TextEdit window on its own.
+- **Steps:**
+  1. Hover just inside its right edge, then its bottom-right corner.
+  2. Drag the corner out, holding ⌘ so it doesn't snap; let go.
+  3. Zoom into it (click).
+  4. Drag its left edge right, past where it would be 200pt wide.
+- **Expected:** Step 1: resize pointers. Step 2: the frame follows with "W × H" beside it, the picture undistorted; on letting go the real window takes the size. Step 3: TextEdit at that size, which is now its chosen size (going away and back keeps it). Step 4: it stops at 200pt wide, its right edge staying. A VM's window has no edges to drag.
+- **Check in log:** `resize TextEdit[<id>] {…} -> {…} (handle)`.
+- **Automate:** unit: edges, the minimum, the size taken (`WindowEdges.move`, the `.resize` drag).
+
+## SIZE-16 A resized edge snaps to neighbours and to screen halves
+- **Type:** Feature
+- **Area:** SIZE
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Zoomed out, two windows side by side a little apart.
+- **Steps:**
+  1. Drag the left window's right edge towards the other.
+  2. On a window alone, drag its right edge to about half the screen's width.
+- **Expected:** Step 1: the edge snaps a gap short of the neighbour (and to its edges), with a guide line. Step 2: it snaps to exactly half the screen (as a screen's half is), and the full width; the bottom edge likewise to full and half height.
+- **Automate:** unit: `CanvasController.snapEdges`.
+
+## SIZE-17 The right-click size menu zoomed out
+- **Type:** Feature
+- **Area:** SIZE
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Zoomed out, a window with another just to its right.
+- **Steps:**
+  1. Right-click the window: Half screen; then Quarter screen; then Fill screen.
+  2. Right-click it: Same size as…, then click another window.
+  3. Right-click empty canvas.
+- **Expected:** Step 1: each size, with the gap round it, the window's top-left staying put; the neighbour moves clear. Step 2: the pointer turns to a crosshair and a toast says to click the window whose size to take; it takes that size (Esc instead: nothing). Step 3: New screen, Tidy up, Fit everything. A VM's window has the sizes greyed out.
+- **Check in log:** `resize <App>[<id>] {…} -> {…} (menu)`.
+- **Automate:** unit: the menu's items and what they do.
+
+## SIZE-18 Even up: Same width, height or size
+- **Type:** Feature
+- **Area:** SIZE
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Zoomed out, three windows of different sizes in a row, selected.
+- **Steps:**
+  1. Right-click the first: Same height.
+  2. Right-click it: Same width.
+- **Expected:** Step 1: the others take its height, keeping their top-left. Step 2: its width too; a window that now overlaps the next is pushed along, a gap after it. With one window selected there's no Same width.
+- **Check in log:** `even up: height of <App>[<id>] for 2 windows`.
+- **Automate:** unit: `CanvasController.evenUp`.
+
+## SIZE-19 Back to its own size
+- **Type:** Feature
+- **Area:** SIZE
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Zoomed out, a window you've resized since Expanse took it on.
+- **Steps:**
+  1. Right-click it: Back to its own size.
+- **Expected:** It takes the size it had when Expanse first took it on (the size Quit puts back), top-left staying put.
+- **Check in log:** `resize <App>[<id>] {…} -> {…} (its own size)`.
+- **Automate:** unit: the menu item and `originalFrame`.

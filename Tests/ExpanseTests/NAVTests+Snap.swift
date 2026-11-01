@@ -46,15 +46,39 @@ extension NAVTests {
             WindowCapture.replaydStuck = stuck
         }
         c.camera = Camera(origin: CGPoint(x: 100, y: 0), scale: 1)
-        // One tick of the wheel: no phases, so only a pause can say it's over.
-        c.view.scrollWheel(with: try #require(Self.scroll(-1, precise: false)))
-        let snapped = c.snappedCamera()
+        // One tick of the wheel, sideways: no phases, so only a pause can say it's over.
+        c.view.scrollWheel(with: try #require(Self.scroll(0, dx: -1, precise: false)))
+        let snapped = c.snappedCamera(going: c.scrollTravel)
         try #require(snapped != c.camera)
         #expect(c.animation == nil) // not straight away
         #expect(c.view.scrollEnd != nil)
         try await Task.sleep(for: .milliseconds(700))
         // About a quarter of a second after the tick: snapping, or snapped.
         #expect(c.animation?.to == snapped || c.camera == snapped)
+    }
+
+    @Test("NAV-61 The snap after a scroll carries on your way, never pulling you back")
+    func nav61() {
+        let c = TestCanvas.make(windows: Self.snapRow())
+        // Scrolled right (the contents moving left) to where A is cut off at the left and C at the
+        // right: the snap left on its own pulled the view 172pt back left, to A.
+        c.camera = Camera(origin: CGPoint(x: 100, y: 0), scale: 1)
+        #expect(c.snappedCamera() == Camera(origin: CGPoint(x: -72, y: 0), scale: 1))
+        let right = c.snappedCamera(going: CGVector(dx: -300, dy: 0))
+        #expect(right.origin.x >= 100 - 40, "pulled back to \(right.origin.x)")
+        // Going the other way, back towards A, the same spot snaps on to A.
+        #expect(c.snappedCamera(going: CGVector(dx: 300, dy: 0)) == Camera(origin: CGPoint(x: -72, y: 0), scale: 1))
+        // Scrolling up or down only: no more than a tidying 40pt sideways.
+        let down = c.snappedCamera(going: CGVector(dx: 0, dy: -200))
+        #expect(abs(down.origin.x - 100) <= 40)
+        // Through the view: a scroll to the right, then its end.
+        try? Self.onCanvas(c) {
+            c.camera = Camera(origin: CGPoint(x: 0, y: 0), scale: 1)
+            c.pan(by: CGVector(dx: -100, dy: 0), scrolling: true)
+            c.scrollEnded()
+            #expect((c.animation?.to.origin.x ?? c.camera.origin.x) >= 60)
+            #expect(c.scrollTravel == .zero)
+        }
     }
 
     @Test("NAV-53 A window that nearly fills the screen is centred by the snap")

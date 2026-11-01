@@ -7,6 +7,14 @@ What we might build next. New requests go in as they come up, and finished work 
 Fixed or built since 0.1.34, for the next release's notes:
 
 - **Groups of windows as places** (Next up 7).
+- **Screens you build, and resizing zoomed out** (Next up 1 and 8): drop a window on another's
+  side or corner to make a screen of halves and quarters, or select 2–4 and press S, or use the
+  screen tool (S with nothing selected); drag a screen's ring to move it whole. Drag a window's
+  edges to resize it, or right-click for Fill / Half / Quarter screen, Same size as…, Back to its
+  own size and, with several selected, Same width / height / size. ⌘Z undoes each. Settings ›
+  Gaps between windows: 20pt, 10pt or none (EDIT-27 to EDIT-34, SIZE-15 to SIZE-19).
+- **Scrolling at 100% is easier to steer**: the snap when a scroll ends carries on your way or
+  tidies by at most 40pt, and no longer pulls you back to the window you were leaving (NAV-61).
 - **Esc and ⌥` go back to the window you were in**, however much you moved around zoomed out
   (NAV-17).
 - **Fixes the regression tests found** (31 Oct): an unchanged layout no longer counts as changed
@@ -54,6 +62,9 @@ in Copy Logs for a Bug Report).
    - Sizes snap to match: the same width as the column, the same height as the row.
    - Maybe: resize handles on the canvas while zoomed out, and a way to even up a row or
      column in one go.
+   - Built 1 Nov (Not released yet, above) for zoomed out: edge and corner handles that snap to
+     neighbours, the gap and screen halves; a right-click size menu; evening up a selection.
+     Still to do: the same snapping when you resize a real window at 100%.
 2. **Demo videos for the README.** Recorded in a clean macOS VM, so nothing personal is filmed.
    In progress.
 3. **Minimap and Spaces polish**, left over from the UI hill climb:
@@ -82,6 +93,9 @@ in Copy Logs for a Bug Report).
    windows a gap or so apart that fit the screen together are one place. A hop to one frames the
    group, hops inside a group on screen only move focus, a click zoomed out or ⌃⌥C frames it, and
    hovering it zoomed out outlines it (NAV-55 to NAV-60).
+8. **Build screens zoomed out** (asked 1 Nov). Built 1 Nov (Not released yet, above): put two to
+   four windows into halves and quarters of a screen, three ways (drop zones, select and S, the
+   screen tool), and resize windows zoomed out. A built screen is a group, so it gets all of 7.
 
 ## In progress elsewhere
 

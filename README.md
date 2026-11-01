@@ -35,6 +35,9 @@ to see everything at once, then click a window to fly to it, ready to use.
   right, above or below.
 - **Groups of windows stay together.** Arrange a few side by side so they fit the screen, and
   Expanse treats them as one place: hops, clicks and centring show the whole group.
+- **Build a screen in a moment.** Zoomed out, drop a window on another's side or corner to tile
+  them into halves and quarters of your screen, or select a few and press S. Resize windows
+  right there by their edges, or right-click for Fill, Half or Quarter screen.
 - **Arrange like a design tool.** Drag windows around; they snap into neat, even gaps.
 - **At home on a laptop or a big display.** On a smaller screen the layout tightens up, and plugging
   back in puts it back exactly.

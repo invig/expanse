@@ -19,6 +19,13 @@ Expanse runs on a stock Mac with System Integrity Protection on. Everything belo
   fits the screen at 100% count as one place, measured from the layout whenever it's needed.
   Going to any of them (a hop, a click zoomed out, ⌃⌥C) frames the whole group, and hops between
   them while it's on screen only move focus.
+- **Screens you build** are windows sized and placed into the halves and quarters of a
+  screen-sized frame (`Screens.swift`), the gap between them and round the edge, so they are a
+  group with nothing new saved. Zoomed out, Expanse sizes the real windows straight away (the
+  canvas hides them) and takes the size each app accepts as its chosen size; windows in the way
+  move clear, far enough not to join the group. Which slots a group fills is worked out from
+  where its windows are, for dropping more in. Each screen or size change keeps the windows'
+  frames and chosen sizes before it, for ⌘Z.
 - **Gliding** between windows at 100% uses the same approach for a moment. The backdrop rises,
   with pictures exactly over the real windows, and the camera animates. The real windows then
   move once, hidden, on a background thread.

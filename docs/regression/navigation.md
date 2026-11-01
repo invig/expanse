@@ -684,3 +684,16 @@
   2. Select two windows (⇧-click), and hover one.
 - **Expected:** Step 1: a soft accent outline around the whole group (12pt outside it, rounded), alongside the hovered window's own outline; none for the window on its own. Step 2: only the selection's dashed box. At 100% nothing is drawn.
 - **Automate:** unit: `CanvasView.render` sets `groupOutline`'s path (NAV-60 test); manual for how it looks.
+
+## NAV-61 The snap after a scroll never pulls you back the way you came
+- **Type:** Bug fix
+- **Area:** NAV
+- **Commits:** unreleased (1 Nov)
+- **Before:** When a scroll at 100% ended, the snap (NAV-51) moved the view up to half a screen any way that left fewer windows cut off: scrolling away from a window across the canvas, each time you lifted your fingers it pulled you back towards it, so it was hard to get away.
+- **Setup:** At 100%, a few windows in a row, more canvas beyond them.
+- **Steps:**
+  1. Scroll away from the window you're in, a little at a time, lifting your fingers between scrolls.
+  2. Scroll up or down past a row of windows.
+- **Expected:** Step 1: each time a scroll ends the view stays, or carries on your way to line a window up, or moves back no more than 40pt; it never takes you back to the window. Step 2: no sideways snap of more than 40pt.
+- **Check in log:** `scroll ended: view snapped by …`, with the move your way (or 40pt or less).
+- **Automate:** unit: `snappedCamera(going:)` and the travel kept by `pan(by:scrolling:)`.

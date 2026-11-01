@@ -7,7 +7,7 @@ enum Input {
     static var allowed: Bool { AXIsProcessTrusted() }
 
     enum Key: CGKeyCode {
-        case a = 0, c = 8, w = 13, t = 17, one = 18, equal = 24, minus = 27, zero = 29, q = 12, tab = 48, space = 49
+        case a = 0, s = 1, z = 6, c = 8, w = 13, t = 17, one = 18, equal = 24, minus = 27, zero = 29, q = 12, tab = 48, space = 49
         case grave = 50, escape = 53, returnKey = 36, left = 123, right = 124, down = 125, up = 126
     }
 

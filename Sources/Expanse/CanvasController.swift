@@ -1358,6 +1358,8 @@ final class CanvasController: NSObject {
         }
         save()
         if let lastLayout { snapshot(lastLayout) }
+        // Undoing a screen or a size afterwards would mix the two layouts.
+        undoSteps.removeAll()
         var pool = layout.windows
         let open = Set(windows.map { LayoutStore.windowKey(pid: $0.pid, id: $0.id) })
         // Taken on this screen: every window where you saw it then. On another, from home spots,
@@ -2440,8 +2442,14 @@ final class CanvasController: NSObject {
 
     // MARK: Tidy up
 
-    /// The gap between neighbouring windows: edge snapping, new-window placement and Tidy Up.
-    static let gap: CGFloat = 20
+    /// The gap between neighbouring windows: edge snapping, new-window placement, Tidy Up, and the
+    /// screens you build (between their windows and round their edge). Settings › Gaps between
+    /// windows: 20pt (the default), 10pt or none.
+    static var gap: CGFloat {
+        let g = UserDefaults.standard.double(forKey: gapKey)
+        return UserDefaults.standard.object(forKey: gapKey) != nil && [0, 10].contains(g) ? g : 20
+    }
+    static let gapKey = "windowGap"
     /// Windows closer than this to a neighbour count as one group (cluster). Tidy Up tidies each
     /// group where it is, and keeps groups at least this far apart.
     static let clusterReach: CGFloat = 240
@@ -2767,12 +2775,16 @@ final class CanvasController: NSObject {
     /// Push overlapping frames apart in reading order. Only ever moving right or down means it
     /// always finishes.
     /// `keep`: pairs of windows (by index) left overlapping, see overlappingPairs.
-    static func separate(_ frames: inout [CGRect], gap: CGFloat, onlyOverlaps: Bool = false, keep: Set<IndexPair> = []) {
-        let order = frames.indices.sorted { (frames[$0].minY, frames[$0].minX) < (frames[$1].minY, frames[$1].minX) }
+    /// `fixed`: frames that stay where they are; the others are pushed clear of them.
+    static func separate(_ frames: inout [CGRect], gap: CGFloat, onlyOverlaps: Bool = false, keep: Set<IndexPair> = [],
+                         fixed: Set<Int> = []) {
+        let order = fixed.sorted() + frames.indices.filter { !fixed.contains($0) }.sorted {
+            (frames[$0].minY, frames[$0].minX) < (frames[$1].minY, frames[$1].minX)
+        }
         var settled: [(index: Int, frame: CGRect)] = []
         for i in order {
             var r = frames[i]
-            for _ in 0..<200 {
+            for _ in 0..<(fixed.contains(i) ? 0 : 200) {
                 let reach = onlyOverlaps ? 0.5 : -gap + 0.5
                 guard let hit = settled.first(where: {
                     !keep.contains(IndexPair($0.index, i)) && $0.frame.insetBy(dx: reach, dy: reach).intersects(r)
@@ -2829,6 +2841,27 @@ final class CanvasController: NSObject {
         return Self.screenGroups(windows.map(\.canvasFrame), fitting: viewSize)
             .first { $0.contains(i) }
             .map { $0.map { windows[$0] } }
+    }
+
+    /// Every screen group on the canvas (see screenGroups).
+    func allScreenGroups() -> [[ManagedWindow]] {
+        Self.screenGroups(windows.map(\.canvasFrame), fitting: viewSize).map { $0.map { windows[$0] } }
+    }
+
+    /// The groups that are screens you built (or arranged that way by hand), each window with its
+    /// slot (see Screens.layout). `excluding`: a window being dragged, which isn't where it was.
+    func builtScreens(excluding: ManagedWindow? = nil) -> [(screen: CGRect, members: [(ManagedWindow, Slot)])] {
+        let ws = windows.filter { $0 !== excluding }
+        return Self.screenGroups(ws.map(\.canvasFrame), fitting: viewSize).compactMap { g in
+            let members = g.map { ws[$0] }
+            guard let built = Screens.layout(of: members.map(\.canvasFrame), size: viewSize, gap: Self.gap) else { return nil }
+            return (built.screen, Array(zip(members, built.slots)))
+        }
+    }
+
+    /// The windows in the screen at `screen`, each with its slot (see Screens.slot).
+    func screenMembers(in screen: CGRect) -> [(ManagedWindow, Slot)] {
+        windows.compactMap { w in Screens.slot(of: w.canvasFrame, in: screen, gap: Self.gap).map { (w, $0) } }
     }
 
     /// The rectangle around a group's windows (canvas space).
@@ -2966,6 +2999,194 @@ final class CanvasController: NSObject {
         w.preferredSize = size
         scheduleSave()
         logger.info("preferred size \(w.appName, privacy: .public)[\(id)] = \(NSStringFromSize(size), privacy: .public)")
+    }
+
+    // MARK: Screens you build, and sizes picked zoomed out
+
+    /// The screen at 100% as a rectangle on the canvas with its top-left at `origin`: what a screen
+    /// you build fills (see Screens).
+    func screenRect(at origin: CGPoint) -> CGRect { CGRect(origin: origin, size: viewSize) }
+
+    /// A slot's size, with the gap you chose.
+    func slotSize(_ slot: Slot) -> CGSize { Screens.frame(of: slot, in: screenRect(at: .zero), gap: Self.gap).size }
+
+    /// Puts windows into the slots of a screen whose top-left is `origin` (see Screens): each takes
+    /// its slot's size for real, straight away, and its spot; windows in the way move clear, far
+    /// enough not to join it. `members`: windows already in the screen, which stay. `how` says
+    /// which way you built it, for the log.
+    func arrange(_ placements: [(ManagedWindow, Slot)], screen origin: CGPoint, members: [ManagedWindow] = [], how: String) {
+        guard !placements.isEmpty else { return }
+        let screen = screenRect(at: origin)
+        recordUndo("screen of \(placements.count)")
+        for (w, slot) in placements {
+            let f = Screens.frame(of: slot, in: screen, gap: Self.gap)
+            let before = w.canvasFrame.origin
+            let size = setSize(w, f.size)
+            w.canvasFrame = CGRect(origin: f.origin, size: size)
+            noteUserMove(w, from: before)
+        }
+        logger.info("screen: \(placements.map { "\($0.0.appName)[\($0.0.id)] \($0.1.name)" }.joined(separator: ", "), privacy: .public) (\(how, privacy: .public))")
+        makeRoom(around: screen, keeping: Set((placements.map(\.0) + members).map(\.id)), clearance: Self.screenGroupReach + 1)
+        view.render()
+        scheduleSave()
+    }
+
+    /// A size you picked zoomed out for one window (the right-click menu, an edge you dragged): its
+    /// top-left stays put (or goes to `origin`, for a left or top edge), and windows it now
+    /// overlaps move clear.
+    func resize(_ w: ManagedWindow, to size: CGSize, at origin: CGPoint? = nil, how: String) {
+        recordUndo("resize")
+        let before = w.canvasFrame
+        if let origin { w.canvasFrame.origin = CGPoint(x: origin.x.rounded(), y: origin.y.rounded()) }
+        let actual = setSize(w, size)
+        logger.info("resize \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(before.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public) (\(how, privacy: .public))")
+        noteUserMove(w, from: before.origin)
+        makeRoom(around: w.canvasFrame, keeping: [w.id], clearance: 0)
+        view.render()
+        scheduleSave()
+    }
+
+    /// Same width, height or size as `model` for the other windows in `ws` (the right-click menu,
+    /// with several picked): each keeps its top-left, and windows they now overlap are pushed
+    /// apart (see separate); overlaps there before are left.
+    func evenUp(_ ws: [ManagedWindow], like model: ManagedWindow, width: Bool, height: Bool) {
+        let before = windows.map(\.canvasFrame)
+        recordUndo("even up")
+        var changed = 0
+        for w in ws where w !== model && !w.sizesItself {
+            let size = CGSize(width: width ? model.canvasFrame.width : w.canvasFrame.width,
+                              height: height ? model.canvasFrame.height : w.canvasFrame.height)
+            guard size != w.canvasFrame.size else { continue }
+            setSize(w, size)
+            changed += 1
+        }
+        var frames = windows.map(\.canvasFrame)
+        let fixed = windows.firstIndex { $0 === model }.map { Set([$0]) } ?? []
+        Self.separate(&frames, gap: Self.gap, onlyOverlaps: true, keep: Self.overlappingPairs(before), fixed: fixed)
+        for (w, f) in zip(windows, frames) where f.origin != w.canvasFrame.origin {
+            let was = w.canvasFrame.origin
+            w.canvasFrame.origin = f.origin
+            noteUserMove(w, from: was)
+        }
+        let what = width && height ? "size" : width ? "width" : "height"
+        logger.info("even up: \(what, privacy: .public) of \(model.appName, privacy: .public)[\(model.id)] for \(changed) windows")
+        view.render()
+        scheduleSave()
+    }
+
+    /// While you drag a window's edges zoomed out: the moving edges snap to neighbours' edges, a
+    /// gap from them, and to the widths and heights of a screen's halves and quarters (and all of
+    /// it). Returns the frame, and guide lines to show (canvas space).
+    func snapEdges(_ f: CGRect, moving edges: WindowEdges, excluding id: CGWindowID) -> (CGRect, [(CGPoint, CGPoint)]) {
+        let reach = 10 / camera.scale, gap = Self.gap
+        let near = f.insetBy(dx: -(200 + reach), dy: -(200 + reach))
+        let others = windows.filter { $0.id != id && $0.canvasFrame.intersects(near) }.map(\.canvasFrame)
+        let widths = [slotSize(.full).width, slotSize(.left).width], heights = [slotSize(.full).height, slotSize(.topLeft).height]
+        func nearest(_ v: CGFloat, _ targets: [CGFloat]) -> CGFloat? {
+            targets.filter { abs($0 - v) <= reach }.min { abs($0 - v) < abs($1 - v) }
+        }
+        var r = f, xs: [CGFloat] = [], ys: [CGFloat] = []
+        if edges.contains(.right), let x = nearest(r.maxX, others.flatMap { [$0.minX, $0.maxX, $0.minX - gap] } + widths.map { r.minX + $0 }) {
+            r.size.width = x - r.minX
+            xs.append(x)
+        }
+        if edges.contains(.left), let x = nearest(r.minX, others.flatMap { [$0.minX, $0.maxX, $0.maxX + gap] } + widths.map { r.maxX - $0 }) {
+            let maxX = r.maxX
+            r.origin.x = x
+            r.size.width = maxX - x
+            xs.append(x)
+        }
+        if edges.contains(.bottom), let y = nearest(r.maxY, others.flatMap { [$0.minY, $0.maxY, $0.minY - gap] } + heights.map { r.minY + $0 }) {
+            r.size.height = y - r.minY
+            ys.append(y)
+        }
+        if edges.contains(.top), let y = nearest(r.minY, others.flatMap { [$0.minY, $0.maxY, $0.maxY + gap] } + heights.map { r.maxY - $0 }) {
+            let maxY = r.maxY
+            r.origin.y = y
+            r.size.height = maxY - y
+            ys.append(y)
+        }
+        let lines = xs.map { (CGPoint(x: $0, y: r.minY - 40), CGPoint(x: $0, y: r.maxY + 40)) }
+            + ys.map { (CGPoint(x: r.minX - 40, y: $0), CGPoint(x: r.maxX + 40, y: $0)) }
+        return (r, lines)
+    }
+
+    /// Sizes `w`, the real window too, straight away (zoomed out, the canvas hides it): the size it
+    /// takes is the size you chose. An app that won't take it (a minimum width, a VM's window)
+    /// keeps what it will, and a toast says so.
+    @discardableResult
+    private func setSize(_ w: ManagedWindow, _ size: CGSize) -> CGSize {
+        let target = CGSize(width: size.width.rounded(), height: size.height.rounded())
+        var actual = target
+        if w.sizesItself { actual = w.canvasFrame.size } else if let ax = w.ax { actual = resizeReal(w, ax, to: target) }
+        if abs(actual.width - target.width) > Self.appRounding || abs(actual.height - target.height) > Self.appRounding {
+            logger.info("can't size \(w.appName, privacy: .public)[\(w.id)] to \(NSStringFromSize(target), privacy: .public): took \(NSStringFromSize(actual), privacy: .public)")
+            Toast.show("\(w.appName) can't be made that size")
+        }
+        w.canvasFrame.size = actual
+        w.preferredSize = actual
+        updateCapture(w)
+        return actual
+    }
+
+    /// Windows other than `keeping` in `area`, or within `clearance` of it, move clear: each the
+    /// shortest way out, then any they now overlap are pushed apart (see separate). Their spots
+    /// go with them.
+    private func makeRoom(around area: CGRect, keeping: Set<CGWindowID>, clearance: CGFloat) {
+        let gap = Self.gap
+        let others = windows.filter { !keeping.contains($0.id) }
+        let zone = area.insetBy(dx: -clearance, dy: -clearance)
+        var frames = [zone] + others.map(\.canvasFrame)
+        let keep = Self.overlappingPairs(frames).filter { $0.a != 0 }
+        for i in frames.indices.dropFirst() where frames[i].insetBy(dx: 0.5, dy: 0.5).intersects(zone) {
+            let r = frames[i]
+            let moves = [CGVector(dx: zone.minX - gap - r.maxX, dy: 0), CGVector(dx: zone.maxX + gap - r.minX, dy: 0),
+                         CGVector(dx: 0, dy: zone.minY - gap - r.maxY), CGVector(dx: 0, dy: zone.maxY + gap - r.minY)]
+            let m = moves.min { abs($0.dx) + abs($0.dy) < abs($1.dx) + abs($1.dy) } ?? .zero
+            frames[i] = r.offsetBy(dx: m.dx, dy: m.dy)
+        }
+        Self.separate(&frames, gap: gap, onlyOverlaps: true, keep: keep, fixed: [0])
+        for (w, f) in zip(others, frames.dropFirst()) where f.origin != w.canvasFrame.origin {
+            let before = w.canvasFrame.origin
+            w.canvasFrame.origin = f.origin
+            noteUserMove(w, from: before)
+        }
+    }
+
+    /// How every window was before a screen or size change, for ⌘Z (see undo).
+    private struct UndoStep {
+        struct State { let id: CGWindowID, frame: CGRect, preferred: CGSize, home: CGPoint?, fitPush: CGVector }
+        let name: String
+        let states: [State]
+    }
+    private var undoSteps: [UndoStep] = []
+
+    private func recordUndo(_ name: String) {
+        undoSteps.append(UndoStep(name: name, states: windows.map {
+            UndoStep.State(id: $0.id, frame: $0.canvasFrame, preferred: $0.preferredSize, home: $0.home, fitPush: $0.fitPush)
+        }))
+        if undoSteps.count > 20 { undoSteps.removeFirst() }
+    }
+
+    var canUndo: Bool { !undoSteps.isEmpty }
+
+    /// ⌘Z zoomed out: every window back as it was before the last screen you built or size you
+    /// picked, real sizes too. Moves on their own aren't undone.
+    func undo() {
+        guard let step = undoSteps.popLast() else { return }
+        for s in step.states {
+            guard let w = windows.first(where: { $0.id == s.id }) else { continue }
+            let resized = s.frame.size != w.canvasFrame.size
+            if resized, !w.sizesItself, let ax = w.ax { resizeReal(w, ax, to: s.frame.size) }
+            w.canvasFrame = s.frame
+            w.preferredSize = s.preferred
+            w.home = s.home
+            w.fitPush = s.fitPush
+            if resized { updateCapture(w) }
+        }
+        logger.info("undo: \(step.name, privacy: .public)")
+        view.render()
+        scheduleSave()
     }
 
     // MARK: New windows
@@ -3878,7 +4099,7 @@ final class CanvasController: NSObject {
 
     /// expanse://dump — geometry for debugging alignment between proxies and real windows.
     func dump() {
-        logger.info("dump viewport=\(NSStringFromRect(self.viewport), privacy: .public) overlay=\(NSStringFromRect(self.overlay.frame), privacy: .public) view=\(NSStringFromRect(self.view.bounds), privacy: .public) camera=\(NSStringFromPoint(self.camera.origin), privacy: .public)@\(self.camera.scale) active=\(self.isActive) gliding=\(self.gliding) animating=\(self.animation != nil) paused=\(self.isPaused) frontmost=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-", privacy: .public) focusedByApp=\(self.focusedWindowByApp.description, privacy: .public)")
+        logger.info("dump viewport=\(NSStringFromRect(self.viewport), privacy: .public) overlay=\(NSStringFromRect(self.overlay.frame), privacy: .public) view=\(NSStringFromRect(self.view.bounds), privacy: .public) camera=\(NSStringFromPoint(self.camera.origin), privacy: .public)@\(self.camera.scale) active=\(self.isActive) gliding=\(self.gliding) animating=\(self.animation != nil) paused=\(self.isPaused) settling=\(self.suspendTracking) frontmost=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-", privacy: .public) focusedByApp=\(self.focusedWindowByApp.description, privacy: .public)")
         let tiles = view.spacesTileFrames().map { "\($0.id)=\(NSStringFromRect($0.frame))" }.joined(separator: "; ")
         logger.info("dump spaces \(tiles, privacy: .public)")
         for w in windows {
@@ -3983,20 +4204,28 @@ final class CanvasController: NSObject {
 
     // MARK: Camera manipulation (called by the view)
 
-    func pan(by d: CGVector) {
+    /// `scrolling`: a trackpad or wheel scroll, whose way is kept for the snap when it ends.
+    func pan(by d: CGVector, scrolling: Bool = false) {
         guard isActive else { return }
         cancelAnimation()
         camera.pan(by: d)
+        if scrolling { scrollTravel = CGVector(dx: scrollTravel.dx + d.dx, dy: scrollTravel.dy + d.dy) }
         viewPlaced = abs(camera.scale - 1) < 0.001
         cameraChanged()
     }
+
+    /// How far the scroll under way has moved the view's contents (see snappedCamera).
+    private var scrollTravel = CGVector.zero
 
     /// A scroll at 100% has ended, momentum and all (see CanvasView.scrollWheel): if it left windows
     /// cut off by the screen's edges, the view moves on a little, to where they're whole or out of
     /// sight (see snappedCamera).
     func scrollEnded() {
+        let travel = scrollTravel
+        scrollTravel = .zero
         guard isActive, !gliding, animation == nil, abs(camera.scale - 1) < 0.001 else { return }
-        let target = snappedCamera()
+        // (No travel recorded: which way is unknown, so any.)
+        let target = snappedCamera(going: travel == .zero ? nil : travel)
         guard target != camera else { return }
         logger.info("scroll ended: view snapped by \(target.origin.x - self.camera.origin.x), \(target.origin.y - self.camera.origin.y)")
         animate(to: target, duration: 0.25)
@@ -4007,7 +4236,11 @@ final class CanvasController: NSObject {
     /// from the screen's, which (windows being a gap apart) also takes the next one just out of
     /// sight, or centres a window with less than that to spare (one filling the screen, say). None
     /// further than half the screen: you scrolled here, so the view stays near.
-    private func snappedCamera() -> Camera {
+    /// `travel`: which way the scroll moved the view's contents. The snap may carry on that way,
+    /// but back the way you came only a tidying 40pt (two gaps), and across it no more than that
+    /// either: further, and a window you were scrolling away from pulled you back to it every time
+    /// you lifted your fingers.
+    private func snappedCamera(going travel: CGVector? = nil) -> Camera {
         let screen = CGRect(origin: .zero, size: viewSize)
         let frames = windows.map { camera.toView($0.canvasFrame) }
         let shown = frames.filter { !$0.intersection(screen).isEmpty }
@@ -4021,8 +4254,18 @@ final class CanvasController: NSObject {
             let spare = length - (to - from)
             return spare < 2 * g ? [spare / 2 - from] : [g - from, length - g - to]
         }
-        let xs = ([0] + shown.flatMap { moves($0.minX, $0.maxX, screen: screen.width) }).filter { abs($0) <= reach.width }
-        let ys = ([0] + shown.flatMap { moves($0.minY, $0.maxY, screen: screen.height) }).filter { abs($0) <= reach.height }
+        func allowed(_ d: CGFloat, went: CGFloat?, reach: CGFloat) -> Bool {
+            guard abs(d) <= reach else { return false }
+            guard let went else { return true }
+            let tidy: CGFloat = 40
+            return abs(d) <= tidy || (abs(went) >= 1 && d * went > 0)
+        }
+        let xs = ([0] + shown.flatMap { moves($0.minX, $0.maxX, screen: screen.width) }).filter {
+            allowed($0, went: travel?.dx, reach: reach.width)
+        }
+        let ys = ([0] + shown.flatMap { moves($0.minY, $0.maxY, screen: screen.height) }).filter {
+            allowed($0, went: travel?.dy, reach: reach.height)
+        }
         // How cut off a window is along one side: 0 whole or out of sight, 0.5 half on screen. One
         // too big for the screen that way counts as whole.
         func cut(_ visible: CGFloat, _ length: CGFloat, screen: CGFloat) -> CGFloat {
@@ -4168,9 +4411,9 @@ final class CanvasController: NSObject {
 
     // MARK: Windows on the canvas
 
-    func window(atView p: CGPoint, parkedOnly: Bool = false) -> ManagedWindow? {
+    func window(atView p: CGPoint, parkedOnly: Bool = false, excluding: ManagedWindow? = nil) -> ManagedWindow? {
         let c = camera.toCanvas(p)
-        return windows.last { $0.canvasFrame.contains(c) && (!parkedOnly || $0.parked) }
+        return windows.last { $0 !== excluding && $0.canvasFrame.contains(c) && (!parkedOnly || $0.parked) }
     }
 
     func bringToFront(_ w: ManagedWindow) {

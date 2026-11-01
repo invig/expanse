@@ -298,3 +298,103 @@
   2. Press T straight away.
 - **Expected:** The group is tidied at its new place, not put back where it was before the drag.
 - **Automate:** manual: depends on scans and save timing; noteUserMove(_:from:) setting home could be unit-tested.
+
+## EDIT-27 Dropping a window on another's side or corner makes the two a screen
+- **Type:** Feature
+- **Area:** EDIT
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Zoomed out, two windows apart: A (say Notes) and B (Safari), well away from others.
+- **Steps:**
+  1. Drag B over A's right side and hold it there.
+  2. Let go.
+  3. Do the same with another pair, but over A's top-left corner; then over A's middle.
+- **Expected:** Step 1: the right half of a screen-sized frame lights up, with the frame outlined round A. Step 2: A takes the left half and B the right, both sized to fit a gap apart, A's top-left where it was; windows in the way move clear. ⌥` then ⌃+arrow in from elsewhere frames both. Step 3: the corner makes B the top-left quarter and A the right half; over the middle nothing lights up and B just moves there. ⌘ held while dragging: no zones.
+- **Check in log:** `screen: Notes[<id>] left, Safari[<id>] right (drop)` (the window dropped on first).
+- **Automate:** unit: drop zones, the screen made and where it goes (`Screens.dropZone`, `CanvasView.dropPlan`, `CanvasController.arrange`).
+
+## EDIT-28 Dropping into a screen you built fills an empty slot or splits a half
+- **Type:** Feature
+- **Area:** EDIT
+- **Commits:** unreleased (1 Nov)
+- **Setup:** A screen built as in EDIT-27 (A left, B right) and two more windows, C and D.
+- **Steps:**
+  1. Drag C over the bottom of B and let go.
+  2. Make a screen of A (left) and B (top-right) only, then drag D into its empty bottom-right corner.
+- **Expected:** Step 1: B moves to the top-right quarter and C takes the bottom-right one. Step 2: D fills the bottom-right quarter; the screen's other windows don't move.
+- **Check in log:** `screen: Safari[<id>] top-right, Terminal[<id>] bottom-right (drop)`.
+- **Automate:** unit: `Screens.layout(of:)` and drops into a built screen.
+
+## EDIT-29 Select windows, press S, pick a layout
+- **Type:** Feature
+- **Area:** EDIT
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Zoomed out, three windows: one on the left, two further right one above the other.
+- **Steps:**
+  1. Select the three (⇧-click or drag a box), press S.
+  2. Pick "One left, two right" (or press 1).
+  3. Right-click one of three selected windows.
+- **Expected:** Step 1: a menu with the layouts three windows can make, drawn small. Step 2: the left one takes the left half, staying where it was, the others the right quarters in the order they were. Step 3: the same layouts under Make a screen. With one or five windows selected, S does nothing.
+- **Check in log:** `screen: … (layout)`.
+- **Automate:** unit: `Screens.assign`, `CanvasView.layoutMenu`, `makeScreen`.
+
+## EDIT-30 The screen tool: a slot and a window, in either order
+- **Type:** Feature
+- **Area:** EDIT
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Zoomed out, nothing selected, three windows.
+- **Steps:**
+  1. Press S (or right-click empty canvas › New screen).
+  2. Click the frame's right half, then a window.
+  3. Click another window, then the frame's left half.
+  4. Click a third window, then near the bottom of the right half.
+  5. Press Return. Then repeat 1–3 and press Esc instead.
+- **Expected:** Step 1: an empty screen frame with its quarters outlined in the middle of the view; hovering lights a half (or a quarter near the top or bottom). Steps 2–3: each window goes into its slot at that size; a click on a window doesn't zoom into it. Step 4: the third takes the bottom-right quarter and the one in the right half moves up to the top-right. Step 5: Return leaves the screen as built; Esc puts every window back. The empty frame can be dragged by its edge.
+- **Check in log:** `screen tool: started`, `screen: … (tool)` per window, `screen tool: done (3 placed)` or `cancelled`.
+- **Automate:** unit: the tool's clicks, quarters, Esc undoing all.
+
+## EDIT-31 Dragging a screen's ring moves the whole screen
+- **Type:** Feature
+- **Area:** EDIT
+- **Commits:** unreleased (1 Nov)
+- **Setup:** A screen of two windows built zoomed out.
+- **Steps:**
+  1. Hover the gap between them, or just outside them.
+  2. Drag from there.
+  3. Drag one of the windows away on its own.
+- **Expected:** Step 1: the ring round the screen shows and the pointer is an open hand. Step 2: both windows move together, as a selection does. Step 3: just that window moves; once it's far enough, the other is on its own again.
+- **Automate:** unit: the ring hit and the group drag.
+
+## EDIT-32 Gaps between windows: 20pt, 10pt or none
+- **Type:** Feature
+- **Area:** EDIT
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Settings › Arranging.
+- **Steps:**
+  1. Build a screen of two windows; look at the gap between them and round the edge at 100%.
+  2. Set Gaps between windows to 10pt, build another; then None.
+  3. Drag a window towards another's edge zoomed out; press T.
+- **Expected:** Step 1: 20pt between the windows and from the screen's edges. Step 2: 10pt, then none (the windows meet each other and the screen's edges). Step 3: snapping and Tidy Up keep the gap chosen. Each is still a screen group.
+- **Automate:** unit: slot frames at each gap, and the setting read by snapping.
+
+## EDIT-33 An app that won't take a slot's size keeps its own
+- **Type:** Feature
+- **Area:** EDIT
+- **Commits:** unreleased (1 Nov)
+- **Setup:** A VM window (UTM, Screen Sharing) or an app with a minimum size (System Settings) and another window.
+- **Steps:**
+  1. Drop the other window on the VM window's right side.
+- **Expected:** The VM window keeps its size, its top-left at the left slot's; the other takes the right half. A toast: "UTM can't be made that size".
+- **Check in log:** `can't size UTM[<id>] to {…}: took {…}`.
+- **Automate:** unit: a window that sizes itself in `arrange`.
+
+## EDIT-34 ⌘Z undoes the last screen or size zoomed out
+- **Type:** Feature
+- **Area:** EDIT
+- **Commits:** unreleased (1 Nov)
+- **Setup:** Zoomed out, some windows.
+- **Steps:**
+  1. Build a screen (any way), then resize one window by its edge.
+  2. ⌘Z, ⌘Z, ⌘Z.
+- **Expected:** The first ⌘Z undoes the resize, real window too; the second puts the screen's windows back where and how big they were (the dropped one where you dragged it from), and windows moved out of the way too; the third beeps. Plain moves aren't undone.
+- **Check in log:** `undo: resize`, `undo: screen of 2`.
+- **Automate:** unit: undo steps.

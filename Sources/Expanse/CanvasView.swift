@@ -21,7 +21,35 @@ final class CanvasView: NSView {
     private let marquee = CAShapeLayer()
     private let selectionBox = CAShapeLayer()
     /// Around the screen group of the window you're hovering, zoomed out: what a click goes to.
+    /// Its ring (and the gaps between its windows) moves the whole screen when dragged.
     private let groupOutline = CAShapeLayer()
+    /// The screen whose ring the pointer is over (see screenRing).
+    private var ringGroup: [ManagedWindow]?
+    /// Where a window dragged over another, or into a screen you built, would go (see dropPlan):
+    /// its slot filled, the screen outlined.
+    private let dropSlot = CAShapeLayer()
+    private let dropScreen = CAShapeLayer()
+    private struct Drop {
+        let placements: [(ManagedWindow, Slot)]
+        let screen: CGRect
+        let slot: CGRect
+        /// The screen's windows already there, which stay.
+        var members: [ManagedWindow] = []
+    }
+    private var drop: Drop?
+    /// The screen tool (S with nothing selected, or New screen): a screen frame you fill by
+    /// clicking a slot then a window, or a window then a slot.
+    private struct Tool {
+        var screen: CGRect
+        var slot: Slot?
+        var window: ManagedWindow?
+        var hover: Slot?
+        /// Undo steps it has taken, so Esc can put everything back.
+        var steps = 0
+    }
+    private var tool: Tool?
+    /// The tool's quarters, outlined.
+    private let toolSlots = CAShapeLayer()
     /// Windows picked with a selection box or ⇧-click; dragging one moves them all.
     private(set) var selected = Set<CGWindowID>()
     private var spaceHeld = false
@@ -38,7 +66,15 @@ final class CanvasView: NSView {
         case group(clicked: ManagedWindow, starts: [(ManagedWindow, CGRect)], startPoint: CGPoint)
         case marquee(start: CGPoint, base: Set<CGWindowID>)
         case minimap
+        /// The screen tool's empty frame, by its edge.
+        case toolScreen(start: CGRect, startPoint: CGPoint)
+        /// A window's edges or corner (see resizeHandle).
+        case resize(ManagedWindow, edges: WindowEdges, startFrame: CGRect, startPoint: CGPoint)
     }
+    /// A window's size as you drag its edges: "726 × 909".
+    private let sizeLabel = CATextLayer()
+    /// The smallest a window can be dragged to.
+    static let minimumSize = CGSize(width: 200, height: 120)
     private var drag: Drag = .none
     var isDragging: Bool { if case .none = drag { return false } else { return true } }
     private var dragged = false
@@ -72,10 +108,26 @@ final class CanvasView: NSView {
         groupOutline.fillColor = nil
         groupOutline.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.45).cgColor
         groupOutline.lineWidth = 1.5
-        for l in [marquee, selectionBox, groupOutline] {
+        dropSlot.fillColor = NSColor.controlAccentColor.withAlphaComponent(0.25).cgColor
+        dropSlot.strokeColor = NSColor.controlAccentColor.cgColor
+        dropSlot.lineWidth = 2
+        dropScreen.fillColor = nil
+        dropScreen.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
+        dropScreen.lineWidth = 1.5
+        dropScreen.lineDashPattern = [6, 4]
+        toolSlots.fillColor = nil
+        toolSlots.strokeColor = NSColor.controlAccentColor.withAlphaComponent(0.35).cgColor
+        toolSlots.lineWidth = 1
+        toolSlots.lineDashPattern = [4, 4]
+        for l in [marquee, selectionBox, groupOutline, toolSlots, dropScreen, dropSlot] {
             l.actions = ["path": NSNull()]
             root.addSublayer(l)
         }
+        sizeLabel.fontSize = 12
+        sizeLabel.alignmentMode = .right
+        sizeLabel.actions = ["position": NSNull(), "bounds": NSNull(), "contents": NSNull()]
+        sizeLabel.isHidden = true
+        root.addSublayer(sizeLabel)
         addSubview(spacesGlass)
         addSubview(minimapGlass)
         applyAppearance()
@@ -91,7 +143,7 @@ final class CanvasView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         world.anchorPoint = .zero
-        for l in [world, labels, guides, marquee, selectionBox, groupOutline] { l.frame = bounds }
+        for l in [world, labels, guides, marquee, selectionBox, groupOutline, toolSlots, dropScreen, dropSlot] { l.frame = bounds }
         // Pinned exactly where the real desktop picture is: the top strip sits under the menu bar.
         wallpaper.frame = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height + menuBarHeight)
         minimapGlass.frame = CGRect(origin: CGPoint(x: bounds.maxX - Minimap.size.width - 16, y: 16), size: Minimap.size)
@@ -155,6 +207,7 @@ final class CanvasView: NSView {
         canvasBackground = (isDark ? NSColor(white: 0.13, alpha: 1) : NSColor(white: 0.85, alpha: 1)).cgColor
         render()
         controller?.windows.forEach { styleLabel($0.node.label) }
+        styleLabel(sizeLabel)
     }
 
     /// White with a shadow over a desktop picture; quiet grey over the plain background.
@@ -244,11 +297,27 @@ final class CanvasView: NSView {
         } else {
             selectionBox.path = nil
         }
-        if c.isActive, picked.count < 2, let w = hovered, let group = c.screenGroup(of: w) {
-            let box = c.camera.toView(CanvasController.outline(of: group)).insetBy(dx: -12, dy: -12)
-            groupOutline.path = CGPath(roundedRect: flip(box), cornerWidth: 10, cornerHeight: 10, transform: nil)
+        if c.isActive, picked.count < 2, drop == nil, tool == nil, let group = hovered.flatMap(c.screenGroup) ?? ringGroup {
+            groupOutline.path = CGPath(roundedRect: flip(ringBox(group)), cornerWidth: 10, cornerHeight: 10, transform: nil)
         } else {
             groupOutline.path = nil
+        }
+        func rounded(_ r: CGRect, _ radius: CGFloat) -> CGPath {
+            CGPath(roundedRect: flip(c.camera.toView(r)), cornerWidth: radius, cornerHeight: radius, transform: nil)
+        }
+        dropSlot.path = nil
+        dropScreen.path = nil
+        toolSlots.path = nil
+        if c.isActive, let t = tool {
+            let gap = CanvasController.gap
+            dropScreen.path = rounded(t.screen, 10)
+            let quarters = CGMutablePath()
+            for s in [Slot.topLeft, .topRight, .bottomLeft, .bottomRight] { quarters.addPath(rounded(Screens.frame(of: s, in: t.screen, gap: gap), 6)) }
+            toolSlots.path = quarters
+            if let s = t.slot ?? t.hover { dropSlot.path = rounded(Screens.frame(of: s, in: t.screen, gap: gap), 6) }
+        } else if c.isActive, let d = drop {
+            dropSlot.path = rounded(d.slot, 6)
+            dropScreen.path = rounded(d.screen, 10)
         }
         minimap.update(windows: c.windows.map(\.canvasFrame), viewport: c.camera.toCanvas(viewRect), scale: c.camera.scale)
         // Gliding at 100%, the overlay is over the real windows, showing their pictures for a
@@ -257,6 +326,94 @@ final class CanvasView: NSView {
         minimapGlass.layer?.zPosition = c.gliding ? -1 : 0
         spacesGlass.layer?.zPosition = c.gliding ? -1 : 0
         CATransaction.commit()
+    }
+
+    /// The window edges at `p` (its outer 6pt; two at a corner) of the top window there: dragging
+    /// them resizes it. Inside only, so the gaps between a screen's windows still move the whole
+    /// screen (see screenRing). Not a window that sizes itself (a VM's), one too small to tell
+    /// its edges apart, or its close button.
+    private func resizeHandle(at p: CGPoint) -> (ManagedWindow, WindowEdges)? {
+        guard let w = controller.window(atView: p) else { return nil }
+        let r = controller.camera.toView(w.canvasFrame)
+        guard !w.sizesItself, r.width > 40, r.height > 30,
+              !(w.node.closeVisible && WindowNode.closeRect(in: r).contains(p)) else { return nil }
+        var edges: WindowEdges = []
+        if p.x - r.minX <= 6 { edges.insert(.left) } else if r.maxX - p.x <= 6 { edges.insert(.right) }
+        if p.y - r.minY <= 6 { edges.insert(.top) } else if r.maxY - p.y <= 6 { edges.insert(.bottom) }
+        return edges.isEmpty ? nil : (w, edges)
+    }
+
+    private static func resizeCursor(_ edges: WindowEdges) -> NSCursor {
+        let position: NSCursor.FrameResizePosition = switch edges {
+        case [.left, .top]: .topLeft
+        case [.right, .top]: .topRight
+        case [.left, .bottom]: .bottomLeft
+        case [.right, .bottom]: .bottomRight
+        case .left: .left
+        case .right: .right
+        case .top: .top
+        default: .bottom
+        }
+        return NSCursor.frameResize(position: position, directions: .all)
+    }
+
+    /// The pointer for what's under it, set only when that changes.
+    private var cursorKind = ""
+    private func showCursor(_ kind: String, _ cursor: @autoclosure () -> NSCursor) {
+        guard kind != cursorKind else { return }
+        cursorKind = kind
+        cursor().set()
+    }
+
+    /// "726 × 909" by the bottom-right corner of `w` as you resize it.
+    private func showSize(of w: ManagedWindow) {
+        let r = flip(controller.camera.toView(w.canvasFrame))
+        sizeLabel.string = "\(Int(w.canvasFrame.width)) × \(Int(w.canvasFrame.height))"
+        sizeLabel.contentsScale = window?.backingScaleFactor ?? 2
+        sizeLabel.frame = CGRect(x: r.maxX - 160, y: r.minY - 20, width: 160, height: 16)
+        sizeLabel.isHidden = false
+    }
+
+    /// Around a screen group, in the view: the outline drawn, and the ring you grab to move it.
+    private func ringBox(_ group: [ManagedWindow]) -> CGRect {
+        controller.camera.toView(CanvasController.outline(of: group)).insetBy(dx: -12, dy: -12)
+    }
+
+    /// The screen group whose ring is at `p` (not on one of its windows: the outline round it, or
+    /// a gap between them).
+    private func screenRing(at p: CGPoint) -> [ManagedWindow]? {
+        controller.allScreenGroups().first { ringBox($0).contains(p) }
+    }
+
+    /// The drop zone under the pointer while `w` is dragged: an empty slot of a screen you built,
+    /// or the top or bottom of one of its halves (split into quarters); else a side or corner of
+    /// a window on its own (see Screens.dropZone), which pairs the two. Nil over nothing, or the
+    /// middle of a window: an ordinary move.
+    private func dropPlan(for w: ManagedWindow, at p: CGPoint) -> Drop? {
+        let c = controller.camera.toCanvas(p)
+        let gap = CanvasController.gap
+        for built in controller.builtScreens(excluding: w) where built.screen.contains(c) {
+            if let (m, slot) = built.members.first(where: { $0.0.canvasFrame.contains(c) }) {
+                guard slot == .left || slot == .right else { return nil }
+                let q = slot.quarters, top = c.y < m.canvasFrame.midY
+                let mine = top ? q[0] : q[1]
+                return Drop(placements: [(m, top ? q[1] : q[0]), (w, mine)], screen: built.screen,
+                            slot: Screens.frame(of: mine, in: built.screen, gap: gap), members: built.members.map(\.0))
+            }
+            let taken = built.members.map(\.1)
+            guard let free = [Slot.left, .right, .topLeft, .topRight, .bottomLeft, .bottomRight].first(where: { s in
+                !taken.contains { $0.overlaps(s) } && Screens.frame(of: s, in: built.screen, gap: gap).contains(c)
+            }) else { return nil }
+            return Drop(placements: [(w, free)], screen: built.screen, slot: Screens.frame(of: free, in: built.screen, gap: gap),
+                        members: built.members.map(\.0))
+        }
+        guard let target = controller.window(atView: p, excluding: w), let mine = Screens.dropZone(at: c, in: target.canvasFrame) else {
+            return nil
+        }
+        let theirs = mine.otherHalf
+        let origin = Screens.screenOrigin(keeping: target.canvasFrame, in: theirs, size: controller.screenRect(at: .zero).size, gap: gap)
+        let screen = controller.screenRect(at: origin)
+        return Drop(placements: [(target, theirs), (w, mine)], screen: screen, slot: Screens.frame(of: mine, in: screen, gap: gap))
     }
 
     /// Part of a selection of more than one window (which × and ⌘W close together).
@@ -333,7 +490,7 @@ final class CanvasView: NSView {
             controller.zoom(by: exp(e.scrollingDeltaY * k), at: point(e))
         } else {
             let k: CGFloat = e.hasPreciseScrollingDeltas ? 1 : 12
-            controller.pan(by: CGVector(dx: e.scrollingDeltaX * k, dy: e.scrollingDeltaY * k))
+            controller.pan(by: CGVector(dx: e.scrollingDeltaX * k, dy: e.scrollingDeltaY * k), scrolling: true)
             scrollMayEnd(e)
         }
     }
@@ -381,6 +538,8 @@ final class CanvasView: NSView {
             // zooms out. The bare desktop is see-through, so its clicks go to the desktop itself.
             drag = .none
             let bar = spacesBarHit(e)
+            let at = point(e)
+            logger.info("click at 100% at \(NSStringFromPoint(at), privacy: .public): \(bar.tile.map { "Spaces tile \($0 + 1)" } ?? (bar.over ? "the Spaces bar, between tiles" : "the backdrop"), privacy: .public)")
             if let i = bar.tile {
                 spacesBar.hovered = nil
                 controller.switchToSpace(spacesBar.spaces[i])
@@ -395,6 +554,15 @@ final class CanvasView: NSView {
         }
         controller.cancelAnimation()
         dragged = false
+        if sizing != nil {
+            drag = .none
+            finishSizing(at: point(e))
+            return
+        }
+        if tool != nil {
+            toolClick(at: point(e))
+            return
+        }
         let bar = spacesBarHit(e)
         if bar.over {
             drag = .none
@@ -415,6 +583,12 @@ final class CanvasView: NSView {
         if spaceHeld {
             drag = .pan(last: p)
             NSCursor.closedHand.set()
+        } else if !shift, let (w, edges) = resizeHandle(at: p) {
+            selected.removeAll()
+            controller.bringToFront(w)
+            // Undistorted while the frame changes; the real window catches up when you let go.
+            w.node.content.contentsGravity = .resizeAspect
+            drag = .resize(w, edges: edges, startFrame: w.canvasFrame, startPoint: p)
         } else if let w = controller.window(atView: p) {
             if w.node.closeVisible, WindowNode.closeRect(in: controller.camera.toView(w.canvasFrame)).contains(p) {
                 drag = .none
@@ -435,6 +609,12 @@ final class CanvasView: NSView {
                 controller.bringToFront(w)
                 drag = .window(w, startFrame: w.canvasFrame, startPoint: p)
             }
+        } else if !shift, let group = screenRing(at: p) {
+            // A screen's ring: the whole screen moves (a click without moving goes to it).
+            selected.removeAll()
+            group.forEach(controller.bringToFront)
+            drag = .group(clicked: group[0], starts: group.map { ($0, $0.canvasFrame) }, startPoint: p)
+            NSCursor.closedHand.set()
         } else {
             drag = .marquee(start: p, base: shift ? selected : [])
             if !shift { selected.removeAll() }
@@ -470,7 +650,9 @@ final class CanvasView: NSView {
             if !dragged && p.distance(to: startPoint) < 3 { return }
             dragged = true
             let proposed = startFrame.offsetBy(dx: (p.x - startPoint.x) / s, dy: (p.y - startPoint.y) / s)
-            let (frame, lines) = snapEnabled ? controller.snap(proposed, excluding: [w.id]) : (proposed, [])
+            // Over a drop zone the window follows the pointer, unsnapped (⌘ turns both off).
+            drop = snapEnabled ? dropPlan(for: w, at: p) : nil
+            let (frame, lines) = snapEnabled && drop == nil ? controller.snap(proposed, excluding: [w.id]) : (proposed, [])
             w.canvasFrame = frame
             showGuides(lines)
             render()
@@ -481,10 +663,23 @@ final class CanvasView: NSView {
             // Snap the group's bounding box as one block against everything else.
             let bounds = starts.map(\.1).reduce(starts[0].1) { $0.union($1) }
             let proposed = bounds.offsetBy(dx: d.dx, dy: d.dy)
-            let (snapped, lines) = snapEnabled ? controller.snap(proposed, excluding: selected) : (proposed, [])
+            let (snapped, lines) = snapEnabled ? controller.snap(proposed, excluding: Set(starts.map(\.0.id))) : (proposed, [])
             let dx = d.dx + snapped.minX - proposed.minX, dy = d.dy + snapped.minY - proposed.minY
             for (w, start) in starts { w.canvasFrame = start.offsetBy(dx: dx, dy: dy) }
             showGuides(lines)
+            render()
+        case .resize(let w, let edges, let start, let startPoint):
+            if !dragged && p.distance(to: startPoint) < 3 { return }
+            dragged = true
+            let moved = edges.move(start, by: CGVector(dx: (p.x - startPoint.x) / s, dy: (p.y - startPoint.y) / s), minimum: Self.minimumSize)
+            let (frame, lines) = snapEnabled ? controller.snapEdges(moved, moving: edges, excluding: w.id) : (moved, [])
+            w.canvasFrame = edges.move(frame, by: .zero, minimum: Self.minimumSize)
+            showGuides(lines)
+            showSize(of: w)
+            render()
+        case .toolScreen(let start, let startPoint):
+            dragged = true
+            tool?.screen = start.offsetBy(dx: ((p.x - startPoint.x) / s).rounded(), dy: ((p.y - startPoint.y) / s).rounded())
             render()
         case .marquee(let start, let base):
             dragged = true
@@ -501,16 +696,22 @@ final class CanvasView: NSView {
         // came: a busy window server drops them, and the window stopped short of the pointer.
         if dragged {
             switch drag {
-            case .window, .group: mouseDragged(with: e)
+            case .window, .group, .resize: mouseDragged(with: e)
             default: break
             }
         }
         lastDragEvent = 0
         showGuides([])
         marquee.path = nil
+        let dropped = drop
+        drop = nil
         switch drag {
         case .window(let w, let startFrame, _):
-            if dragged {
+            if dragged, let d = dropped {
+                // From where it started: ⌘Z puts it back there, not where you let go.
+                w.canvasFrame = startFrame
+                controller.arrange(d.placements, screen: d.screen.origin, members: d.members, how: "drop")
+            } else if dragged {
                 controller.noteUserMove(w, from: startFrame.origin)
                 controller.scheduleSave()
             } else {
@@ -525,11 +726,22 @@ final class CanvasView: NSView {
                 selected.removeAll()
                 controller.exit(focus: w)
             }
+        case .resize(let w, _, let start, _):
+            w.node.content.contentsGravity = .resize
+            sizeLabel.isHidden = true
+            if dragged {
+                // From where it started, so ⌘Z puts it back there.
+                let target = w.canvasFrame
+                w.canvasFrame = start
+                controller.resize(w, to: target.size, at: target.origin, how: "handle")
+            }
         case .pan:
             if spaceHeld { NSCursor.openHand.set() }
         default:
             break
         }
+        // The next move sets the pointer for what's under it.
+        cursorKind = ""
         drag = .none
         render()
     }
@@ -538,11 +750,36 @@ final class CanvasView: NSView {
         guard controller.isActive else { return }
         let bar = spacesBarHit(e)
         spacesBar.hovered = bar.tile
-        let w = minimapPoint(e) == nil && !bar.over ? controller.window(atView: point(e)) : nil
+        let free = minimapPoint(e) == nil && !bar.over
+        if var t = tool {
+            let s = free ? Screens.toolSlot(at: controller.camera.toCanvas(point(e)), in: t.screen) : nil
+            if s != t.hover {
+                t.hover = s
+                tool = t
+                render()
+            }
+        }
+        let w = free ? controller.window(atView: point(e)) : nil
+        let ring = free && w == nil && tool == nil ? screenRing(at: point(e)) : nil
+        let ringChanged = (ring == nil) != (ringGroup == nil) || ring?.first !== ringGroup?.first
+        if ringChanged { ringGroup = ring }
+        if sizing != nil {
+            showCursor("pick", .crosshair)
+        } else if !spaceHeld {
+            if free, tool == nil, let (_, edges) = resizeHandle(at: point(e)) {
+                showCursor("resize \(edges.rawValue)", Self.resizeCursor(edges))
+            } else if ring != nil {
+                showCursor("ring", .openHand)
+            } else {
+                showCursor("arrow", .arrow)
+            }
+        }
         if w !== hovered {
             hovered?.node.label.string = hovered?.appName
             hovered = w
             if let w { w.node.label.string = w.title.isEmpty ? w.appName : "\(w.appName) — \(w.title)" }
+            render()
+        } else if ringChanged {
             render()
         }
     }
@@ -555,7 +792,28 @@ final class CanvasView: NSView {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         switch Int(e.keyCode) {
         case kVK_Escape:
-            if selected.isEmpty { controller.exit() } else { selected.removeAll(); render() }
+            if sizing != nil {
+                sizing = nil
+                NSCursor.arrow.set()
+            } else if tool != nil {
+                finishTool(cancel: true)
+            } else if selected.isEmpty { controller.exit() } else { selected.removeAll(); render() }
+        case kVK_ANSI_Z where e.modifierFlags.contains(.command):
+            if tool != nil { NSSound.beep() } else if controller.canUndo { controller.undo() } else { NSSound.beep() }
+        case kVK_ANSI_S where e.modifierFlags.intersection([.command, .option, .control]).isEmpty:
+            // 2–4 picked: the screens they can make. None: the screen tool, here.
+            let picked = controller.windows.filter { selected.contains($0.id) }
+            if tool != nil {
+                break
+            } else if picked.isEmpty {
+                startTool(centredOn: controller.camera.toCanvas(center))
+            } else if (2...4).contains(picked.count) {
+                showLayouts(for: picked)
+            } else {
+                NSSound.beep()
+            }
+        case kVK_Return where tool != nil:
+            finishTool()
         case kVK_LeftArrow: controller.navigate(.left)
         case kVK_RightArrow: controller.navigate(.right)
         case kVK_UpArrow: controller.navigate(.up)
@@ -600,4 +858,210 @@ final class CanvasView: NSView {
             super.keyUp(with: e)
         }
     }
+
+    // MARK: Right-click menu
+
+    /// "Same size as…": the window that takes the size of the next one you click.
+    private var sizing: ManagedWindow?
+
+    /// Zoomed out: a window's sizes, or on empty canvas, what you can do with it all.
+    override func menu(for e: NSEvent) -> NSMenu? {
+        guard controller.isActive, !controller.gliding, tool == nil else { return nil }
+        sizing = nil
+        let p = point(e)
+        guard let w = controller.window(atView: p) else { return canvasMenu(at: controller.camera.toCanvas(p)) }
+        return windowMenu(w)
+    }
+
+    private func windowMenu(_ w: ManagedWindow) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let c = controller!
+        let sizable = !w.sizesItself
+        for (title, slot) in [("Fill screen", Slot.full), ("Half screen", .left), ("Quarter screen", .topLeft)] {
+            menu.addItem(MenuAction(title, enabled: sizable) { c.resize(w, to: c.slotSize(slot), how: "menu") })
+        }
+        menu.addItem(MenuAction("Same size as…", enabled: sizable) { [weak self] in
+            self?.sizing = w
+            NSCursor.crosshair.set()
+            Toast.show("Click the window whose size to take")
+        })
+        menu.addItem(MenuAction("Back to its own size", enabled: sizable && w.originalFrame.size != .zero) {
+            c.resize(w, to: w.originalFrame.size, how: "its own size")
+        })
+        let picked = c.windows.filter { selected.contains($0.id) }
+        if picked.contains(where: { $0 === w }), picked.count > 1 {
+            // Evening up: the others take this one's width, height or both.
+            menu.addItem(.separator())
+            for (title, width, height) in [("Same width", true, false), ("Same height", false, true), ("Same size", true, true)] {
+                menu.addItem(MenuAction(title) { c.evenUp(picked, like: w, width: width, height: height) })
+            }
+        }
+        if picked.contains(where: { $0 === w }), (2...4).contains(picked.count) {
+            let make = NSMenuItem(title: "Make a screen", action: nil, keyEquivalent: "")
+            make.submenu = layoutMenu(for: picked)
+            menu.addItem(make)
+        }
+        return menu
+    }
+
+    private func canvasMenu(at c: CGPoint) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let controller = controller!
+        menu.addItem(MenuAction("New screen") { [weak self] in self?.startTool(centredOn: c) })
+        menu.addItem(.separator())
+        menu.addItem(MenuAction("Tidy up") { controller.tidy() })
+        menu.addItem(MenuAction("Fit everything") { controller.animate(to: controller.fitCamera()) })
+        return menu
+    }
+
+    // MARK: Making a screen
+
+    /// The screens these 2–4 windows can make, drawn small: picking one (or pressing its number)
+    /// puts them in, each in the slot nearest where it is.
+    func layoutMenu(for ws: [ManagedWindow]) -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for (i, layout) in ScreenLayout.layouts(for: ws.count).enumerated() {
+            let item = MenuAction(Self.title(of: layout)) { [weak self] in self?.makeScreen(ws, layout) }
+            item.image = Self.thumbnail(of: layout)
+            item.keyEquivalent = "\(i + 1)"
+            item.keyEquivalentModifierMask = []
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    private func showLayouts(for ws: [ManagedWindow]) {
+        let box = ws.dropFirst().reduce(controller.camera.toView(ws[0].canvasFrame)) { $0.union(controller.camera.toView($1.canvasFrame)) }
+        layoutMenu(for: ws).popUp(positioning: nil, at: NSPoint(x: box.midX, y: bounds.height - box.midY), in: self)
+    }
+
+    /// The windows into `layout`, each in the slot nearest where it is (see Screens.assign); the
+    /// one in its first slot (the left, or top-left) stays where it is.
+    func makeScreen(_ ws: [ManagedWindow], _ layout: ScreenLayout) {
+        let placements = Array(zip(ws, Screens.assign(ws.map(\.canvasFrame.center), to: layout)))
+        guard let anchor = placements.first(where: { $0.1 == layout.slots[0] }) ?? placements.first else { return }
+        let origin = Screens.screenOrigin(keeping: anchor.0.canvasFrame, in: anchor.1, size: controller.screenRect(at: .zero).size,
+                                          gap: CanvasController.gap)
+        selected.removeAll()
+        controller.arrange(placements, screen: origin, how: "layout")
+    }
+
+    static func title(of layout: ScreenLayout) -> String {
+        switch layout {
+        case .halves: "Side by side"
+        case .leftAndQuarters: "One left, two right"
+        case .quartersAndRight: "Two left, one right"
+        default: "Four quarters"
+        }
+    }
+
+    /// A screen with `layout`'s slots filled, menu-sized.
+    static func thumbnail(of layout: ScreenLayout) -> NSImage {
+        let image = NSImage(size: NSSize(width: 30, height: 19), flipped: true) { r in
+            NSColor.black.setFill()
+            for slot in layout.slots {
+                NSBezierPath(roundedRect: Screens.frame(of: slot, in: r, gap: 1.5), xRadius: 1.5, yRadius: 1.5).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    // MARK: The screen tool
+
+    func startTool(centredOn c: CGPoint) {
+        let size = controller.screenRect(at: .zero).size
+        tool = Tool(screen: controller.screenRect(at: CGPoint(x: (c.x - size.width / 2).rounded(), y: (c.y - size.height / 2).rounded())))
+        selected.removeAll()
+        logger.info("screen tool: started")
+        render()
+    }
+
+    /// A click with the tool on: a slot (puts the window you picked there, or picks the slot), a
+    /// window (puts it in the slot you picked, or picks it), the frame's edge while it's empty
+    /// (moves it), or empty canvas (done).
+    private func toolClick(at p: CGPoint) {
+        guard var t = tool else { return }
+        drag = .none
+        let edge = controller.camera.toView(t.screen)
+        if edge.insetBy(dx: -12, dy: -12).contains(p), !edge.insetBy(dx: 12, dy: 12).contains(p),
+           controller.screenMembers(in: t.screen).isEmpty {
+            drag = .toolScreen(start: t.screen, startPoint: p)
+            return
+        }
+        if let slot = Screens.toolSlot(at: controller.camera.toCanvas(p), in: t.screen) {
+            if let w = t.window { toolPlace(w, in: slot) } else {
+                t.slot = slot
+                tool = t
+                render()
+            }
+        } else if let w = controller.window(atView: p) {
+            if let slot = t.slot { toolPlace(w, in: slot) } else {
+                t.window = w
+                tool = t
+                selected = [w.id]
+                render()
+            }
+        } else {
+            finishTool()
+        }
+    }
+
+    /// `w` into `slot` of the tool's screen: a window in the half a quarter is part of moves to
+    /// its other quarter, one in its way leaves (see Screens.makeWay).
+    private func toolPlace(_ w: ManagedWindow, in slot: Slot) {
+        guard var t = tool else { return }
+        let there = controller.screenMembers(in: t.screen).filter { $0.0 !== w }
+        var placements = [(w, slot)], stay: [ManagedWindow] = []
+        for ((m, was), now) in zip(there, Screens.makeWay(for: slot, among: there.map(\.1))) {
+            if now == was { stay.append(m) } else if let now { placements.append((m, now)) }
+        }
+        controller.arrange(placements, screen: t.screen.origin, members: stay, how: "tool")
+        t.steps += 1
+        t.slot = nil
+        t.window = nil
+        tool = t
+        selected.removeAll()
+        render()
+    }
+
+    /// Return or a click on empty canvas: done. Esc: everything it did undone.
+    private func finishTool(cancel: Bool = false) {
+        guard let t = tool else { return }
+        tool = nil
+        if cancel { for _ in 0..<t.steps { controller.undo() } }
+        selected.removeAll()
+        logger.info("screen tool: \(cancel ? "cancelled" : "done", privacy: .public) (\(t.steps) placed)")
+        render()
+    }
+
+    /// The click after "Same size as…": the window clicked gives its size; anywhere else, nothing.
+    private func finishSizing(at p: CGPoint) {
+        guard let w = sizing else { return }
+        sizing = nil
+        NSCursor.arrow.set()
+        if let source = controller.window(atView: p), source !== w {
+            controller.resize(w, to: source.canvasFrame.size, how: "same size as \(source.appName)[\(source.id)]")
+        }
+    }
+}
+
+/// A menu item that runs a closure.
+private final class MenuAction: NSMenuItem {
+    private let run: () -> Void
+
+    init(_ title: String, enabled: Bool = true, _ run: @escaping () -> Void) {
+        self.run = run
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+        isEnabled = enabled
+    }
+
+    required init(coder: NSCoder) { fatalError() }
+
+    @objc private func fire() { run() }
 }

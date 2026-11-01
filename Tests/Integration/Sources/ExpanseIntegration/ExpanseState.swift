@@ -28,6 +28,8 @@ struct ExpanseState {
     var gliding = false
     var animating = false
     var paused = false
+    /// Expanse is still settling after a display change (its first 20s or so): window moves aren't followed.
+    var settling = false
     var frontmost = ""
     /// Each app's focused window as Expanse last heard it (focusedWindowByApp): where a hop starts.
     var focusedByApp: [pid_t: CGWindowID] = [:]
@@ -124,6 +126,7 @@ struct ExpanseState {
                 gliding = flag("gliding", in: line)
                 animating = flag("animating", in: line)
                 paused = flag("paused", in: line)
+                settling = flag("settling", in: line)
                 if let m = line.firstMatch(of: #/frontmost=(.*?) focusedByApp=/#) { frontmost = String(m.1) }
                 // "focusedByApp=[512: 4021, 77: 310]"
                 if let m = line.firstMatch(of: #/focusedByApp=\[([^\]]*)\]/#) {

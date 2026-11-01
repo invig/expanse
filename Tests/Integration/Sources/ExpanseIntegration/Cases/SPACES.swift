@@ -32,8 +32,7 @@ import AppKit
                 try await spacesArrived(t, sc, typing: field, since: mark)
             }
         },
-        Case("SPACES-07", "The Spaces panel works at 100% too",
-             known: "in complete runs in the VM a click on the tile sometimes switches nothing while a display change settles") { t in
+        Case("SPACES-07", "The Spaces panel works at 100% too") { t in
             try t.needsInput()
             try await spacesScene(t, "Spaces07", showing: false) { sc in
                 let field = spacesTypingField(sc.fs)
@@ -46,13 +45,23 @@ import AppKit
                 if let other = spacesCovering(t, p) { throw Skip("\(other) covers the Spaces panel at 100% (hide the Dock automatically to run this)") }
                 let mark = t.log.mark()
                 Input.click(at: p)
+                // DIAGNOSTIC: a first click that reaches nothing (seen after the DISPLAY cases), and
+                // whether a second one gets there.
+                var second = "not needed"
+                if await t.log.wait(since: mark, timeout: 2, { $0.hasPrefix("click at 100%") || $0.hasPrefix("switching from") }) == nil {
+                    Input.click(at: p)
+                    second = await t.log.wait(since: mark, timeout: 2, { $0.hasPrefix("click at 100%") || $0.hasPrefix("switching from") }) == nil
+                        ? "lost too" : "reached Expanse"
+                }
                 do {
                     try await spacesArrived(t, sc, typing: field, since: mark)
+                    if second != "not needed" { throw Failure("the first click on the tile reached nothing; a second \(second)") }
                 } catch {
                     // Twice in complete runs the click switched nothing and logged nothing: say what was there.
                     let s = try? await t.state()
-                    throw Failure("\(error) (clicked \(NSStringFromPoint(p)); in front there now: \(spacesCovering(t, p) ?? "Expanse"); "
-                                  + "the panel's tiles: \(s.map { $0.spacesTiles.mapValues(NSStringFromRect).description } ?? "?"))")
+                    throw Failure("\(error) (clicked \(NSStringFromPoint(p)); a second click: \(second); in front there now: \(spacesCovering(t, p) ?? "Expanse"); "
+                                  + "the panel's tiles: \(s.map { $0.spacesTiles.mapValues(NSStringFromRect).description } ?? "?"); "
+                                  + "Expanse's windows: \(spacesExpanseWindows(t)); at the point, Accessibility finds \(spacesAXAt(p)))")
                 }
             }
         },
@@ -407,6 +416,9 @@ private func spacesOf(_ id: CGWindowID) -> [UInt64] {
     guard let desktop = start.current, start.currentSpace?.fullScreen == false else {
         throw Skip("needs to start on a desktop, not a full-screen app's Space")
     }
+    // Not straight after a display change (DISPLAY-18 runs just before these): while Expanse
+    // settles, a click on its Spaces bar at 100% doesn't reach it in the VM (README, Questions).
+    try await t.until("Expanse to settle after the last display change", timeout: 30) { try await !t.state().settling }
     let f = try await t.fixture(name, windows: 2)
     let ids = f.windows
     try await t.until("Expanse to take on \(name)'s windows", timeout: 10) {
@@ -657,4 +669,27 @@ private func spacesFrontWindow() -> (id: CGWindowID, pid: pid_t)? {
         }
         return last
     }
+}
+
+/// Expanse's windows on screen, front first, as the window server has them: level and bounds.
+@MainActor private func spacesExpanseWindows(_ t: Ctx) -> String {
+    let pid = t.expanse?.processIdentifier
+    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    return info.filter { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid }.map { w in
+        let b = (w[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) } ?? .zero
+        return "layer \(w[kCGWindowLayer as String] as? Int ?? 0) \(NSStringFromRect(b)) alpha \(w[kCGWindowAlpha as String] as? Double ?? 1)"
+    }.joined(separator: ", ")
+}
+
+/// The Accessibility element at `p` (global): its app and role.
+private func spacesAXAt(_ p: CGPoint) -> String {
+    var element: AXUIElement?
+    guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(p.x), Float(p.y), &element) == .success,
+          let element else { return "nothing" }
+    var pid: pid_t = 0
+    AXUIElementGetPid(element, &pid)
+    var role: CFTypeRef?
+    AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+    let app = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
+    return "\(app) \(role as? String ?? "?")"
 }

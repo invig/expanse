@@ -25,6 +25,8 @@ private struct SettingsView: View {
     let checkForUpdates: () -> Void
     @State private var openAtLogin = LoginItem.enabled
     @State private var automatic = Updater.shared.automatic
+    /// See CanvasController.gap.
+    @AppStorage(CanvasController.gapKey) private var gap: Double = 20
     private let isRelease = Updater.shared.isRelease
 
     var body: some View {
@@ -34,6 +36,16 @@ private struct SettingsView: View {
                     LoginItem.toggle()
                     openAtLogin = LoginItem.enabled
                 }))
+            }
+            Section("Arranging") {
+                Picker("Gaps between windows", selection: $gap) {
+                    Text("20pt").tag(20.0)
+                    Text("10pt").tag(10.0)
+                    Text("None").tag(0.0)
+                }
+                Text("Snapping, Tidy up and the screens you build use it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             Section("Updates") {
                 Toggle("Check for updates automatically", isOn: Binding(get: { automatic }, set: {

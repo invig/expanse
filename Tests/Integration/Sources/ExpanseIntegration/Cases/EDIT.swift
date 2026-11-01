@@ -436,7 +436,7 @@ private func editSavedSpot(_ id: CGWindowID) -> CGPoint? {
     return CGPoint(x: x, y: y)
 }
 
-private func editMouse(_ type: CGEventType, _ p: CGPoint, _ flags: CGEventFlags = []) {
+func editMouse(_ type: CGEventType, _ p: CGPoint, _ flags: CGEventFlags = []) {
     let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left)
     e?.flags = flags
     e?.setIntegerValueField(.mouseEventClickState, value: 1)
@@ -454,7 +454,7 @@ private func editKey(_ code: CGKeyCode, down: Bool, flags: CGEventFlags) {
 /// A drag with the left button, a step at a time, so a case can look at Expanse mid-drag or
 /// change the modifier keys on the way. Release it in a `defer`, so a failure never leaves the
 /// button down.
-@MainActor private final class EditDrag {
+@MainActor final class EditDrag {
     var point: CGPoint
     private var flags: CGEventFlags
     private var held = true
@@ -488,18 +488,18 @@ private func editKey(_ code: CGKeyCode, down: Bool, flags: CGEventFlags) {
 }
 
 extension ExpanseState {
-    @MainActor fileprivate func editFrame(_ w: TestWindow) throws -> CGRect { try editFrame(w.id) }
+    @MainActor func editFrame(_ w: TestWindow) throws -> CGRect { try editFrame(w.id) }
 
-    fileprivate func editFrame(_ id: CGWindowID) throws -> CGRect {
+    func editFrame(_ id: CGWindowID) throws -> CGRect {
         guard let f = window(id)?.canvas else { throw Failure("window \(id) isn't on the canvas") }
         return f
     }
 
     /// Where the middle of a canvas rect is on screen.
-    fileprivate func editCentre(_ r: CGRect) -> CGPoint { screenPoint(CGPoint(x: r.midX, y: r.midY)) }
+    func editCentre(_ r: CGRect) -> CGPoint { screenPoint(CGPoint(x: r.midX, y: r.midY)) }
 }
 
-fileprivate extension Ctx {
+extension Ctx {
     /// The runner's windows in a row, `gap` apart, at a clear spot on the canvas (see editClearSpot).
     func editRow(_ titles: [String], size: CGSize = CGSize(width: 400, height: 260), gap: CGFloat = 20) async throws -> ([TestWindow], CGPoint) {
         let spot = editClearSpot(try await state())
