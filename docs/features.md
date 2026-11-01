@@ -4,13 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Fixed or built since 0.1.35, for the next release's notes:
-
-- **A window grown back after a smaller screen keeps its size**: a window scan that started
-  just after Expanse resized a window, and still had its old size, no longer puts that size
-  back (PERSIST-31, found by the end-to-end tests in the VM).
-- **A toast that fades while the screen is locked goes away**: it was put away when its fade
-  animation finished, which waits for the display to draw (SUPPORT-06).
+Nothing yet.
 
 ## Bugs
 
@@ -99,6 +93,9 @@ Not decided yet.
 
 ## Done
 
+- 0.1.36: A window grown back to its size after a smaller screen (unplugging a display, say)
+  keeps that size, instead of sometimes slipping back to the smaller one; a notice that fades
+  while the screen is locked goes away.
 - 0.1.35: Build a screen zoomed out: drop a window on another's side or corner to tile them
   into halves and quarters of your screen, or select a few and press S, or press S with nothing
   selected for the screen tool; drag the gap between them to move the screen. Resize windows
