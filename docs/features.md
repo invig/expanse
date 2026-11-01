@@ -4,43 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Fixed or built since 0.1.34, for the next release's notes:
-
-- **Groups of windows as places** (Next up 7).
-- **Screens you build, and resizing zoomed out** (Next up 1 and 8): drop a window on another's
-  side or corner to make a screen of halves and quarters, or select 2–4 and press S, or use the
-  screen tool (S with nothing selected); drag a screen's ring to move it whole. Drag a window's
-  edges to resize it, or right-click for Fill / Half / Quarter screen, Same size as…, Back to its
-  own size and, with several selected, Same width / height / size. ⌘Z undoes each. Settings ›
-  Gaps between windows: 20pt, 10pt or none (EDIT-27 to EDIT-34, SIZE-15 to SIZE-19).
-- **Scrolling at 100% is easier to steer**: the snap when a scroll ends carries on your way or
-  tidies by at most 40pt, and no longer pulls you back to the window you were leaving (NAV-61).
-- **Esc and ⌥` go back to the window you were in**, however much you moved around zoomed out
-  (NAV-17).
-- **Fixes the regression tests found** (31 Oct): an unchanged layout no longer counts as changed
-  and pushes out an older snapshot (PERSIST-21); Welcome from the panel while zoomed out no longer
-  opens behind a window (UI-11); pictures come back after replayd crashes while you're zoomed out,
-  without moving the view (CAPTURE-21); the end of a drag in the 20s after a display change is
-  followed (DISPLAY-01); a window nearly the screen's width is centred by the snap after a scroll
-  (NAV-53); an `expanse://pan` link with a bad number is ignored, not half followed (SEC-01).
-- **Steadier with a busy window server** (31 Oct, found running the regression tests in the VM):
-  while the canvas is up, the check for dialogs reads the window list off the main thread (in the
-  VM each read took up to a second, every half second, and Expanse froze for up to 10s); and
-  zoomed out, only streams that stopped are restarted after a scan, not every start that timed
-  out (which piled requests onto macOS's capture service). A display change while zoomed out
-  keeps the sizes it fitted windows to (a slow scan from before the fit put the old ones back).
-  A slow hop's start is now logged in parts (`slow: glide prep`), and opening the canvas logs
-  `canvas up`. A window dragged on the canvas ends where you let go, even if the last moves were
-  dropped; a window a scan catches on its way into the Dock comes back to its own spot; and windows
-  macOS sets down elsewhere as a full-screen window comes back (or the Space changes) are put back,
-  even when only a later scan notices, and even mid-glide (SPACES-23). Minimising a window just
-  after Expanse brought it forward no longer brings it straight back out (PLACE-17). Pictures
-  come back after macOS restarts its capture service just as streams are starting (requests it
-  never answered held every capture back until Expanse restarted; CAPTURE-27), and an answer to
-  a window scan already given up on is dropped even when it comes before the next scan begins
-  (CAPTURE-30). Expanse logs why it quits (`quitting: …`). Centre window
-  from the panel acts on the window you were in (UI-34), and a toast shown while the last one
-  fades stays up (SUPPORT-06).
+Nothing yet.
 
 ## Bugs
 
@@ -62,7 +26,7 @@ in Copy Logs for a Bug Report).
    - Sizes snap to match: the same width as the column, the same height as the row.
    - Maybe: resize handles on the canvas while zoomed out, and a way to even up a row or
      column in one go.
-   - Built 1 Nov (Not released yet, above) for zoomed out: edge and corner handles that snap to
+   - Released in 0.1.35 for zoomed out: edge and corner handles that snap to
      neighbours, the gap and screen halves; a right-click size menu; evening up a selection.
      Still to do: the same snapping when you resize a real window at 100%.
 2. **Demo videos for the README.** Recorded in a clean macOS VM, so nothing personal is filmed.
@@ -89,11 +53,11 @@ in Copy Logs for a Bug Report).
      and notices over the screen, out of the way.
    - The 54 guided and 31 look cases haven't been run yet.
 
-7. **Groups of windows as places** (asked 31 Oct). Built 31 Oct (Not released yet, above):
+7. **Groups of windows as places** (asked 31 Oct). Released in 0.1.35:
    windows a gap or so apart that fit the screen together are one place. A hop to one frames the
    group, hops inside a group on screen only move focus, a click zoomed out or ⌃⌥C frames it, and
    hovering it zoomed out outlines it (NAV-55 to NAV-60).
-8. **Build screens zoomed out** (asked 1 Nov). Built 1 Nov (Not released yet, above): put two to
+8. **Build screens zoomed out** (asked 1 Nov). Released in 0.1.35: put two to
    four windows into halves and quarters of a screen, three ways (drop zones, select and S, the
    screen tool), and resize windows zoomed out. A built screen is a group, so it gets all of 7.
 
@@ -120,6 +84,17 @@ in Copy Logs for a Bug Report).
 
 ## Done
 
+- 0.1.35: Build a screen zoomed out: drop a window on another's side or corner to tile them
+  into halves and quarters of your screen, or select a few and press S, or press S with nothing
+  selected for the screen tool; drag the gap between them to move the screen. Resize windows
+  zoomed out by their edges, or right-click one for Fill, Half or Quarter screen, Same size as…
+  and more; ⌘Z undoes it, and Settings has the gap between windows (20pt, 10pt or none). Windows
+  side by side that fit the screen are one place: a hop, a click or ⌃⌥C shows the whole group.
+  Esc and ⌥` go back to the window you were in, and scrolling at 100% no longer pulls you back
+  to the window you were leaving. Fixes found by the new regression tests: steadier when the
+  window server is busy, pictures come back after macOS restarts its capture service, windows
+  macOS moves as a full-screen app comes back go back to their spots, and a window you minimise
+  right after switching to it stays minimised.
 - 0.1.34: Streaming video (Prime Video, say) no longer blinks every few seconds. Expanse kept
   taking pictures of windows at the screen's edge, and macOS blinks protected video at every
   one; now it takes nothing while you're at 100%.
