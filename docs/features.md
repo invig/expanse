@@ -4,7 +4,13 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+Fixed or built since 0.1.35, for the next release's notes:
+
+- **A window grown back after a smaller screen keeps its size**: a window scan that started
+  just after Expanse resized a window, and still had its old size, no longer puts that size
+  back (PERSIST-31, found by the end-to-end tests in the VM).
+- **A toast that fades while the screen is locked goes away**: it was put away when its fade
+  animation finished, which waits for the display to draw (SUPPORT-06).
 
 ## Bugs
 
@@ -75,6 +81,15 @@ in Copy Logs for a Bug Report).
 
 - Tidy Up lines up bottom and right edges too (today: tops and lefts).
 - Demo clips that show the pointer: resting in a corner, clicking a window.
+
+## Open questions
+
+Not decided yet.
+
+- **Should Expanse keep windows from hiding under other windows** (mostly), as a tiling window
+  manager does? Asked 1 Nov. Today overlaps are allowed: new windows, Tidy Up, screens you build
+  and sizes picked zoomed out keep clear of other windows, but a window you drag (on the canvas or
+  at 100%) or resize at 100% can sit over another.
 
 ## Won't do
 

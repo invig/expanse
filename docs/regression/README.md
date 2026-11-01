@@ -251,7 +251,11 @@ yet:
   where it should be. Reproduced every time with `expanse://screen?w=1120&h=700`, then
   `expanse://screen`, then SPACES-07; 25s later it works. A redraw of the overlay at its new size
   didn't help, and nothing in Expanse's own click handling looks at the settling. On a Mac this
-  would be the 20s after plugging a display in or out. The SPACES cases wait for it to end.
+  would be the 20s after plugging a display in or out. The SPACES cases wait for it to end;
+  since then DISPLAY then SPACES has passed 6 times in 7. The one failure came with nothing
+  settling, so the settling isn't the whole story. SPACES-07 now clicks a second time when the
+  first reaches nothing and fails saying whether that one got through: the next failure should
+  tell a click that was swallowed from a backdrop that takes no clicks.
 - **Pause and Quit hold Expanse up while apps are slow:** `restoreOriginals` moves every window
   back with Accessibility calls on the main thread, one after another, so with a busy app (or
   in a VM) Expanse answers nothing for seconds (URL-01 saw more than 8s). `commitAsync` already

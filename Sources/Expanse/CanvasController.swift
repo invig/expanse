@@ -1595,6 +1595,7 @@ final class CanvasController: NSObject {
         }
         let input = scanInput()
         let s0 = CACurrentMediaTime()
+        scanStartedAt = s0
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { [weak self] content, error in
             // An answer to a scan given up on: a later one is in flight, or has been answered.
             guard let self, self.latestScan.withLock({ $0 }) == token else { return }
@@ -1664,6 +1665,18 @@ final class CanvasController: NSObject {
         let liveNow = !isActive && !suspendTracking
         return input.live != liveNow || input.resizes != ManagedWindow.resizes
             || (liveNow && (input.moves != ManagedWindow.moves || input.camera != camera))
+    }
+
+    /// When the scan being applied started (one at a time; see sync).
+    private var scanStartedAt: CFTimeInterval = 0
+
+    /// A scan that started within half a second of Expanse resizing `w` can still have its old size:
+    /// macOS's window list catches up a moment after the app takes the new one. In the VM a slow
+    /// scan put a window back to the size it had on a smaller screen (PERSIST-31, 1 Nov). Its size
+    /// for `w` isn't taken then unless it's the one Expanse gave it; the next scan says how it ended.
+    private func predatesResize(_ w: ManagedWindow, _ size: CGSize) -> Bool {
+        guard let given = w.lastSized, scanStartedAt - w.lastSizedAt < 0.5 else { return false }
+        return abs(given.width - size.width) > 2 || abs(given.height - size.height) > 2
     }
 
     /// `tracked`: Expanse already manages this window. The on-screen test is only for discovering
@@ -2003,7 +2016,7 @@ final class CanvasController: NSObject {
                         if selfResized {
                             // Its app recentred it as it resized itself: back to its spot.
                             replaceAny = true
-                            if !stale { adoptSize(w, f.size) }
+                            if !stale, !predatesResize(w, f.size) { adoptSize(w, f.size) }
                             continue
                         }
                         w.canvasFrame.origin = canvasPoint(forGlobal: f.origin)
@@ -2013,7 +2026,7 @@ final class CanvasController: NSObject {
                         }
                     }
                 }
-                if !stale { adoptSize(w, f.size) }
+                if !stale, !predatesResize(w, f.size) { adoptSize(w, f.size) }
             } else {
                 // A new window is where its app put it, which nothing here has moved, so its frame
                 // holds even in an out-of-date scan (opening windows in a burst makes most scans

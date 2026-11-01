@@ -43,12 +43,12 @@ enum Toast {
         let this = shown
         hideWork?.cancel()
         let work = DispatchWorkItem {
-            NSAnimationContext.runAnimationGroup({ $0.duration = 0.3; w.animator().alphaValue = 0 },
-                                                 completionHandler: {
-                // A toast that came during the fade (Copy Logs' "Copied" after "Collecting
-                // logs…") stays: it has a fade of its own.
-                if shown == this { w.orderOut(nil) }
-            })
+            NSAnimationContext.runAnimationGroup { $0.duration = 0.3; w.animator().alphaValue = 0 }
+            // Put away once faded, on a timer rather than the fade's completion, which waits for
+            // the display to draw (with the screen locked it never came, and the window stayed).
+            // A toast that came during the fade (Copy Logs' "Copied" after "Collecting logs…")
+            // stays: it has a fade of its own.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { if shown == this { w.orderOut(nil) } }
         }
         hideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: work)

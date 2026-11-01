@@ -226,4 +226,26 @@ extension PERSISTTests {
         #expect(w[0].canvasFrame.origin == CGPoint(x: 100, y: 80))
         #expect(w[1].canvasFrame.origin == CGPoint(x: 760, y: 80))
     }
+
+    @Test("PERSIST-31 A scan that started just after Expanse resized a window doesn't put its old size back (logic)")
+    func persist31Lag() {
+        // Grown back to its chosen size after a smaller screen; the window list a moment later can
+        // still have it at the small screen's size, moved but not yet grown.
+        let w = Fake.window(id: Self.farID + 31, canvas: Self.rect(3000, 100, 1360, 328))
+        let c = Self.synced([w])
+        Self.quietly(c) {
+            c.firstSync = false
+            w.parked = true
+            w.lastSized = CGSize(width: 1360, height: 328)
+            w.lastSizedAt = CACurrentMediaTime()
+            c.scanStartedAt = w.lastSizedAt + 0.1
+            let behind = Fake.scWindow(id: w.id, frame: CGRect(x: 0, y: 30, width: 1088, height: 328))
+            c.apply([behind], ax: CanvasController.AXSnapshot())
+            #expect(w.canvasFrame.size == CGSize(width: 1360, height: 328))
+            // A scan that started later tells how it really ended up.
+            c.scanStartedAt = w.lastSizedAt + 2
+            c.apply([behind], ax: CanvasController.AXSnapshot())
+            #expect(w.canvasFrame.size == CGSize(width: 1088, height: 328))
+        }
+    }
 }

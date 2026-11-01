@@ -247,6 +247,14 @@ import AppKit
             try await t.pause(4)
             let replayd = try await captureStartReplayd()
             defer { replayd.stop() }
+            // The 33 first pictures go about three a second, and the log stream hands them over a
+            // moment late: at rest starts once replayd has been asked nothing for 3 s (on 1 Nov the
+            // last three, taken before, counted as during).
+            try await t.until("replayd quiet for 3 s", timeout: 40) {
+                let m = replayd.mark()
+                try await t.pause(3)
+                return replayd.count(.picture, since: m) + replayd.count(.streamStart, since: m) == 0
+            }
             let rpid = await captureReplaydPID()
             let rmark = replayd.mark()
             let c0 = await captureCPU(pid)

@@ -376,6 +376,7 @@
 - **Expected:** Step 2: the windows are laid out from the snapshot's home spots, tightened to fit the laptop's screen. Step 3: every window is exactly where the snapshot had it on the external display.
 - **Check in log:** `restored a layout: N of M windows`.
 - **Automate:** manual: needs two screen sizes.
+- **Note:** Since 1 Nov (not released yet), found by the end-to-end case after a long run in the VM: back on the big screen, a slow window scan that started just after Expanse grew the big window again still had it at the small screen's size, and that size was taken back. A scan that started within half a second of Expanse resizing a window no longer takes a different size for it; the next scan says how it ended up.
 
 ## PERSIST-32 Take snapshot keeps the layout now
 - **Type:** Feature
