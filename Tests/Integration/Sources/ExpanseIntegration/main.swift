@@ -1,4 +1,5 @@
 import AppKit
+import os
 
 // Expanse Tests: runs the regression cases in docs/regression against a running development
 // build of Expanse. See scripts/integration.sh, which builds this app and starts it.
@@ -55,6 +56,21 @@ app.run()
     private let out = URL(fileURLWithPath: option("--out") ?? (NSHomeDirectory() + "/Library/Logs/ExpanseTests"), isDirectory: true)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Which of Expanse Tests' windows has the keyboard, and when it's in front, logged under
+        // Expanse's subsystem so a case's log shows it among Expanse's own lines.
+        let log = Logger(subsystem: "com.invignation.expanse", category: "tests")
+        let center = NotificationCenter.default
+        for (name, what) in [(NSWindow.didBecomeKeyNotification, "key"), (NSWindow.didBecomeMainNotification, "main")] {
+            center.addObserver(forName: name, object: nil, queue: .main) { note in
+                // Its number (the window ID in Expanse's lines), never its title: SUPPORT-01 checks
+                // no window title ever reaches this log.
+                let number = (note.object as? NSWindow)?.windowNumber ?? 0
+                log.info("tests: \(what, privacy: .public) window [\(number)]")
+            }
+        }
+        for (name, what) in [(NSApplication.didBecomeActiveNotification, "active"), (NSApplication.didResignActiveNotification, "not active")] {
+            center.addObserver(forName: name, object: nil, queue: .main) { _ in log.info("tests: Expanse Tests \(what, privacy: .public)") }
+        }
         Task { @MainActor in
             let code = await run()
             exit(code)
@@ -105,6 +121,7 @@ app.run()
         if t.expanse == nil { try? await t.launchExpanse() }
         do {
             let s = try await t.state()
+            measureClearSpot(s)
             progress("Expanse: \(s.windows.count) windows on the canvas (\(s.windows.filter(\.parked).count) out of view), "
                      + "viewport \(NSStringFromRect(s.viewport)), scale \(s.scale), \(s.active ? "zoomed out" : "at 100%")\(s.paused ? ", paused" : "")")
         } catch {
@@ -121,6 +138,12 @@ app.run()
                 continue
             }
             await t.cleanUp()
+            // A prompt of macOS's (Screen Recording asking again, say) sits in the middle of the
+            // screen and takes the case's clicks: it needs answering, by hand, first.
+            if c.kind == .auto, let prompt = macOSPromptOnScreen() {
+                record(c, "skipped", "macOS is asking something on screen (\(prompt)): answer it, then run this case again", 0)
+                continue
+            }
             t.begin()
             let began = Date()
             do {
@@ -133,6 +156,7 @@ app.run()
             } catch {
                 if let known = c.known {
                     record(c, "known", "\(known) — \(error)", Date().timeIntervalSince(began))
+                    keepLog(c, t)
                 } else {
                     record(c, "FAILED", "\(error)", Date().timeIntervalSince(began))
                     // Expanse's log in a VM keeps info lines only for minutes: keep the case's now.
@@ -255,8 +279,10 @@ app.run()
 
     private func report() {
         // Every window still open: hidden and minimised ones too, not closed ones.
-        let ids = windows.filter(\.isOpen).map { "\($0.id)" }
-        DistributedNotificationCenter.default().postNotificationName(Fixture.stateNote, object: name, userInfo: ["windows": ids],
+        let open = windows.filter(\.isOpen)
+        DistributedNotificationCenter.default().postNotificationName(Fixture.stateNote, object: name,
+                                                                     userInfo: ["windows": open.map { "\($0.id)" },
+                                                                                "opened": open.map { NSStringFromRect($0.opened) }],
                                                                      deliverImmediately: true)
     }
 

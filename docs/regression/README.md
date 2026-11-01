@@ -63,9 +63,17 @@ several seconds), so limits on smoothness and speed (`expectTiming`) don't fail 
 miss is noted in the report beside the pass, and the rest of the case still has to pass. Judge
 those on a Mac. Restart the VM before a full run (`tart stop expanse-demo`, then
 `tart run expanse-demo`): after an hour or two of cases its window server is slower still. Keep
-its window showing: now and then macOS asks again whether Expanse may record the screen ("bypass
-the system private window picker"), and until you click Allow its prompt sits in the middle of
-the screen and takes the cases' clicks. A heavy app on this Mac (a game) slows the VM too.
+its window showing: macOS asks again whether Expanse may record the screen ("bypass the system
+private window picker") every so often (in the VM, within the hour, even with the same build),
+and until you click Allow its prompt sits in the middle of the screen and takes the cases'
+clicks. While one is up, the runner skips each automatic case
+with the reason ("macOS is asking something on screen"). On 1 Nov it came three complete runs
+in a row just as TRACK-12 began, about 25 minutes in (twice after a VM restart, once without),
+so something there may set it off. After Allow, `--only` with the skipped IDs finishes the pass.
+The VM's disk is 60GB (`tart set expanse-demo --disk-size 60`, 1 Nov): at 41GB it filled up
+partway through a run (macOS downloads several GB of assets by itself), and cases failed
+saving files ("No space left on device"). `df -h /` in the VM shows what's left. A heavy app on this Mac (a game) slows
+the VM too.
 
 One-time VM setup: this Mac's SSH key in the VM (`ssh-copy-id admin@<VM address>`, the
 image's password is admin); Expanse Tests switched on in the VM's System Settings › Privacy &
@@ -127,11 +135,18 @@ change), NAV-53 (the snap and a nearly screen-wide window) and SEC-01 (a pan lin
 number). SEC-22's wording was wrong, not the code. Mark a new one with `withKnownIssue` in a unit
 test, or `known:` on an end-to-end case, until it's fixed.
 
-- **NAV-49** (end-to-end, first run 31 Oct; it skipped before, for want of bare desktop): after
-  ⌘ + scroll on the canvas opened at 100% and Esc, whose hand-back focuses another window of the
-  same app, a click on a window partly on screen glides to centre it, but the app's earlier window
-  (B) ends up with the keyboard. Seen every time in the VM; not yet checked on a Mac, so it may be
-  a real "typing goes to the wrong window" bug or the VM. The hop step before it passes.
+- **SPACES-07** (end-to-end, VM, 1 Nov): in each of three complete runs, never in a run of the
+  SPACES cases alone (eight passes), the click on the full-screen app's tile at 100% switched
+  nothing and logged nothing. The click was on the tile's middle, as Expanse has it, with Expanse
+  in front there. Each time Expanse was settling after a display change ("focused while displays
+  settle", then "display change settled" seconds after the click) and the passing runs had none,
+  but nothing on a click's way to the Spaces bar waits for that. Expanse now logs the clicks it
+  drops (`click ignored: a glide is under way`, `not switching to …`, `already on …`), and a
+  failure says what was in front and what the panel showed: the next one should say which.
+
+NAV-49, which first ran in the VM on 31 Oct, looked like one (the keyboard in
+the wrong window after a click) until its log showed the click landing on another window of the
+case's, cut off at the same edge; the case now brings the window it clicks to the front.
 
 - **SUPPORT-01** (catalogue wording): a glide's moves are logged as one `windows landed after
   …ms (apps)` line, not a `move …` line each (`commitAsync`); single moves still log `move`. The
@@ -151,10 +166,22 @@ What the first runs in the VM taught (Tests/Integration):
 - macOS can stop a dragged window a few points short of the pointer: compare against where the
   real window landed, not the pointer's path.
 - Expanse only takes a resize as your chosen size more than 2s after a resize of its own (a
-  glide's): wait that long before resizing.
+  glide's): wait that long before resizing. And a move in a window's first 5s on the canvas is
+  taken for its app placing it late, and put back (`cameBack`): wait those out before moving or
+  resizing a new window as you would (SIZE-04, SIZE-11).
 - The VM has other apps' windows on its canvas: lay a case's windows out somewhere clear (a hop
   goes to the nearest window, whoever's it is), and don't count on which window gets focus when
-  one closes or an app hides.
+  one closes or an app hides. Those windows wander on the canvas (by tens of thousands of points
+  after a VM restart), so no fixed spot is clear for good: start from `clearSpot`, measured as
+  the run starts. Not too far from them either: a restored layout zooms out to fit every window,
+  and at the smallest zoom the screen spans only about 30,000pt.
+- Expanse can place a new window on the canvas within 100ms of its opening, before the window
+  server lists it: where macOS had it is `TestWindow.opened` (or `Fixture.opened`), not where
+  the window server first shows it.
+- The pointer is a window of the window server's own in its window list: leave it out when
+  asking what's in front at a point (a click leaves it there).
+- Zoomed out, a window's picture can lie under Expanse's panels in the bottom-right corner, which
+  take the click: click it at `s.clickPoint(on: w.canvas)`, not its middle.
 - replayd ignores SIGTERM: `killall -KILL replayd` is a restart (launchd starts a new one).
 - Two windows a gap apart that fit the screen together are a screen group (NAV-55): a hop
   between them only moves focus, and going to one frames both. Put windows more than 40pt apart
@@ -210,10 +237,19 @@ yet:
   call for the Space (`Spaces.inFullScreenSpace`, in `realWindowChanged`). In the VM, with 67
   windows, that added up to freezes of 1 to 10s (DISPLAY-10). Asking for the Space once per batch
   of moves, not once per window, would cut most of it.
-- **A window shoved while another leaves full screen:** in SPACES-23 (VM, 1 Nov, once in several
-  runs) macOS moved a window that was half off the screen's left edge onto it as A came back from
-  full screen, and Expanse followed that as a move (`follow … moved to`), so the window's spot
-  changed. `movedByFullScreen` only covers the window going full screen itself.
+- **A 140s freeze as a window left full screen from another Space:** in SPACES-07 (VM, 1 Nov,
+  once) the case's tidy-up took its window out of full screen while the desktop was showing
+  (`toggleFullScreen` on a window whose Space isn't the one shown, which a person can't do).
+  Expanse glided to it as it came back, and then neither Expanse's main thread nor the runner did
+  anything for 140s. No sample was caught, so whether Expanse or the window server was stuck is
+  open. The tidy-up now goes to the window's Space first; if it's seen on a Mac, `sample Expanse`
+  during it would tell.
+- **Seen once each on 1 Nov in the VM, passing since (in a complete run too):** in UI-11 Expanse
+  quit itself (a normal quit, no crash report) between the walkthrough opening and the case
+  pressing Quit; in CAPTURE-15 replayd was asked for 3 pictures during the minute at rest, after
+  33 new windows. The logs don't say why; if one comes back, its saved log (`--keep-logs`) is
+  where to start (SPACES-07 is under known issues above). Expanse now logs why it quits (`quitting: Quit in the menu bar panel`, `SIGTERM`, or `asked
+  by <app> (pid …)` for a quit Apple event), so a repeat of UI-11's says who asked.
 - **Pause and Quit hold Expanse up while apps are slow:** `restoreOriginals` moves every window
   back with Accessibility calls on the main thread, one after another, so with a busy app (or
   in a VM) Expanse answers nothing for seconds (URL-01 saw more than 8s). `commitAsync` already

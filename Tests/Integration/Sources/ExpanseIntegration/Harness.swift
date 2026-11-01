@@ -429,3 +429,36 @@ func closeBackgroundItemNotices() {
     AXUIElementSetMessagingTimeout(app, 1)
     for w in attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? [] { visit(w, 0) }
 }
+
+/// A prompt macOS puts up on its own (UserNotificationCenter: Screen Recording asking again, a
+/// permission request), on screen now: where it is, or nil.
+func macOSPromptOnScreen() -> String? {
+    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    for w in info where (w[kCGWindowOwnerName as String] as? String) == "UserNotificationCenter" {
+        guard let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b),
+              r.width >= 100, r.height >= 100 else { continue }
+        return "UserNotificationCenter at \(NSStringFromRect(r))"
+    }
+    return nil
+}
+
+/// 2,000pt right of every window on the canvas as the run started, level with the top of them:
+/// clear of the Mac's own windows, wherever they've got to on the canvas (in the VM they wander
+/// tens of thousands of points from one restart to the next), and near enough that zooming out
+/// to fit shows both (at the smallest zoom the screen spans about 30,000pt). Set by
+/// measureClearSpot as the run starts.
+@MainActor private(set) var clearSpot = CGPoint(x: 12_000, y: 12_000)
+
+@MainActor func measureClearSpot(_ s: ExpanseState) {
+    guard let first = s.windows.first?.canvas else { return }
+    let all = s.windows.dropFirst().reduce(first) { $0.union($1.canvas) }
+    clearSpot = CGPoint(x: (all.maxX + 2000).rounded(), y: all.minY.rounded())
+}
+
+/// The runner's limit for an automatic case (--timeout; 90s by default). A case that needs longer
+/// skips itself below it, saying what to run it with.
+var runnerTimeout: TimeInterval {
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--timeout"), args.indices.contains(i + 1) else { return 90 }
+    return TimeInterval(args[i + 1]) ?? 90
+}

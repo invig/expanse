@@ -305,6 +305,17 @@ final class CanvasView: NSView {
         return minimap.bounds.contains(p) ? p : nil
     }
 
+    /// Where each Space's tile in the Spaces bar is on screen (global, top-left origin), for
+    /// expanse://dump. None while the bar is hidden.
+    func spacesTileFrames() -> [(id: UInt64, frame: CGRect)] {
+        guard let root = layer, let window, !spacesBar.isHidden else { return [] }
+        let h = NSScreen.screens.first?.frame.height ?? 0
+        return zip(spacesBar.spaces, spacesBar.tileFrames).map { space, f in
+            let s = window.convertToScreen(convert(spacesBar.convert(f, to: root), to: nil))
+            return (space.id, CGRect(x: s.minX, y: h - s.maxY, width: s.width, height: s.height))
+        }
+    }
+
     /// Over the Spaces bar: which tile, if any (`nil` tile over the bar's background).
     private func spacesBarHit(_ e: NSEvent) -> (over: Bool, tile: Int?) {
         guard let root = layer, !spacesBar.isHidden else { return (false, nil) }
@@ -360,7 +371,10 @@ final class CanvasView: NSView {
     // MARK: Mouse
 
     override func mouseDown(with e: NSEvent) {
-        guard !controller.gliding else { return }
+        guard !controller.gliding else {
+            logger.info("click ignored: a glide is under way")
+            return
+        }
         guard controller.isActive else {
             // Live mode: a click on a parked window's picture on the backdrop goes to that window,
             // and the Spaces bar works here too; anywhere else Expanse draws (the minimap), it

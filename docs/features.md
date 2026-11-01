@@ -23,7 +23,16 @@ Fixed or built since 0.1.34, for the next release's notes:
   keeps the sizes it fitted windows to (a slow scan from before the fit put the old ones back).
   A slow hop's start is now logged in parts (`slow: glide prep`), and opening the canvas logs
   `canvas up`. A window dragged on the canvas ends where you let go, even if the last moves were
-  dropped; and a window a scan catches on its way into the Dock comes back to its own spot.
+  dropped; a window a scan catches on its way into the Dock comes back to its own spot; and windows
+  macOS sets down elsewhere as a full-screen window comes back (or the Space changes) are put back,
+  even when only a later scan notices, and even mid-glide (SPACES-23). Minimising a window just
+  after Expanse brought it forward no longer brings it straight back out (PLACE-17). Pictures
+  come back after macOS restarts its capture service just as streams are starting (requests it
+  never answered held every capture back until Expanse restarted; CAPTURE-27), and an answer to
+  a window scan already given up on is dropped even when it comes before the next scan begins
+  (CAPTURE-30). Expanse logs why it quits (`quitting: …`). Centre window
+  from the panel acts on the window you were in (UI-34), and a toast shown while the last one
+  fades stays up (SUPPORT-06).
 
 ## Bugs
 
@@ -60,15 +69,13 @@ in Copy Logs for a Bug Report).
    has a test. 503 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 229
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
-   - End-to-end, 1 Nov: in the last full run 128 of the 144 automatic cases passed, NAV-49 showed
-     its known issue (typing may go to the wrong window after a zoom; to check on a Mac), and 12
-     skipped (a Developer ID release, a longer `--timeout`, a Dock that hides, or something
-     covering the screen). 3 failed: TRACK-21 (and UI-23/24 skipped) because macOS's
-     screen-recording prompt was up in the VM, and UI-34 on a test timing; with the prompt
-     answered and that fixed, all four pass. SPACES-23 fails now and then (see the README's
-     questions). The flaky ones from before are fixed:
-     timing limits are noted rather than failed in a VM, and the runner no longer lets windows
-     from earlier cases, or a notice over the screen, get in the way.
+   - End-to-end, 1 Nov: in the last full run 128 of the 144 automatic cases passed and 12 skipped
+     (a Developer ID release, a longer `--timeout`, a Dock that hides, or something covering the
+     screen). Since then the rest are fixed and pass on repeat runs: TRACK-21, UI-23/24 (macOS's
+     screen-recording prompt had been left up in the VM: it needs an Allow by hand), UI-34, NAV-49
+     (the case clicked under another of its windows) and SPACES-23 (fixed in Expanse). Timing
+     limits are noted rather than failed in a VM, and the runner keeps windows from earlier cases,
+     and notices over the screen, out of the way.
    - The 54 guided and 31 look cases haven't been run yet.
 
 7. **Groups of windows as places** (asked 31 Oct). Built 31 Oct (Not released yet, above):

@@ -663,7 +663,10 @@ import Security
                 var s = try await t.settle()
                 t.place(ws[0], at: CGPoint(x: s.camera.x + 60, y: s.camera.y + 60))
                 s = try await t.settle()
-                ws[0].focus()
+                // Clicked, as you would: focus an app moves by itself within a second of Expanse
+                // picking another of its windows looks like a steal, and is given back (1 Nov).
+                guard let a = ws[0].real else { throw Failure("“UI-34 A” isn't on screen") }
+                Input.click(at: CGPoint(x: a.midX, y: a.minY + 10))
                 // Until Expanse has heard: Centre window goes to the window it last heard had focus,
                 // and in a VM the notification can come well after.
                 try await t.until("Expanse to hear “UI-34 A” has focus", timeout: 5) { try await t.state().focusedByApp[getpid()] == ws[0].id }

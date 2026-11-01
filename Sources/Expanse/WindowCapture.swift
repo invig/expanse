@@ -43,7 +43,27 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     static var canAsk: Bool { overdue < 3 && !replaydStuck }
     /// Starts what was held back, once replayd answers again.
     static var askAgain: (() -> Void)?
+    /// How long an overdue request counts against new ones: as long as replayd had gone without
+    /// answering anything when it went overdue, at least overdueExpiry and at most
+    /// overdueExpiryLimit. replayd forgets what it held when it's restarted, so those answers never
+    /// come, and three of them stopped every capture for good (CAPTURE-27). One that's stuck still
+    /// gets three requests at a time, at ever longer intervals: a hundred or so overnight, where
+    /// asking every few seconds piled up thousands.
+    static var expiry: TimeInterval {
+        min(max(overdueExpiry, CACurrentMediaTime() - lastAnswer), overdueExpiryLimit)
+    }
+    static var overdueExpiry: TimeInterval = 10
+    static var overdueExpiryLimit: TimeInterval = 600
+    /// When replayd last answered a stream start or a picture.
+    static var lastAnswer = CACurrentMediaTime()
 
+    /// A request was answered (or failed before it reached replayd).
+    private static func noteAnswer(late: inout Bool) {
+        lastAnswer = CACurrentMediaTime()
+        if late { late = false; overdueAnswered() }
+    }
+
+    /// A late request was answered, or stopped counting (see expiry).
     private static func overdueAnswered() {
         overdue -= 1
         if canAsk { askAgain?() }
@@ -75,7 +95,12 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         // Main thread only, like the counter.
         var answered = false, late = false
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.replaydTimeout) { [weak self] in
-            if !answered { late = true; Self.overdue += 1 }
+            if !answered {
+                late = true; Self.overdue += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.expiry) {
+                    if late { late = false; Self.overdueAnswered() }
+                }
+            }
             guard let self, self.starting, self.startToken == token else { return }
             logger.info("stream start for \(window.windowID) timed out")
             self.starting = false
@@ -99,7 +124,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                 logger.error("addStreamOutput failed: \(error.localizedDescription)")
                 DispatchQueue.main.async {
                     answered = true
-                    if late { Self.overdueAnswered() }
+                    Self.noteAnswer(late: &late)
                     self.starting = false
                     if self.isStopped { self.notifyStopped() }
                 }
@@ -108,7 +133,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             stream.startCapture { [weak self] error in
                 DispatchQueue.main.async {
                     answered = true
-                    if late { Self.overdueAnswered() }
+                    Self.noteAnswer(late: &late)
                     guard let self else { return }
                     // Given up on meanwhile: not this capture's stream any more.
                     guard self.startToken == token else {
@@ -154,13 +179,18 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                 if let error { logger.info("snapshot of \(window.windowID) failed: \(error.localizedDescription, privacy: .public)") }
                 DispatchQueue.main.async {
                     answered = true
-                    if late { Self.overdueAnswered() }
+                    Self.noteAnswer(late: &late)
                     finish(ok)
                 }
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.replaydTimeout) {
-            if !answered { late = true; Self.overdue += 1 }
+            if !answered {
+                late = true; Self.overdue += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.expiry) {
+                    if late { late = false; Self.overdueAnswered() }
+                }
+            }
             if !finished { logger.info("snapshot of \(window.windowID) timed out") }
             finish(false)
         }

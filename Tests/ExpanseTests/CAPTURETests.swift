@@ -414,6 +414,43 @@ import ObjectiveC
         }
     }
 
+    @Test("CAPTURE-31 The longer replayd has gone without answering, the longer an overdue request counts")
+    func capture31c() async throws {
+        try await withCapture(stuck: false) { _ in
+            let now = CACurrentMediaTime()
+            WindowCapture.lastAnswer = now
+            #expect(abs(WindowCapture.expiry - 10) < 0.5)
+            WindowCapture.lastAnswer = now - 100
+            #expect(abs(WindowCapture.expiry - 100) < 0.5)
+            WindowCapture.lastAnswer = now - 5000
+            #expect(WindowCapture.expiry == 600)
+        }
+    }
+
+    @Test("CAPTURE-27 Requests replayd never answers (it was restarted) stop holding captures back")
+    func capture27() async throws {
+        try await withCapture(stuck: false) { lab in
+            lab.shots.holding = true
+            WindowCapture.overdueExpiryLimit = 1
+            for i in 0..<3 {
+                WindowCapture().snapshot(window: Fake.scWindow(id: CGWindowID(1 + i), frame: CGRect(x: 0, y: 0, width: 400, height: 300)),
+                                         pixelSize: CGSize(width: 400, height: 300)) { _ in }
+            }
+            try await Task.sleep(for: .seconds(5.3))
+            #expect(WindowCapture.overdue == 3)
+            #expect(!WindowCapture.canAsk)
+            #expect(lab.askedAgain == 0)
+            try await Task.sleep(for: .seconds(1.2))
+            #expect(WindowCapture.overdue == 0)
+            #expect(WindowCapture.canAsk)
+            #expect(lab.askedAgain >= 1)
+            // An answer turning up after all isn't counted again.
+            lab.shots.answer(1, with: picture())
+            try await Task.sleep(for: .milliseconds(50))
+            #expect(WindowCapture.overdue == 0)
+        }
+    }
+
     @Test("CAPTURE-31 Three snapshots replayd doesn't answer hold everything back until one is answered")
     func capture31b() async throws {
         try await withCapture(stuck: false) { lab in
@@ -935,12 +972,14 @@ private final class Lab {
 @MainActor
 private func withCapture(stuck: Bool = true, _ body: (Lab) async throws -> Void) async throws {
     let saved = (askAgain: WindowCapture.askAgain, stuck: WindowCapture.replaydStuck,
-                 overdue: WindowCapture.overdue, screenshot: WindowCapture.screenshot)
+                 overdue: WindowCapture.overdue, screenshot: WindowCapture.screenshot,
+                 expiry: WindowCapture.overdueExpiry, limit: WindowCapture.overdueExpiryLimit)
     let lab = Lab()
     WindowCapture.askAgain = nil
     WindowCapture.screenshot = { [shots = lab.shots] window, config, done in shots.take(window, config, done) }
     WindowCapture.replaydStuck = stuck
     WindowCapture.overdue = 0
+    WindowCapture.lastAnswer = CACurrentMediaTime()
     WindowCapture.askAgain = { [weak lab] in lab?.askedAgain += 1 }
     var failure: Error?
     do { try await body(lab) } catch { failure = error }
@@ -951,6 +990,8 @@ private func withCapture(stuck: Bool = true, _ body: (Lab) async throws -> Void)
     WindowCapture.replaydStuck = saved.stuck
     WindowCapture.overdue = saved.overdue
     WindowCapture.screenshot = saved.screenshot
+    WindowCapture.overdueExpiry = saved.expiry
+    WindowCapture.overdueExpiryLimit = saved.limit
     WindowCapture.askAgain = saved.askAgain
     if let failure { throw failure }
 }

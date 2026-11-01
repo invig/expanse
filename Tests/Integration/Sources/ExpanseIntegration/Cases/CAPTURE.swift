@@ -538,7 +538,9 @@ import AppKit
                 let now = Date()
                 if let last {
                     let gap = now.timeIntervalSince(last)
-                    try t.expect(abs(gap - Double(wait)) <= 4, String(format: "%.0f s between unanswered scans, %d s expected", gap, wait))
+                    // macOS lets a long timer fire a few percent late, to save power (168 s for 160 in the VM).
+                    try t.expect(gap >= Double(wait) - 4 && gap <= Double(wait) * 1.1 + 4,
+                                 String(format: "%.0f s between unanswered scans, %d s expected", gap, wait))
                 }
                 last = now
                 if i == 1 {
@@ -602,9 +604,17 @@ import AppKit
                 return s.window(closed) == nil && (opened.map { s.window($0) != nil } ?? true)
             }
             try await t.pause(3)
-            let slow = t.log.lines(since: resumed).filter { $0.hasPrefix("slow: window scan took") }
-            try t.expect(slow.count <= 1, "a run of \(slow.count) “slow: window scan took …” lines after the resume "
-                         + "(answers to scans given up on should stop before asking apps about their windows): \(slow.prefix(3))")
+            // A scan's slow line counts from when it was asked for: an answer to one given up on that
+            // got applied took 10 s (the shortest wait) or more. Replayd resumes just as the third is
+            // given up, so the next scan has only just been asked for: new scans can be slow while
+            // replayd catches up, but not that slow. (On 1 Nov the third's answer came 155ms after
+            // it was given up, before the next scan began, and was applied: 42155ms.)
+            let prefix = "slow: window scan took "
+            let late = t.log.lines(since: resumed).filter { line in
+                line.hasPrefix(prefix) && (Int(line.dropFirst(prefix.count).prefix(while: \.isNumber)) ?? 0) >= 10_000
+            }
+            try t.expect(late.isEmpty, "\(late.count) answers to scans given up on were applied after the resume "
+                         + "(they should stop before asking apps about their windows): \(late.prefix(3))")
         },
         Case("CAPTURE-34", "Refused window scans back off", .guided) { t in
             let ids = try await t.captureFixtures("CAPTURE-34", windows: 4)
@@ -658,7 +668,7 @@ import AppKit
             defer { setExpanseDefault("background", background) }
             // On its own far out on the canvas, so no other window's picture is taken meanwhile.
             let a = try await t.window("CAPTURE-35 A")
-            t.place(a, at: CGPoint(x: 50000, y: 50000))
+            t.place(a, at: CGPoint(x: clearSpot.x + 5000, y: clearSpot.y))
             try await t.settle()
             try await t.captureFocus(a.id)
             try await t.until("no streams at 100%", timeout: 12) { captureStreaming(try await t.state()) == 0 }
@@ -857,9 +867,7 @@ private struct CapturePic {
 
 /// Long cases need the runner's --timeout raised (auto cases get 90 s unless told otherwise).
 private func captureNeedsTime(_ seconds: Int) throws {
-    let args = CommandLine.arguments
-    let given = args.firstIndex(of: "--timeout").flatMap { args.indices.contains($0 + 1) ? Double(args[$0 + 1]) : nil } ?? 90
-    if given < Double(seconds) {
+    if runnerTimeout < Double(seconds) {
         throw Skip("takes about \(seconds / 60 + 1) minutes: run it with --timeout \(seconds) or more")
     }
 }

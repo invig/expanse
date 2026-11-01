@@ -688,7 +688,9 @@ import AppKit
             // Saved spots are for windows coming back in Expanse's first 3 minutes; this needs it running longer.
             if let launched = t.expanse?.launchDate {
                 let wait = 190 - Date().timeIntervalSince(launched)
-                if wait > 60 { throw Skip("Expanse started \(Int(190 - wait))s ago; this needs it running for 3 minutes") }
+                if wait > 60, runnerTimeout < wait + 60 {
+                    throw Skip("Expanse started \(Int(190 - wait))s ago; this needs it running for 3 minutes (or run it with --timeout 260, and it waits)")
+                }
                 if wait > 0 { try await t.pause(wait) }
             }
             let old = expanseDefault("autoCentre")

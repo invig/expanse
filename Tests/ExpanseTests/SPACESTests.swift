@@ -497,6 +497,68 @@ struct SPACESTests {
 
     // MARK: SPACES-23
 
+    @Test("SPACES-23 A window macOS shoved just before a full-screen window came back is put back (logic)")
+    func spaces23b() {
+        let a = Fake.window(id: Self.firstID, appName: "Notes", canvas: CGRect(x: 100, y: 100, width: 600, height: 400))
+        let left = Fake.window(id: Self.firstID + 1, appName: "Notes", canvas: CGRect(x: -120, y: 300, width: 600, height: 400))
+        let c = TestCanvas.make(windows: [a, left])
+        defer { Self.finish(c) }
+        left.lastPlaced = CGPoint(x: -120, y: 300 + c.viewport.minY)
+        left.home = CGPoint(x: -120, y: 300)
+        // Leaving full screen, macOS moves Left (half off the screen) onto it, before A says it's back.
+        c.realWindowChanged(left, AXUIElementCreateApplication(left.pid), userDragging: false,
+                            size: left.canvasFrame.size, position: CGPoint(x: 100, y: 92), inFullScreenSpace: false)
+        #expect(left.canvasFrame.origin != CGPoint(x: -120, y: 300), "followed, for now")
+        // A says it's back: Left goes back to its spot, home and all, to be put back.
+        c.fullScreenChanging(a)
+        #expect(left.canvasFrame.origin == CGPoint(x: -120, y: 300))
+        #expect(left.home == CGPoint(x: -120, y: 300))
+        #expect(c.movedAroundFullScreen == [left.id])
+        // A move you made (a drag) isn't undone.
+        c.putBackWork?.cancel()
+        c.movedAroundFullScreen = []
+        left.lastDraggedAt = CACurrentMediaTime()
+        c.realWindowChanged(left, AXUIElementCreateApplication(left.pid), userDragging: true,
+                            size: left.canvasFrame.size, position: CGPoint(x: 300, y: 200), inFullScreenSpace: false)
+        let dragged = left.canvasFrame.origin
+        c.fullScreenChanging(a)
+        #expect(left.canvasFrame.origin == dragged)
+        #expect(c.movedAroundFullScreen.isEmpty)
+    }
+
+    @Test("SPACES-23 A window a scan finds moved, seconds after full screen, is put back, not followed (logic)")
+    func spaces23c() {
+        let left = Fake.window(id: Self.firstID, appName: "Notes", canvas: CGRect(x: -120, y: 300, width: 600, height: 400))
+        let c = TestCanvas.make(windows: [left])
+        defer { Self.finish(c) }
+        c.firstSync = false
+        left.lastPlaced = CGPoint(x: -120, y: 300 + c.viewport.minY)   // hanging off the left edge
+        let whole = CGRect(x: 100, y: 92, width: 600, height: 400)       // where macOS set it down
+        // A full-screen window came back 8 s ago (past the 1.5 s for moves it reports).
+        c.fullScreenChanging()
+        c.fullScreenSettleUntil = 0
+        c.lastFullScreenChange -= 8
+        c.apply([Fake.scWindow(id: left.id, appName: "Notes", frame: whole)], ax: CanvasController.AXSnapshot())
+        #expect(left.canvasFrame.origin == CGPoint(x: -120, y: 300), "not followed")
+        #expect(c.movedAroundFullScreen == [left.id], "to be put back")
+        // So is one that was whole on screen (the window back from full screen, set down where
+        // it was before Expanse moved it).
+        c.putBackWork?.cancel()
+        c.movedAroundFullScreen = []
+        left.lastPlaced = CGPoint(x: 500, y: 301)
+        c.apply([Fake.scWindow(id: left.id, appName: "Notes", frame: CGRect(x: 130, y: 122, width: 600, height: 400))],
+                ax: CanvasController.AXSnapshot())
+        #expect(left.canvasFrame.origin == CGPoint(x: -120, y: 300))
+        #expect(c.movedAroundFullScreen == [left.id])
+        // Long after, the same find is a move to follow.
+        left.lastPlaced = CGPoint(x: -120, y: 300 + c.viewport.minY)
+        c.putBackWork?.cancel()
+        c.movedAroundFullScreen = []
+        c.lastFullScreenChange -= 60
+        c.apply([Fake.scWindow(id: left.id, appName: "Notes", frame: whole)], ax: CanvasController.AXSnapshot())
+        #expect(left.canvasFrame.origin == c.canvasPoint(forGlobal: whole.origin))
+    }
+
     @Test("SPACES-23 A scan just after full screen doesn't take where macOS set a window down (logic)")
     func spaces23() {
         let w = Fake.window(id: Self.firstID, appName: "Calendar", canvas: CGRect(x: 100, y: 100, width: 800, height: 600))

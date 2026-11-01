@@ -17,15 +17,17 @@ import AppKit
             // where quitting puts it back.
             let w = try await t.window("SIZE-04 W", CGRect(x: vf.maxX - 510, y: vf.maxY - 410, width: 500, height: 400), managed: false)
             try await t.until("the window on screen", timeout: 3) { w.real != nil }
-            guard let original = w.real else { throw Failure("the window isn't on screen") }
+            let original = w.opened
             try await t.until("Expanse to take on the window", timeout: 10) { try await t.state().window(w.id) != nil }
+            let takenOn = Date()
             let app = try await t.state().window(w.id)?.app ?? "Expanse Tests"
             // Your size for it, much bigger than fits from that corner, made at 100%.
             t.link("focus", ["id": w.id])
             try await t.sizeInView(w.id)
             let chosen = CGSize(width: min(1200, vp.width - 120).rounded(), height: min(800, vp.height - 120).rounded())
-            // (Expanse takes a window's own move or resize within 0.6s of placing it for the echo of that.)
-            try await t.pause(0.8)
+            // (Expanse takes a window's own move or resize within 0.6s of placing it for the echo of
+            // that, and a move in a new window's first 5s for its app placing it late: cameBack.)
+            try await t.pause(max(0.8, 5.5 - Date().timeIntervalSince(takenOn)))
             guard let r = w.real else { throw Failure("the window isn't on screen") }
             Input.click(at: CGPoint(x: r.minX + 100, y: r.minY + 10))
             w.setFrame(CGRect(origin: CGPoint(x: vp.minX + 40, y: vp.minY + 40), size: chosen))

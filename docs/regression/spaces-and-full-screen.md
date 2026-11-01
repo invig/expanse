@@ -282,6 +282,8 @@
 - **Expected:** Calendar ends exactly at its old canvas spot and stays there; it's not left where macOS set it down.
 - **Check in log:** `Calendar[<id>] moved as a full-screen window came or went; putting it back`
 - **Automate:** manual: needs a real full-screen transition.
+- **Note:** Since 1 Nov (not released yet) windows macOS sets down elsewhere as a full-screen window comes back (the one coming back too, and ones half off the screen) are put back even when only a scan seconds later finds them, and the put-back happens after a glide that was running (before, its commit had already been worked out, and the next scan followed them).
+
 
 ## SPACES-24 Clicking Expanse's own Space tile goes back to 100%
 - **Type:** Bug fix

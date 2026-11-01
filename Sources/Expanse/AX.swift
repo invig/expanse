@@ -69,6 +69,11 @@ enum AX {
         return AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &value) == .success && (value as? Bool) == true
     }
 
+    static func isMinimized(_ element: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, kAXMinimizedAttribute as CFString, &value) == .success && (value as? Bool) == true
+    }
+
     static func size(_ element: AXUIElement) -> CGSize? {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &value) == .success,

@@ -32,7 +32,8 @@ import AppKit
                 try await spacesArrived(t, sc, typing: field, since: mark)
             }
         },
-        Case("SPACES-07", "The Spaces panel works at 100% too") { t in
+        Case("SPACES-07", "The Spaces panel works at 100% too",
+             known: "in complete runs in the VM a click on the tile sometimes switches nothing while a display change settles") { t in
             try t.needsInput()
             try await spacesScene(t, "Spaces07", showing: false) { sc in
                 let field = spacesTypingField(sc.fs)
@@ -45,7 +46,14 @@ import AppKit
                 if let other = spacesCovering(t, p) { throw Skip("\(other) covers the Spaces panel at 100% (hide the Dock automatically to run this)") }
                 let mark = t.log.mark()
                 Input.click(at: p)
-                try await spacesArrived(t, sc, typing: field, since: mark)
+                do {
+                    try await spacesArrived(t, sc, typing: field, since: mark)
+                } catch {
+                    // Twice in complete runs the click switched nothing and logged nothing: say what was there.
+                    let s = try? await t.state()
+                    throw Failure("\(error) (clicked \(NSStringFromPoint(p)); in front there now: \(spacesCovering(t, p) ?? "Expanse"); "
+                                  + "the panel's tiles: \(s.map { $0.spacesTiles.mapValues(NSStringFromRect).description } ?? "?"))")
+                }
             }
         },
         Case("SPACES-08", "Switching to another desktop from the Spaces panel", .guided) { t in
@@ -163,8 +171,17 @@ import AppKit
                 // Then a click on a window zooms into it.
                 let pick = sc.ids[0]
                 s = try await t.state()
-                guard let w = s.window(pick) else { throw Failure("the fixture's window isn't on the canvas") }
-                Input.click(at: s.screenPoint(CGPoint(x: w.canvas.midX, y: w.canvas.midY)))
+                guard var w = s.window(pick) else { throw Failure("the fixture's window isn't on the canvas") }
+                if s.clickPoint(on: w.canvas) == nil {
+                    // All under the panels in the corner: into the middle of the screen first.
+                    let c = s.screenPoint(CGPoint(x: w.canvas.midX, y: w.canvas.midY))
+                    t.link("pan", ["dx": Int(s.viewport.midX - c.x), "dy": Int(s.viewport.midY - c.y)])
+                    s = try await t.settle()
+                    guard let moved = s.window(pick) else { throw Failure("the fixture's window isn't on the canvas") }
+                    w = moved
+                }
+                guard let p = s.clickPoint(on: w.canvas) else { throw Failure("no part of the fixture's window is clear to click: \(w.canvas)") }
+                Input.click(at: p)
                 try await t.spacesViewOn(pick, "the view at 100% on the window clicked")
             }
         },
@@ -432,6 +449,11 @@ private func spacesOf(_ id: CGWindowID) -> [UInt64] {
 /// Takes `w` out of full screen, if it is, and waits until it's back on its desktop.
 @MainActor private func spacesLeaveFullScreen(_ t: Ctx, _ w: TestWindow) async throws {
     guard w.window.styleMask.contains(.fullScreen) else { return }
+    // From its own Space, as a person would. Toggled from the desktop, once in the VM (1 Nov)
+    // Expanse and the runner both stopped for 140s as it came back.
+    if let space = SpacesNow().list.first(where: { $0.fullScreen && $0.windows.contains(w.id) })?.id {
+        try? await spacesGo(t, to: space, "on “\(w.title)”'s Space", by: { w.focus() })
+    }
     w.toggleFullScreen()
     try await t.until("“\(w.title)” out of full screen", timeout: 12) {
         !w.window.styleMask.contains(.fullScreen) && !SpacesNow().list.contains { $0.windows.contains(w.id) }
@@ -501,24 +523,33 @@ private func spacesAt(_ dx: CGFloat, _ dy: CGFloat) -> CGPoint { CGPoint(x: -700
 /// 14pt apart, 14pt in from the panel's edges, the panel 12pt left of the 208pt minimap, 16pt in from the screen's
 /// bottom-right corner, the tiles' middles 83.5pt up from the bottom.
 @MainActor private func spacesTile(_ t: Ctx, _ space: UInt64) async throws -> CGPoint {
-    let now = SpacesNow()
-    guard now.list.count >= 2, let i = now.list.firstIndex(where: { $0.id == space }) else {
-        throw Failure("the Spaces panel has no tile for Space \(space)")
+    // Where Expanse has it (expanse://dump), once its panel has caught up with the Space.
+    var tile: CGRect?
+    var shown: [UInt64] = []
+    do {
+        try await t.until("Expanse's Spaces panel to show Space \(space)", timeout: 3) {
+            let s = try await t.state()
+            shown = s.spacesTiles.keys.sorted()
+            tile = s.spacesTiles[space]
+            return tile != nil
+        }
+    } catch {
+        throw Failure("Expanse's Spaces panel has no tile for Space \(space) (it shows \(shown.isEmpty ? "none: hidden" : "\(shown)"))")
     }
-    let vp = try await t.state().viewport
-    let panel = 14 + 114 * CGFloat(now.list.count)
-    let left = vp.maxX - 16 - 208 - 12 - panel
-    return CGPoint(x: left + 14 + 114 * CGFloat(i) + 50, y: vp.maxY - 83.5)
+    guard let tile else { throw Failure("no tile for Space \(space)") }
+    return CGPoint(x: tile.midX, y: tile.midY)
 }
 
 /// What's in front at `p` (global), as the window server stacks windows: nil if it's Expanse's (the canvas, or its
-/// panels on the desktop at 100%), else whose window it is.
+/// panels on the desktop at 100%), else whose window it is. The pointer is the window server's own window, and
+/// doesn't count: a click on a tile (SPACES-06) leaves it there.
 @MainActor private func spacesCovering(_ t: Ctx, _ p: CGPoint) -> String? {
     let expanse = t.expanse?.processIdentifier
+    let pointer = Int(CGWindowLevelForKey(.cursorWindow))
     let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
     for w in info {
         guard let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b), r.contains(p),
-              (w[kCGWindowAlpha as String] as? Double ?? 1) > 0 else { continue }
+              (w[kCGWindowAlpha as String] as? Double ?? 1) > 0, (w[kCGWindowLayer as String] as? Int ?? 0) < pointer else { continue }
         if (w[kCGWindowOwnerPID as String] as? pid_t) == expanse { return nil }
         return w[kCGWindowOwnerName as String] as? String ?? "a window"
     }

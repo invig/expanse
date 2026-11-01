@@ -70,6 +70,9 @@ final class SpacesBar: CALayer {
         styleTiles()
     }
 
+    /// Each tile's frame (this layer's coordinates), in the order of `spaces`.
+    var tileFrames: [CGRect] { tiles.map(\.frame) }
+
     /// The tile at `p` (this layer's coordinates).
     func tile(at p: CGPoint) -> Int? {
         guard !isHidden else { return nil }

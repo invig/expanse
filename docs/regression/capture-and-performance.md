@@ -329,6 +329,7 @@
 - **Expected:** Steps 1–2: every open window stays on the canvas and its picture comes back. Step 3: the closed window still drops off, once a scan confirms it.
 - **Check in log:** `<App>[<id>]: its capture stopped; checking it's still open` for each; for step 3, `dropped <App>[<id>]: not in the window list`.
 - **Automate:** manual: needs replayd restarted.
+- **Note:** Since 1 Nov (not released yet), found by the end-to-end case in the VM: stream starts asked for just as replayd restarted never get an answer, and three of them held every capture back (CAPTURE-31) until Expanse restarted, so the pictures never came back. An overdue request now stops counting after as long as replayd had gone without answering, 10s at least, so pictures come back about 15s after a restart.
 
 ## CAPTURE-28 A scan with no answer is given up, so new windows are still taken on
 - **Type:** Bug fix
@@ -370,7 +371,8 @@
   2. `killall -CONT replayd`.
   3. Straight away, toggle the canvas (⌥`) and hop with ⌃+arrows.
 - **Expected:** Only the newest scan's answer is applied; answers to earlier scans stop before any app is asked about its windows. Expanse stays responsive while replayd catches up, and the canvas shows the windows as they are now.
-- **Check in log:** Answers to given-up scans log nothing; after the resume, scans log one at a time, with no run of `slow: window scan took …` lines for the backlog.
+- **Check in log:** Answers to given-up scans log nothing; after the resume, scans log one at a time, with no run of `slow: window scan took …` lines for the backlog. (A slow line counts from when its scan was asked for, so an applied answer to a given-up scan shows 10,000ms or more; new scans just after the resume can show a few hundred.)
+- **Note:** Since 1 Nov (not released yet), found by the end-to-end case in the VM: an answer that came after its scan was given up but before the next scan began was still applied (the check only compared it with the newest scan, which it still was). Giving a scan up now drops its answer, whenever it comes.
 - **Automate:** manual: needs replayd answering requests late, on its own thread (the check is `latestScan` in `CanvasController.sync`).
 
 ## CAPTURE-31 No more than three capture requests are left hanging in replayd
@@ -386,6 +388,7 @@
 - **Expected:** After a few requests time out (5 s each), no new picture or stream start is asked for: the timeout lines stop at a handful instead of growing every few seconds. When replayd answers one of the overdue requests, what was held back starts: streams come up and pictures refresh, with no freeze.
 - **Check in log:** A few `stream start for <id> timed out` / `snapshot of <id> timed out` lines, then none until replayd is resumed.
 - **Automate:** unit: `WindowCapture.canAsk` (false once `overdue` reaches 3, true again when an overdue answer arrives, and `askAgain` is called then).
+- **Note:** Since 1 Nov (not released yet) an overdue request stops counting after a while (`WindowCapture.expiry`, CAPTURE-27): as long as replayd had gone without answering when it went overdue, 10s at least and 10 minutes at most. A stuck replayd gets three requests at a time at ever longer intervals, a hundred or so overnight; in step 2 the timeout lines come in threes, further and further apart.
 
 ## CAPTURE-32 Captures wait while window scans get no answer, and start when one does
 - **Type:** Bug fix

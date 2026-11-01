@@ -605,7 +605,7 @@ import ApplicationServices
         Case("PERSIST-38", "A cancelled logout resumes Expanse after 3 minutes") { t in
             // The timer is three minutes on the running app, and this waits it out twice.
             let needed: TimeInterval = 420
-            guard persistRunnerTimeout >= needed else {
+            guard runnerTimeout >= needed else {
                 throw Skip("waits out the 3-minute timer twice (about 6½ minutes): run it with --timeout \(Int(needed))")
             }
             let a = try await t.window("PERSIST-38 A")
@@ -683,7 +683,7 @@ import ApplicationServices
 
 /// Out on the canvas, away from your windows, so a case's windows are only near each other
 /// (not so far that zooming out to fit everything would need more than Expanse's smallest zoom).
-private let persistOrigin = CGPoint(x: 12_000, y: 12_000)
+@MainActor private var persistOrigin: CGPoint { clearSpot }
 
 private let persistFolder = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/Expanse", isDirectory: true)
 private let persistLayoutFile = persistFolder.appendingPathComponent("layout.json")
@@ -695,13 +695,6 @@ private func persistNear(_ a: CGRect, _ b: CGRect, _ d: CGFloat) -> Bool {
 
 private func persistNear(_ a: CGSize, _ b: CGSize, _ d: CGFloat) -> Bool {
     abs(a.width - b.width) <= d && abs(a.height - b.height) <= d
-}
-
-/// The runner's limit for an automatic case (--timeout; 90s by default).
-private var persistRunnerTimeout: TimeInterval {
-    let args = CommandLine.arguments
-    guard let i = args.firstIndex(of: "--timeout"), args.indices.contains(i + 1) else { return 90 }
-    return TimeInterval(args[i + 1]) ?? 90
 }
 
 /// A screen 70% the size of this one, for expanse://screen (a laptop's, with a big display unplugged).
@@ -804,20 +797,14 @@ private func persistKeepSnapshots() -> () -> Void {
     /// place in the macOS layout, which quitting and pausing put back.
     func persistWindow(_ title: String, _ frame: CGRect) async throws -> (TestWindow, CGRect) {
         let w = try await window(title, frame, managed: false)
-        var original = w.real
-        for _ in 0..<10 where original == nil {
-            try await pause(0.02)
-            original = w.real
-        }
-        guard let original else { throw Failure("the window server doesn't list “\(title)”") }
         try await until("Expanse to take on “\(title)”", timeout: 10) { try await self.state().window(w.id) != nil }
-        return (w, original)
+        return (w, w.opened)
     }
 
     /// A fixture app with one window, that window, and where macOS put it before Expanse took it on.
     func persistFixture(_ name: String) async throws -> (Fixture, CGWindowID, CGRect) {
         let f = try await fixture(name, windows: 1, size: CGSize(width: 520, height: 360))
-        guard let id = f.windows.first, let original = realFrame(id) else { throw Failure("the fixture \(name) has no window") }
+        guard let id = f.windows.first, let original = f.opened[id] else { throw Failure("the fixture \(name) has no window") }
         try await until("Expanse to take on \(name)'s window", timeout: 10) { try await self.state().window(id) != nil }
         return (f, id, original)
     }

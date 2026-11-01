@@ -78,7 +78,12 @@ func isOnScreen(_ id: CGWindowID) -> Bool {
         self.window = window
         self.id = CGWindowID(window.windowNumber)
         self.title = title
+        opened = appKitRect(window.frame)   // (the flip works both ways)
     }
+
+    /// Where it opened (global CG, title bar included): where macOS had it. By the time the window
+    /// server lists it, Expanse may already have placed it on the canvas.
+    let opened: CGRect
 
     var isOpen: Bool { window != nil }
     /// Where the window server has it (global CG).
@@ -112,14 +117,19 @@ func isOnScreen(_ id: CGWindowID) -> Bool {
     private(set) var windows: [CGWindowID] = []
     private var observer: NSObjectProtocol?
     private var updates = 0
+    /// Where each window opened (see TestWindow.opened), as the fixture app first reported it.
+    private(set) var opened: [CGWindowID: CGRect] = [:]
 
     init(name: String) {
         self.name = name
         observer = DistributedNotificationCenter.default().addObserver(forName: Self.stateNote, object: name, queue: .main) { [weak self] note in
             let ids = (note.userInfo?["windows"] as? [String] ?? []).compactMap { CGWindowID($0) }
+            let frames = (note.userInfo?["opened"] as? [String] ?? []).map(NSRectFromString)
             MainActor.assumeIsolated {
-                self?.windows = ids
-                self?.updates += 1
+                guard let self else { return }
+                self.windows = ids
+                for (id, frame) in zip(ids, frames) where self.opened[id] == nil { self.opened[id] = frame }
+                self.updates += 1
             }
         }
     }

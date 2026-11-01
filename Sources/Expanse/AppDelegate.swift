@@ -30,7 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-            source.setEventHandler { NSApp.terminate(nil) }
+            source.setEventHandler {
+                Self.quitReason = sig == SIGTERM ? "SIGTERM" : "SIGINT"
+                NSApp.terminate(nil)
+            }
             source.resume()
             signalSources.append(source)
         }
@@ -295,7 +298,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? (spaces.indices.contains(position) ? spaces[position] : nil)
     }
 
+    /// Why Expanse is quitting, for the log (once, in the VM, it quit with no sign of what asked).
+    static var quitReason: String?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Anything else is a quit Apple event: from logging out, or another app.
+        if Self.quitReason == nil {
+            let pid = NSAppleEventManager.shared().currentAppleEvent?.attributeDescriptor(forKeyword: keySenderPIDAttr)?.int32Value
+            let app = pid.flatMap { NSRunningApplication(processIdentifier: $0)?.localizedName } ?? "unknown"
+            Self.quitReason = "asked by \(app) (pid \(pid.map(String.init) ?? "?"))"
+        }
+        return .terminateNow
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        logger.notice("quitting: \(Self.quitReason ?? "unknown", privacy: .public)")
         // Never started: nothing to put back, and the saved layout must not be overwritten.
         guard isOn else { return }
         controller.shutdown()
@@ -357,7 +374,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // An ordinary window: zoomed out, leave the canvas first, or it would open underneath.
             if controller.isActive, !controller.gliding { controller.exit() }
             SettingsWindow.show { [weak self] in self?.checkForUpdates() }
-        case .quit: NSApp.terminate(nil)
+        case .quit:
+            Self.quitReason = "Quit in the menu bar panel"
+            NSApp.terminate(nil)
         }
     }
 

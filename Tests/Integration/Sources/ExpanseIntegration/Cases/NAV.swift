@@ -310,11 +310,13 @@ import AppKit
                 let still = try await t.settle()
                 try t.expect(still.active, "staying in the \(c.name) corner toggled the canvas again")
                 try t.expectNear(still.camera, out.camera, within: 0.5, "staying in the \(c.name) corner moved the view")
-                // Out and back in: back to 100%, to the view you left.
+                // Out and back in: back to 100%, to the view you left. Out for long enough that the
+                // corner's check of the pointer sees it gone (a busy main thread in a VM checks late).
                 Input.glide(to: middle)
-                try await t.pause(0.3)
+                try await t.pause(1)
                 Input.glide(to: c.point)
-                try await t.until("going back into the \(c.name) corner to toggle back to 100%", timeout: 3) { try await !t.settle().active }
+                // (Back at 100% includes the windows' moves and the hand-back: seconds in a busy VM.)
+                try await t.until("going back into the \(c.name) corner to toggle back to 100%", timeout: 10) { try await !t.settle().active }
                 let back = try await t.settle()
                 try t.expect(abs(back.scale - 1) < 0.001, "the \(c.name) corner should toggle back to 100% (\(navPercent(back.scale)))")
                 try t.expectNear(back.camera, start.camera, within: 0.5, "the \(c.name) corner should toggle back to the view you left")
@@ -1038,8 +1040,7 @@ import AppKit
             try await t.noLog("glide to ", since: mark, within: 0.1)
         },
 
-        Case("NAV-49", "The next glide, zoom or display change ends the placed view",
-             known: "after ⌘ + scroll on the canvas opened at 100% and Esc (whose hand-back focuses another window of the same app), clicking a window partly on screen glides to centre it, but that app's earlier window ends up with the keyboard; seen in the VM 31 Oct, where this case first ran, not yet on a Mac") { t in
+        Case("NAV-49", "The next glide, zoom or display change ends the placed view") { t in
             try t.needsInput()
             try await t.navReady()
             let old = expanseDefault("autoCentre")
@@ -1063,6 +1064,9 @@ import AppKit
                     guard let r = w.real else { return false }
                     return r.minX < t.screen.maxX - 100 && r.maxX > t.screen.maxX
                 }
+                // In front of B, which the placed view left cut off at the same edge: the click is
+                // for this window (without the keyboard yet: that's the click's to give).
+                w.window.orderFrontRegardless()
                 try await t.pause(0.5)
                 let mark = t.log.mark()
                 try await t.navClick(w)

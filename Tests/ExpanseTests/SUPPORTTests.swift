@@ -5,6 +5,7 @@ import ScreenCaptureKit
 @_private(sourceFile: "CanvasController.swift") @testable import Expanse
 @_private(sourceFile: "Log.swift") @testable import Expanse
 @_private(sourceFile: "BugReport.swift") @testable import Expanse
+@_private(sourceFile: "Toast.swift") @testable import Expanse
 
 /// docs/regression/troubleshooting.md. Log files are written to temp folders only (LogFile(folder:)),
 /// with Expanse's own one (LogFile.shared) checked to be off first, so nothing reaches ~/Library/Logs.
@@ -222,6 +223,21 @@ import ScreenCaptureKit
         for action in [MenuPanel.Action.detailedLogging(true), .copyLogs, .showLogFile, .reportIssue] {
             #expect(!action.needsCanvas)
         }
+    }
+
+    @Test("SUPPORT-06 A toast that comes while the last one fades stays on screen (Copied after Collecting logs)")
+    func support06Toast() async throws {
+        Toast.show("Collecting logs…")
+        // Into the first toast's fade (it starts 1.2 s on and takes 0.3 s).
+        try await Task.sleep(for: .milliseconds(1300))
+        Toast.show("Copied. For more, turn on Detailed Logging and try again.")
+        // Past the end of the first fade, whose end used to put the window away.
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(Toast.window?.isVisible == true, "the second toast was hidden by the first one's fade")
+        #expect((Toast.window?.alphaValue ?? 0) > 0.9)
+        // It fades in its own time.
+        try await Task.sleep(for: .milliseconds(1400))
+        #expect(Toast.window?.isVisible == false)
     }
 }
 

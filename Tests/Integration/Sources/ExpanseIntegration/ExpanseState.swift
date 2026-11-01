@@ -31,6 +31,8 @@ struct ExpanseState {
     var frontmost = ""
     /// Each app's focused window as Expanse last heard it (focusedWindowByApp): where a hop starts.
     var focusedByApp: [pid_t: CGWindowID] = [:]
+    /// Where the Spaces bar's tile for each Space is on screen (global): empty while it's hidden.
+    var spacesTiles: [UInt64: CGRect] = [:]
     /// Back to front.
     var windows: [Window] = []
     var unmanaged: [Unmanaged] = []
@@ -42,6 +44,22 @@ struct ExpanseState {
     /// Where a canvas point is on screen (global CG coordinates) at the current camera.
     func screenPoint(_ p: CGPoint) -> CGPoint {
         CGPoint(x: (p.x - camera.x) * scale + viewport.minX, y: (p.y - camera.y) * scale + viewport.minY)
+    }
+
+    /// Where to click on the window at `canvas` (on screen): its middle, or else a part of it clear
+    /// of Expanse's panels in the bottom-right corner (the Spaces bar and the minimap), which take
+    /// clicks there. Zoomed out to fit everything, a window can lie under them (SPACES-14, 1 Nov).
+    /// Nil if it's all under them, or off screen: pan it into the open first.
+    func clickPoint(on canvas: CGRect) -> CGPoint? {
+        let a = screenPoint(canvas.origin), b = screenPoint(CGPoint(x: canvas.maxX, y: canvas.maxY))
+        let r = CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y)
+        let left = (spacesTiles.values.map(\.minX).min() ?? viewport.maxX - 260) - 30
+        let top = min((spacesTiles.values.map(\.minY).min() ?? viewport.maxY) - 30, viewport.maxY - 170)
+        let panels = CGRect(x: left, y: top, width: viewport.maxX - left, height: viewport.maxY - top)
+        let spots = [CGPoint(x: r.midX, y: r.midY)] + [0.15, 0.5, 0.85].flatMap { fy in
+            [0.15, 0.5, 0.85].map { fx in CGPoint(x: r.minX + r.width * fx, y: r.minY + r.height * fy) }
+        }
+        return spots.first { !panels.contains($0) && viewport.contains($0) }
     }
 
     /// The screen group window `id` is in, as Expanse sees it (CanvasController.screenGroups):
@@ -91,7 +109,12 @@ struct ExpanseState {
 
     init(lines: [String]) {
         for line in lines {
-            if line.hasPrefix("dump viewport=") {
+            if line.hasPrefix("dump spaces") {
+                // "dump spaces 1={{1100, 893}, {100, 63}}; 40={{1214, 893}, {100, 63}}"
+                for m in line.matches(of: #/(\d+)=(\{\{.*?\}\})/#) {
+                    if let id = UInt64(m.1) { spacesTiles[id] = NSRectFromString(String(m.2)) }
+                }
+            } else if line.hasPrefix("dump viewport=") {
                 viewport = rect(after: "viewport=", in: line) ?? .zero
                 if let m = line.firstMatch(of: #/camera=\{([^}]*)\}@([0-9.eE+-]+)/#) {
                     camera = NSPointFromString("{\(m.1)}")

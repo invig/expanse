@@ -34,9 +34,15 @@ final class ManagedWindow {
     /// When a drag of yours last moved it (CACurrentMediaTime): the move that lands just after you
     /// let go is still the drag (see CanvasController.realWindowChanged).
     var lastDraggedAt: CFTimeInterval = 0
-    /// Where it was before a window scan last saw it somewhere else, and when: if it's gone a moment
-    /// later, that was it on its way out (see CanvasController.remove).
-    var followedFrom: (origin: CGPoint, at: CFTimeInterval)?
+    /// Its spot (and home) before Expanse last followed a move of it that you didn't drag, and when:
+    /// if it's gone a moment later, or a full-screen window comes or goes, that was macOS moving it,
+    /// not you (see CanvasController.remove and fullScreenChanging).
+    var followedFrom: (origin: CGPoint, home: CGPoint?, fitPush: CGVector, at: CFTimeInterval)?
+
+    /// Notes where it is now, as Expanse is about to follow a move of it (see followedFrom).
+    func noteFollowed(from origin: CGPoint? = nil) {
+        followedFrom = (origin ?? canvasFrame.origin, home, fitPush, CACurrentMediaTime())
+    }
     /// When its app last changed its size (see sizesItself, CanvasController.resizedItself).
     var resizedItselfAt: CFTimeInterval = 0
     /// The size the user chose. On a small screen the real window may be shrunk to fit.

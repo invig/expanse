@@ -259,15 +259,14 @@ final class CanvasController: NSObject {
     /// The window you're in: the front app's focused window or, failing that (at the lock screen,
     /// say), the front-most one on screen.
     private func currentWindow() -> ManagedWindow? {
-        if let app = NSWorkspace.shared.frontmostApplication, let w = focusedWindow(of: app.processIdentifier) { return w }
+        if let pid = appYoureIn, let w = focusedWindow(of: pid) { return w }
         return windows.last { !$0.parked }
     }
     /// The same from what Expanse already knows, without asking the app (which may be busy, or be
     /// Expanse itself by then): its focused window as its notifications left it, or the front-most
     /// window on screen.
     private func knownCurrentWindow() -> ManagedWindow? {
-        if let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != getpid(),
-           let id = focusedWindowByApp[axPID(ofApp: app.processIdentifier)], let w = windows.first(where: { $0.id == id }) {
+        if let pid = appYoureIn, let id = focusedWindowByApp[axPID(ofApp: pid)], let w = windows.first(where: { $0.id == id }) {
             return w
         }
         return windows.last { !$0.parked }
@@ -556,6 +555,7 @@ final class CanvasController: NSObject {
         }
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(appActivated(_:)),
                                                           name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        if let front = NSWorkspace.shared.frontmostApplication?.processIdentifier, front != getpid() { lastOtherApp = front }
         overlay.level = OverlayWindow.backdropLevel
         overlay.orderFrontRegardless()
 
@@ -608,7 +608,19 @@ final class CanvasController: NSObject {
         }
         guard !isPaused, let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
               app.processIdentifier != getpid() else { return }
+        lastOtherApp = app.processIdentifier
         windowFocused()
+    }
+
+    /// The last app other than Expanse to come to the front: the one you're in while Expanse is
+    /// (its menu bar panel open, or the canvas up).
+    private var lastOtherApp: pid_t?
+
+    /// The app whose window you're in: the front one, or while that's Expanse itself, the one
+    /// before it (asking Expanse's own process through Accessibility is no use, and slow).
+    private var appYoureIn: pid_t? {
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        return front == getpid() ? lastOtherApp : front
     }
 
     /// A window got focus (click, ⌘-Tab, Dock). Focus often bounces between windows for a moment
@@ -686,9 +698,11 @@ final class CanvasController: NSObject {
         // not by you: arriving on a Space (from a full-screen app's, say), macOS activates the app
         // in front there, and the app puts its previous window back in focus. That's not a choice
         // to follow; the window you picked gets focus back (once, so an app that insists wins).
+        // Not if the window you picked is going into the Dock: minimising it is what moved focus,
+        // and focusing it again would bring it straight back out.
         if let request = lastFocusRequest, !request.reasserted, request.pid == w.pid, request.id != id,
            CACurrentMediaTime() - request.at < 1, !inputSince(request.at),
-           let picked = windows.first(where: { $0.id == request.id }) {
+           let picked = windows.first(where: { $0.id == request.id }), !(picked.knownAX.map(AX.isMinimized) ?? false) {
             logger.info("\(w.appName, privacy: .public)[\(id)] took focus just after [\(request.id)] was picked; giving it back")
             focusWindow(picked, reasserting: true)
             return
@@ -807,8 +821,10 @@ final class CanvasController: NSObject {
         // Accessibility queue (after any moves still running there), not the main thread.
         let ax = w.ax, appPID = w.appPID
         focusedWindowByApp[w.pid] = w.id
+        let name = "\(w.appName)[\(w.id)]"
         axQueue.async {
             AX.focus(ax, pid: appPID)
+            logger.info("focused \(name, privacy: .public)\(reasserting ? " again" : "", privacy: .public)")
             if let applied { DispatchQueue.main.async(execute: applied) }
         }
         raiseSystemPrompts()
@@ -981,7 +997,7 @@ final class CanvasController: NSObject {
 
     private func backFromFullScreen(_ w: ManagedWindow) {
         logger.info("\(w.appName, privacy: .public)[\(w.id)] back from full screen")
-        fullScreenChanging()
+        fullScreenChanging(w)
         // Once macOS has finished bringing it back.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak w] in
             guard let self, let w, self.windows.contains(where: { $0 === w }) else { return }
@@ -989,9 +1005,40 @@ final class CanvasController: NSObject {
         }
     }
 
-    private func fullScreenChanging() {
-        fullScreenSettleUntil = CACurrentMediaTime() + 1.5
+    /// `changing`: the window going full screen or coming back, whose own moves are its own.
+    private func fullScreenChanging(_ changing: ManagedWindow? = nil) {
+        let now = CACurrentMediaTime()
+        fullScreenSettleUntil = now + 1.5
+        lastFullScreenChange = now
+        // Moves just before macOS told us, followed by then: leaving full screen, macOS can shove
+        // another window (one half off the screen, say) before the one coming back says so.
+        for w in windows where w !== changing {
+            guard let moved = w.followedFrom, now - moved.at < 1.5 else { continue }
+            logger.info("\(w.appName, privacy: .public)[\(w.id)] moved just before a full-screen window came or went; putting it back")
+            w.canvasFrame.origin = moved.origin
+            w.home = moved.home
+            w.fitPush = moved.fitPush
+            w.followedFrom = nil
+            movedAroundFullScreen.insert(w.id)
+        }
         if !movedAroundFullScreen.isEmpty { putBackAfterFullScreenSoon() }
+    }
+
+    /// When a full-screen window last came or went, or the Space changed (see setDownByMacOS).
+    private var lastFullScreenChange: CFTimeInterval = -.infinity
+
+    /// Whether a scan finding a window Expanse placed somewhere else is macOS's doing: coming back
+    /// to a Space (from a full-screen app's, say), macOS sets windows down where it likes (one that
+    /// hung off the screen's edge whole on it, the one back from full screen where it was before
+    /// Expanse moved it), and no notification says so; the next scan finds them, seconds later.
+    /// Your moves, and an app's, come with notifications. If so it's noted, to be put back.
+    private func setDownByMacOS(_ w: ManagedWindow) -> Bool {
+        guard CACurrentMediaTime() - lastFullScreenChange < 15 else { return false }
+        if movedAroundFullScreen.insert(w.id).inserted {
+            logger.info("\(w.appName, privacy: .public)[\(w.id)] set down elsewhere by macOS after a Space change; putting it back")
+        }
+        putBackAfterFullScreenSoon()
+        return true
     }
 
     /// Whether `w` moving now, not by you, is down to a full-screen window coming or going (see
@@ -1026,8 +1073,12 @@ final class CanvasController: NSObject {
                     _ = self.resizeReal(w, ax, to: w.canvasFrame.size)
                 }
             }
-            // Zoomed out (or mid-glide), the next commit puts them back.
-            if !self.isActive, !self.gliding { self.commitInBackground() }
+            // Zoomed out, the next commit puts them back (leaving the canvas). Mid-glide, once it's
+            // over: its own commit was worked out before these were let go of, so it doesn't.
+            self.whenIdle { [weak self] in
+                guard let self, !self.isActive, !self.isPaused else { return }
+                self.commitInBackground()
+            }
         }
         putBackWork = work
         // Half a second after the last such move: an app moves its windows in a burst.
@@ -1051,7 +1102,7 @@ final class CanvasController: NSObject {
             // and for a moment other windows may move too (see movedAroundFullScreen).
             if AX.isFullScreen(element) || size == screenSize {
                 wentFullScreen.insert(w.id)
-                fullScreenChanging()
+                fullScreenChanging(w)
                 return
             }
             if !isActive, wentFullScreen.remove(w.id) != nil {
@@ -1095,6 +1146,7 @@ final class CanvasController: NSObject {
                 if !gliding { commitInBackground() }
             } else {
                 logger.info("follow \(w.appName, privacy: .public)[\(w.id)] moved to \(NSStringFromPoint(pos), privacy: .public) (last placed \(w.lastPlaced.map { NSStringFromPoint($0) } ?? "never", privacy: .public))")
+                if !yourDrag { w.noteFollowed() }
                 w.lastPlaced = nil
                 w.parked = false
                 let before = w.canvasFrame.origin
@@ -1530,6 +1582,8 @@ final class CanvasController: NSObject {
         let wait = Self.scanWait(after: unansweredScans)
         DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             guard let self, self.syncing, self.syncToken == token else { return }
+            // Its answer, whenever it comes, stops there: the next scan may not have started yet.
+            self.latestScan.withLock { $0 = 0 }
             self.unansweredScans += 1
             // No pictures or new streams either until it answers (see WindowCapture.overdue).
             WindowCapture.replaydStuck = true
@@ -1920,7 +1974,7 @@ final class CanvasController: NSObject {
                 } else if live {
                     if let last = w.lastPlaced {
                         if last.distance(to: f.origin) > 2, NSEvent.pressedMouseButtons & 1 == 0,
-                           movedByFullScreen(w, inFullScreenSpace: false) {
+                           movedByFullScreen(w, inFullScreenSpace: false) || setDownByMacOS(w) {
                             // Put back later; its size isn't taken either.
                             continue
                         } else if last.distance(to: f.origin) > 2, selfResized {
@@ -1931,7 +1985,7 @@ final class CanvasController: NSObject {
                         } else if last.distance(to: f.origin) > 2 {
                             // Moved behind our back (by the user or the app): follow it.
                             logger.info("follow \(w.appName, privacy: .public)[\(w.id)] found at \(NSStringFromPoint(f.origin), privacy: .public) (last placed \(NSStringFromPoint(last), privacy: .public))")
-                            w.followedFrom = (w.canvasFrame.origin, CACurrentMediaTime())
+                            w.noteFollowed()
                             w.parked = false
                             w.lastPlaced = nil
                             w.canvasFrame.origin = canvasPoint(forGlobal: f.origin)
@@ -1953,7 +2007,7 @@ final class CanvasController: NSObject {
                         w.canvasFrame.origin = canvasPoint(forGlobal: f.origin)
                         if before.distance(to: w.canvasFrame.origin) > 2 {
                             logger.info("follow \(w.appName, privacy: .public)[\(w.id)] found at \(NSStringFromPoint(f.origin), privacy: .public) (never placed)")
-                            w.followedFrom = (before, CACurrentMediaTime())
+                            w.noteFollowed(from: before)
                         }
                     }
                 }
@@ -3499,11 +3553,15 @@ final class CanvasController: NSObject {
     /// A window becoming key is what makes macOS switch Spaces; Accessibility and ordinary
     /// activation bring an app forward without leaving the Space you're on (see activate).
     func switchToSpace(_ space: Spaces.Space) {
-        guard !gliding else { return }
+        guard !gliding else {
+            logger.info("not switching to \(space.name, privacy: .public) (\(space.id)): a glide is under way")
+            return
+        }
         // Already on that Space: from the canvas, its tile means back to it at 100%, which is what
         // leaving the canvas does (over a full-screen app, back to that app). At 100% there's
         // nothing to do (and no reason to move focus).
         if space.id == Spaces.list().active {
+            logger.info("already on \(space.name, privacy: .public) (\(space.id))")
             if isActive { exit() }
             return
         }
@@ -3821,6 +3879,8 @@ final class CanvasController: NSObject {
     /// expanse://dump — geometry for debugging alignment between proxies and real windows.
     func dump() {
         logger.info("dump viewport=\(NSStringFromRect(self.viewport), privacy: .public) overlay=\(NSStringFromRect(self.overlay.frame), privacy: .public) view=\(NSStringFromRect(self.view.bounds), privacy: .public) camera=\(NSStringFromPoint(self.camera.origin), privacy: .public)@\(self.camera.scale) active=\(self.isActive) gliding=\(self.gliding) animating=\(self.animation != nil) paused=\(self.isPaused) frontmost=\(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-", privacy: .public) focusedByApp=\(self.focusedWindowByApp.description, privacy: .public)")
+        let tiles = view.spacesTileFrames().map { "\($0.id)=\(NSStringFromRect($0.frame))" }.joined(separator: "; ")
+        logger.info("dump spaces \(tiles, privacy: .public)")
         for w in windows {
             let axPos = w.ax.flatMap(AX.position).map { NSStringFromPoint($0) } ?? "nil"
             logger.info("dump \(w.appName, privacy: .public)[\(w.id)] sc=\(NSStringFromRect(w.scWindow.frame), privacy: .public) ax=\(axPos, privacy: .public) canvas=\(NSStringFromRect(w.canvasFrame), privacy: .public) layer=\(NSStringFromRect(w.node.container.frame), privacy: .public) parked=\(w.parked) capturing=\(w.capture.isRunning) first=\(w.needsFirstFrame) pic=\(w.pictureWidth) lastPlaced=\(w.lastPlaced.map { NSStringFromPoint($0) } ?? "nil", privacy: .public)")

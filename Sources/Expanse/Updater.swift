@@ -258,6 +258,7 @@ final class Updater {
         task.arguments = ["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"",
                           Bundle.main.bundlePath, String(getpid())]
         try? task.run()
+        AppDelegate.quitReason = "relaunching"
         NSApp.terminate(nil)
     }
 
