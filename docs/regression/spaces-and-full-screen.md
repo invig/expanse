@@ -298,3 +298,17 @@
   4. Zoom out and run `open "expanse://space?name=Expanse"`.
 - **Expected:** Steps 2 and 4: back to 100%, as leaving the canvas does (the view you left, unless you panned or zoomed). Step 3: nothing happens, and focus doesn't move.
 - **Automate:** manual: needs the Spaces list (`switchToSpace` with the active Space).
+
+## SPACES-25 The minimap and Spaces panel are back at 100% after a full-screen app's Space
+- **Type:** Bug fix
+- **Area:** SPACES
+- **Commits:** unreleased (2 Nov)
+- **Before:** Back on the desktop from a full-screen app's Space, with another app in front, macOS could stop drawing Expanse's window at 100% while still listing it on screen: the minimap, the Spaces panel and parked windows' pictures vanished, and clicks there went to the desktop picture, until the canvas next opened. A glide to the window you came back to showed it again, so it was seen only without one: in the 20s after a display change (when Expanse doesn't follow focus), or with the view already on that window (SPACES-07 lost its click now and then).
+- **Setup:** At 100% on the canvas's desktop, with the minimap and Spaces panel showing in the bottom-right. Safari is full screen on a Space of its own.
+- **Steps:**
+  1. Click a window of another app (TextEdit, say) on the desktop.
+  2. Click Safari's tile in the Spaces panel.
+  3. Come back to the desktop (its tile, or a swipe).
+  4. Click between the tiles in the Spaces panel, then click Safari's tile again.
+- **Expected:** At step 3 the minimap and Spaces panel are drawn on the desktop. At step 4 the clicks reach Expanse (`click at 100%` in the log), and the second one switches to Safari.
+- **Automate:** manual: end-to-end in the VM (SPACES-25), the rule in a unit test.

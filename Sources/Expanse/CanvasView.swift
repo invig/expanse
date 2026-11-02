@@ -508,7 +508,8 @@ final class CanvasView: NSView {
         else if e.momentumPhase == [], e.phase == .ended || e.phase == .cancelled { wait = 0.08 }
         else if e.momentumPhase == [], e.phase == [] { wait = 0.25 }
         else { return }
-        let work = DispatchWorkItem { [weak self] in self?.controller.scrollEnded() }
+        let wheel = e.momentumPhase == [] && e.phase == []
+        let work = DispatchWorkItem { [weak self] in self?.controller.scrollEnded(wheel: wheel) }
         scrollEnd = work
         DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: work)
     }

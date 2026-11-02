@@ -218,3 +218,17 @@
 - **Check in log:** Compare the new window's `tracking Finder [<id>]` line with F2's ID; when they match, it must still be logged as `placed new window Finder at … beside Finder[<F1 id>] …`.
 - **Automate:** manual: needs Finder reusing a window ID and Accessibility's element-destroyed notification (`closedWindows`, `Departed.closed`).
 - **Note:** Wait more than 2 s after the close: a window of the same size at the same spot within 2 s of a close counts as a tab taking over (`tabTakingOver`). Since 2d65ed9 a closed window's record is kept only 10 s, for a tab taking over.
+
+## PLACE-18 A tab dragged out into a new window is left alone until you let go
+- **Type:** Bug fix
+- **Area:** PLACE
+- **Commits:** unreleased (2 Nov)
+- **Before:** Dragging a tab out of Chrome or Brave makes a new window that the browser moves with the pointer while you hold the button. Expanse took it on mid-drag (a scan comes 0.15s after a window opens), placed it beside its window and moved it there, or glided to it (fitting it to the screen, parking it off screen): the window jumped away from the pointer, and the browser and Expanse fought over it until you let go.
+- **Setup:** At 100%, a Chrome or Brave window with a few tabs in view, free space beside it.
+- **Steps:**
+  1. Drag a tab out of the window and move it around for a few seconds, holding the button.
+  2. Let go over the desktop.
+  3. Drag another tab out and back into the window's tab strip.
+- **Expected:** Step 1: the new window follows the pointer; nothing else moves and the view stays. Step 2: it goes beside the window it came from, 20pt away and lined up, as any new window (PLACE-03; a glide if that's out of view). Step 3: nothing happens.
+- **Check in log:** `scans wait: mouse button held` while you drag; `tracking <App> [<id>]` and `placed new window <App> at … beside <App>[<its window>] …` only after you let go.
+- **Automate:** manual: end-to-end in the VM (PLACE-18, with a fixture app that tears a window off as Chrome does), the wait in a unit test (`buttonHeld`).

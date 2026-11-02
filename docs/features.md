@@ -4,7 +4,19 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- Back on your desktop from a full-screen app's Space, the minimap and Spaces panel stay at
+  100%. They could vanish until you next zoomed out, and clicks on them went to the desktop.
+- **A tab dragged out of Chrome or Brave is left alone while you hold the button.** Expanse
+  used to place the new window mid-drag and fight the browser for it; now it waits until you let
+  go, then puts it beside the window it came from (PLACE-18, TRACK-43).
+- **Scrolling and pinching on the bare desktop at 100% work again.** An invisible window over the
+  desktop (Notification Center's, on macOS 27) counted as a window under the pointer, and after
+  you left the canvas at an empty spot the gesture went to Expanse itself, which only watched
+  other apps'. Either way nothing opened the canvas. A mouse wheel's slow notches no longer snap
+  back either (NAV-62, NAV-63).
+- **Unplugging a display with the lid shut keeps your layout.** With no display, Expanse no
+  longer drops windows it can't see; when every window goes missing at once it waits 3s before
+  taking them as closed. Before, they all came back as new windows in new spots (DISPLAY-29).
 
 ## Bugs
 
@@ -41,7 +53,7 @@ in Copy Logs for a Bug Report).
    centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
    is on (Accessibility › Display), which Expanse doesn't follow yet.
 6. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 532 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 234
+   has a test. 537 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 237
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
    - End-to-end, 2 Nov: a complete run of 0.1.36 in the VM passed all 145 automatic cases, in one

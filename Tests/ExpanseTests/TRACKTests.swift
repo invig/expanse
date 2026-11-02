@@ -970,4 +970,23 @@ private final class QuitApp: NSRunningApplication {
         #expect(tenLater.calls == 1)
         #expect(!tenLater.recheck)
     }
+
+    // MARK: TRACK-43
+
+    @Test("TRACK-43 The move that lands just after you let go of a just-opened window isn't put back")
+    func track43() {
+        let w = Self.placed(4301, canvas: CGRect(x: 300, y: 200, width: 500, height: 400))
+        let c = Self.canvas([w])
+        defer { Self.finish(c) }
+        // Just placed, and under 5s old: a move by its app alone would be put back (TRACK-32).
+        w.lastPlacedAt = CACurrentMediaTime()
+        c.realWindowChanged(w, AXUIElementCreateApplication(w.pid), userDragging: true,
+                            size: w.canvasFrame.size, position: CGPoint(x: 700, y: 433), inFullScreenSpace: false)
+        // You let go; the drag's last move lands a moment later, with the button up.
+        c.realWindowChanged(w, AXUIElementCreateApplication(w.pid), userDragging: false,
+                            size: w.canvasFrame.size, position: CGPoint(x: 720, y: 433), inFullScreenSpace: false)
+        #expect(w.canvasFrame.origin == CGPoint(x: 720, y: 400))
+        #expect(w.lastPlaced == nil)
+        #expect(w.cameBackAt == 0)
+    }
 }

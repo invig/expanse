@@ -592,8 +592,8 @@
 - **Commits:** d33eab0 (0.1.29)
 - **Setup:** As NAV-51, with a mouse that has a scroll wheel.
 - **Steps:**
-  1. Open the canvas at 100% and turn the wheel (⇧ + wheel for sideways) until a window is cut off; stop.
-- **Expected:** About a quarter of a second after the last tick, the view snaps as in NAV-51.
+  1. Open the canvas at 100% and turn the wheel (⇧ + wheel for sideways) until a window is cut off and the next one's edge is a notch or two short of 20pt in from the screen's; stop.
+- **Expected:** About a quarter of a second after the last tick, the view snaps as in NAV-51, but only on the way you turned the wheel and by 40pt or less (NAV-63).
 - **Check in log:** `scroll ended: view snapped by …`.
 - **Automate:** manual: event phases (`CanvasView.scrollMayEnd`).
 
@@ -697,3 +697,28 @@
 - **Expected:** Step 1: each time a scroll ends the view stays, or carries on your way to line a window up, or moves back no more than 40pt; it never takes you back to the window. Step 2: no sideways snap of more than 40pt.
 - **Check in log:** `scroll ended: view snapped by …`, with the move your way (or 40pt or less).
 - **Automate:** unit: `snappedCamera(going:)` and the travel kept by `pan(by:scrolling:)`.
+
+## NAV-62 Scrolling or pinching on the bare desktop works under an invisible window, and with Expanse in front
+- **Type:** Bug fix
+- **Area:** NAV
+- **Commits:** unreleased (2 Nov)
+- **Before:** Expanse took a scroll or pinch on the desktop (NAV-18) only where the window server listed no window over it, and some apps keep invisible windows that let everything through: Notification Center one over the whole screen (macOS 27), a dictation app (Wispr Flow) one over the bottom middle. Under those, a mouse wheel, a two-finger scroll or a pinch on the desktop did nothing. It did nothing anywhere, too, while Expanse was still the front app (after leaving the canvas at an empty part of it, with nothing to focus): the gesture then went to Expanse itself, with no window, and Expanse only watched other apps' gestures (found by NAV-62 in the VM, 3 Nov).
+- **Setup:** At 100%, bare desktop under the pointer. Notification Center's window up (it is after a notification), or Wispr Flow running. Then again just after leaving the canvas at an empty part of it (Expanse still in front).
+- **Steps:**
+  1. Turn a mouse's scroll wheel on the bare desktop, then a notch at a time with pauses.
+  2. Back to 100% (Esc), then scroll with two fingers, and then pinch, on the bare desktop.
+  3. Scroll over an app's window, the menu bar and the Dock.
+- **Expected:** Steps 1 and 2: the canvas opens at 100%, and the rest of the gesture moves or zooms the view (each notch moves it on). Step 3: the window gets the scroll; the canvas doesn't open (NAV-50).
+- **Automate:** manual: end-to-end in the VM (NAV-62), where Notification Center's window is up after a notification.
+
+## NAV-63 A mouse wheel turned a notch at a time isn't pulled back
+- **Type:** Bug fix
+- **Area:** NAV
+- **Commits:** unreleased (2 Nov)
+- **Before:** A wheel's ticks have no phases, so a pause ends the scroll (NAV-52) and the snap follows. A notch moves the view 12pt, and the snap may go back the way you came up to 40pt (NAV-61): it put the view back after every notch, or leapt on to line up the next window.
+- **Setup:** At 100% on the canvas, a row of windows lined up with the screen's edge, a mouse with a scroll wheel.
+- **Steps:**
+  1. Turn the wheel sideways (⇧ + wheel) one notch at a time, pausing between notches.
+- **Expected:** Each notch moves the view 12pt on and it stays there; after a wheel the snap only finishes a move your way of 40pt or less (a window's edge lining up 20pt in), never back.
+- **Check in log:** no `scroll ended: view snapped by` against the way you turned the wheel.
+- **Automate:** unit: `snappedCamera(going:wheel:)`, and notches through `CanvasView.scrollWheel`.

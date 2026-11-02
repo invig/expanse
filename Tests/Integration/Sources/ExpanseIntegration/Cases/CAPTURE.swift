@@ -685,6 +685,7 @@ import AppKit
             defer { replayd.stop() }
             // 1: the canvas opened and closed four times within 2 s.
             var rmark = replayd.mark()
+            let burstMark = t.log.mark()
             for _ in 0..<4 {
                 t.link("enter", ["zoomOut": 0])
                 try await t.pause(0.2)
@@ -694,7 +695,11 @@ import AppKit
             try await t.settle()
             try await t.pause(1.5)
             let burst = replayd.count(.picture, since: rmark)
-            try t.expect(burst <= 1, "opening the canvas 4 times within 2 s took \(burst) pictures (the desktop at most once every 2 s)")
+            // Over 2 s by Expanse's clock when the VM stalls (2.5 s on 2 Nov): then a second picture is due.
+            let opens = t.log.timedLines(since: burstMark).filter { $0.line.hasPrefix("url command enter") }.map(\.time)
+            let span = (opens.last ?? 0) - (opens.first ?? 0)
+            let allowed = 1 + Int(span / 2)
+            try t.expect(burst <= allowed, "opening the canvas 4 times in \(String(format: "%.1f", span)) s took \(burst) pictures (the desktop at most once every 2 s)")
             // 2: while scans get no answer, opening the canvas asks for no desktop picture.
             let mark = t.log.mark()
             try captureSignalReplayd("STOP")

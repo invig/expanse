@@ -313,6 +313,25 @@ struct SPACESTests {
         }
     }
 
+    // MARK: SPACES-25
+
+    @Test("SPACES-25 At 100% the backdrop is shown again on a desktop Space (logic)")
+    func spaces25() {
+        let c = TestCanvas.make()
+        defer { Self.finish(c) }
+        Self.withSpaces(Self.usual(current: 1)) { #expect(c.backdropShouldFollowSpace) }
+        Self.withSpaces(Self.usual(current: 3)) { #expect(c.backdropShouldFollowSpace) }
+        // Not on a full-screen app's Space, where the app covers it; not with the canvas open or
+        // gliding (it's in front then); not while paused (it's put away).
+        Self.withSpaces(Self.usual(current: 5)) { #expect(!c.backdropShouldFollowSpace) }
+        c.isActive = true
+        Self.withSpaces(Self.usual(current: 1)) { #expect(!c.backdropShouldFollowSpace) }
+        c.isActive = false
+        c.isPaused = true
+        Self.withSpaces(Self.usual(current: 1)) { #expect(!c.backdropShouldFollowSpace) }
+        c.isPaused = false
+    }
+
     // MARK: SPACES-16
 
     @Test("SPACES-16 Focus taken by another of the app's windows just after a pick is given back")

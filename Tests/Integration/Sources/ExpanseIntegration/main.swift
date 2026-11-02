@@ -258,11 +258,34 @@ app.run()
         windows.append(TestWindow(title: Fixture.title(name, i + 1), frame: CGRect(origin: CGPoint(x: offset, y: offset), size: size)))
     }
 
+    /// What Chrome does with a tab dragged out of its window: a new window, held by its tab
+    /// (Fixture.tearOffGrab) under the pointer, that the app itself moves with the pointer until
+    /// the mouse button comes up.
+    private func tearOff() {
+        let grab = Fixture.tearOffGrab
+        func spot() -> CGPoint {
+            let m = NSEvent.mouseLocation
+            let h = NSScreen.screens.first?.frame.height ?? 0
+            return CGPoint(x: m.x - grab.dx, y: h - m.y - grab.dy)
+        }
+        let w = TestWindow(title: Fixture.title(name, windows.count + 1), frame: CGRect(origin: spot(), size: size))
+        windows.append(w)
+        // In every run loop mode, so it keeps going while AppKit tracks the held button.
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                guard NSEvent.pressedMouseButtons & 1 != 0, w.isOpen else { timer.invalidate(); return }
+                w.setFrame(CGRect(origin: spot(), size: self.size))
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
     private func handle(_ info: [String: String]) {
         let i = Int(info["index"] ?? "0") ?? 0
         let w = windows.indices.contains(i) ? windows[i] : nil
         switch info["do"] {
         case "open": open()
+        case "tearoff": tearOff()
         case "close": w?.close()
         case "minimise": w?.minimise()
         case "restore": w?.restore()

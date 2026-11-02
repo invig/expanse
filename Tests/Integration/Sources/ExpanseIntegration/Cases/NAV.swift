@@ -1165,6 +1165,36 @@ import AppKit
             if !notTried.isEmpty { throw Skip("the rest passed; not tried: \(notTried.joined(separator: ", "))") }
         },
 
+        Case("NAV-62", "A wheel on the bare desktop opens the canvas, under an invisible window or with Expanse in front") { t in
+            try t.needsInput()
+            try await t.navReady()
+            try await t.window("NAV-62 A")
+            let s = try await t.navGoEmpty()
+            guard let p = navBarePoint(s) else { throw Skip("there's no bare desktop on screen to scroll on") }
+            Input.move(to: p)
+            try await t.pause(0.2)
+            // A notch: the canvas opens at 100% (the rest of the turn moves it).
+            navWheel(dy: -2)
+            do {
+                try await t.until("the wheel to open the canvas", timeout: 2) { try await t.state().active }
+            } catch {
+                let listed = navOnScreenWindows().filter { $0.layer >= 0 && $0.alpha > 0 && $0.frame.contains(p) }.map { "\($0.owner) (layer \($0.layer))" }
+                throw Failure("a mouse wheel on the bare desktop at \(p) didn't open the canvas (listed over it: \(listed.isEmpty ? "nothing" : listed.joined(separator: ", ")))")
+            }
+            let opened = try await t.settle()
+            try t.expect(abs(opened.scale - 1) < 0.001, "the canvas should open at 100% (\(navPercent(opened.scale)))")
+            // Notches a pause apart, each a scroll of its own: each moves the view on (24pt down).
+            for n in 1...3 {
+                navWheel(dy: -2)
+                try await t.pause(0.5)
+                let now = try await t.settle()
+                try t.expect(now.camera.y - opened.camera.y >= CGFloat(n) * 24 - 2,
+                             "notch \(n) should have moved the view \(n * 24)pt down from where the canvas opened; it's \(Int(now.camera.y - opened.camera.y))pt")
+            }
+            Input.key(.escape)
+            try await t.until("Esc to go back to 100%") { try await !t.settle().active }
+        },
+
         Case("NAV-52", "A mouse-wheel scroll snaps after a short pause") { t in
             try t.needsInput()
             try await t.navReady()
@@ -1175,9 +1205,11 @@ import AppKit
             t.link("enter", ["zoomOut": 0])
             try await t.until("the canvas at 100%") { try await t.state().active }
             var s = try await t.settle()
-            // The second window cut off by the left edge, the row level with the middle of the screen.
-            guard let f1 = s.window(ws[1].id)?.canvas else { throw Failure("a window left the canvas") }
-            let target = CGPoint(x: f1.minX + 200, y: (f1.midY - s.viewport.height / 2).rounded())
+            // The second window cut off by the left edge, the row level with the middle of the screen,
+            // and the third's left edge where the ticks (12pt each) leave it 30pt short of lining up
+            // 20pt in: a wheel's snap goes no further than 40pt, and only on its way (NAV-63).
+            guard let f2 = s.window(ws[2].id)?.canvas else { throw Failure("a window left the canvas") }
+            let target = CGPoint(x: f2.minX - 20 - 30 - 72, y: (f2.midY - s.viewport.height / 2).rounded())
             t.link("pan", ["dx": Int((s.camera.x - target.x).rounded()), "dy": Int((s.camera.y - target.y).rounded())])
             try await t.until("the view moved there") { let s = try await t.settle(); return navDistance(s.camera, target) < 2 }
             s = try await t.settle()
@@ -1416,8 +1448,31 @@ private func navOnScreenWindows() -> [NavWindowInfo] {
 }
 
 /// A window (app windows, the Dock, the menu bar, panels) is at `p`, as Expanse sees it.
-private func navCovered(_ p: CGPoint) -> Bool {
-    navOnScreenWindows().contains { $0.layer >= 0 && $0.alpha > 0 && $0.frame.contains(p) }
+/// The one a click there would reach, as the window server works it out (and Expanse asks): not
+/// every window listed there. Some are invisible and let everything through, like the one
+/// Notification Center keeps over the whole screen on macOS 27.
+@MainActor private func navCovered(_ p: CGPoint) -> Bool {
+    guard let id = navHit(p) else { return false }
+    return navOnScreenWindows().contains { $0.id == id && $0.layer >= 0 }
+}
+
+/// The window a click at `p` (global) would reach; nil for none (the desktop's own windows count
+/// as none only if they're left out of navOnScreenWindows, which leaves them out).
+@MainActor private func navHit(_ p: CGPoint) -> CGWindowID? {
+    let h = NSScreen.screens.first?.frame.height ?? 0
+    let n = NSWindow.windowNumber(at: NSPoint(x: p.x, y: h - p.y), belowWindowWithWindowNumber: 0)
+    return n > 0 ? CGWindowID(n) : nil
+}
+
+/// Windows listed on screen above the desktop that do take clicks somewhere: one of their middle
+/// and corners (24pt in) reaches them.
+@MainActor private func navSolidWindows() -> [NavWindowInfo] {
+    navOnScreenWindows().filter { w in
+        guard w.layer >= 0, w.alpha > 0 else { return false }
+        let r = w.frame.insetBy(dx: min(24, w.frame.width / 3), dy: min(24, w.frame.height / 3))
+        return [CGPoint(x: r.midX, y: r.midY), CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY),
+                CGPoint(x: r.minX, y: r.maxY), CGPoint(x: r.maxX, y: r.maxY)].contains { navHit($0) == w.id }
+    }
 }
 
 /// Which of `ids` (one app's windows) is in front, as the window server has them.
@@ -1425,24 +1480,29 @@ private func navFrontWindow(among ids: [CGWindowID]) -> CGWindowID? {
     navOnScreenWindows().first { $0.layer == 0 && ids.contains($0.id) }?.id
 }
 
-/// A point on the bare desktop: no window there (as Expanse checks), none of the canvas's windows
+/// A point on the bare desktop: no window there that takes clicks (as Expanse checks), none of the canvas's windows
 /// or their pictures, clear of the minimap and Spaces panels along the bottom right and of the
 /// screen's corners. The one furthest from all of those; nil if nothing is clear by 24pt.
-private func navBarePoint(_ s: ExpanseState) -> CGPoint? {
+@MainActor private func navBarePoint(_ s: ExpanseState) -> CGPoint? {
     let vp = s.viewport
-    var blocked = navOnScreenWindows().filter { $0.layer >= 0 && $0.alpha > 0 }.map(\.frame)
+    var blocked = navSolidWindows().map(\.frame)
     blocked += s.windows.map { navScreenRect(s, $0.canvas) }
     blocked.append(CGRect(x: vp.midX, y: vp.maxY - 200, width: vp.width / 2, height: 200))
-    var best: (point: CGPoint, clear: CGFloat)?
+    var spots: [(point: CGPoint, clear: CGFloat)] = []
     for y in stride(from: vp.minY + 50, to: vp.maxY - 120, by: 40) {
         for x in stride(from: vp.minX + 60, to: vp.maxX - 60, by: 40) {
             let p = CGPoint(x: x, y: y)
             let clear = blocked.map { navDistance(p, $0) }.min() ?? .greatestFiniteMagnitude
-            if clear > (best?.clear ?? 0) { best = (p, clear) }
+            if clear >= 24 { spots.append((p, clear)) }
         }
     }
-    guard let best, best.clear >= 24 else { return nil }
-    return best.point
+    // The clearest where a click (as Expanse asks) reaches nothing, there or 24pt around: a window
+    // that takes clicks in only part of it, like Stage Manager's strip of apps at the left, is
+    // left out of `blocked`.
+    return spots.sorted { $0.clear > $1.clear }.first { spot in
+        [CGPoint.zero, CGPoint(x: 24, y: 0), CGPoint(x: -24, y: 0), CGPoint(x: 0, y: 24), CGPoint(x: 0, y: -24)]
+            .allSatisfy { !navCovered(CGPoint(x: spot.point.x + $0.x, y: spot.point.y + $0.y)) }
+    }?.point
 }
 
 /// macOS's own shortcuts on ⌃ + arrows (Mission Control › Move left / right a space, Mission

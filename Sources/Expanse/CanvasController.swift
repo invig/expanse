@@ -52,12 +52,26 @@ final class CanvasController: NSObject {
     /// A scan was asked for while one was running: run another once it's done.
     private var syncAgain = false
     private var syncRetryScheduled = false
+    /// The left mouse button is down (tests stand in their own): you may be dragging a window,
+    /// or a tab out of a browser into a window of its own, and scans wait (see sync).
+    var buttonHeld: () -> Bool = { NSEvent.pressedMouseButtons & 1 != 0 }
+    /// A scan is waiting for the button to come up (logged once per press).
+    private var scanWaitingForButton = false
+    /// A display to show windows on (tests stand in their own): one connected and awake.
+    var displayAvailable: () -> Bool = { !NSScreen.screens.isEmpty && CGDisplayIsAsleep(CGMainDisplayID()) == 0 }
+    /// When a scan first listed none of the windows (see dropsHeld).
+    private var allGoneAt: CFTimeInterval?
+    static let allGoneWait: CFTimeInterval = 3
+    private var allGoneCheck: DispatchWorkItem?
+    /// The last scan kept windows it didn't list (logged once each time).
+    private var holdingDrops = false
     private var pendingSyncCompletions: [() -> Void] = []
     private var firstSync = true
     private var saveWork: DispatchWorkItem?
     private var pinchAccumulator: CGFloat = 0
     private var magnifyMonitor: Any?
     private var scrollMonitor: Any?
+    private var ownGestureMonitor: Any?
     private var observers: [pid_t: AppObserver] = [:]
     private var syncSoonWork: DispatchWorkItem?
     private var saved: SavedLayout?
@@ -549,6 +563,16 @@ final class CanvasController: NSObject {
         scrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             self?.handleDesktopGesture(event)
         }
+        // A global monitor only sees other apps' events. With Expanse still the front app (left at
+        // an empty part of the canvas, nothing to focus), a gesture over the bare desktop comes to
+        // Expanse itself, with no window, and the desktop never opened the canvas (NAV-62).
+        ownGestureMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { [weak self] event in
+            if event.window == nil, let self {
+                if event.type == .magnify { self.handleGlobalPinch(event) }
+                self.handleDesktopGesture(event)
+            }
+            return event
+        }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification,
                                                           object: nil, queue: .main) { [weak self] note in
             self?.appTerminated(note)
@@ -575,6 +599,7 @@ final class CanvasController: NSObject {
             self?.refreshSpaces()
             self?.fullScreenChanging()
             self?.canvasFollowsSpace()
+            self?.backdropFollowsSpace()
             self?.syncSoon()
         }
     }
@@ -952,7 +977,7 @@ final class CanvasController: NSObject {
             guard !isActive, animation == nil else { return }
             // (The observer knows its windows' IDs; asking the app is the fallback.)
             guard let id = id ?? AX.windowID(element), let w = windows.first(where: { $0.id == id }) else { return }
-            let mouseDown = NSEvent.pressedMouseButtons & 1 != 0
+            let mouseDown = buttonHeld()
             // The echo of a move we just made (it can arrive after a glide hands back). Asking
             // the app where its window is costs two round trips; a slow app with a dozen
             // windows would stall the main thread for half a second right after every glide.
@@ -1142,7 +1167,8 @@ final class CanvasController: NSObject {
             } else if selfResized {
                 w.lastPlaced = nil
                 if !gliding { commitInBackground() }
-            } else if !userDragging, cameBack(w, to: pos) {
+            } else if !yourDrag, cameBack(w, to: pos) {
+                // (Not the move that lands just after you let go of it: that's still yours.)
                 if !gliding { commitInBackground() }
             } else {
                 logger.info("follow \(w.appName, privacy: .public)[\(w.id)] moved to \(NSStringFromPoint(pos), privacy: .public) (last placed \(w.lastPlaced.map { NSStringFromPoint($0) } ?? "never", privacy: .public))")
@@ -1163,7 +1189,7 @@ final class CanvasController: NSObject {
     /// which isn't you moving it. True while a move should be put back rather than followed, so
     /// it keeps its spot, growing or shrinking from its top-left like any other window.
     private func resizedItself(_ w: ManagedWindow, to size: CGSize?) -> Bool {
-        guard w.sizesItself, NSEvent.pressedMouseButtons & 1 == 0 else { return false }
+        guard w.sizesItself, !buttonHeld() else { return false }
         let now = CACurrentMediaTime()
         if let size, abs(size.width - w.canvasFrame.width) > 1 || abs(size.height - w.canvasFrame.height) > 1 {
             if now - w.resizedItselfAt > 2 {
@@ -1413,14 +1439,18 @@ final class CanvasController: NSObject {
         // Inside one of the canvas's windows: not the desktop (and no need to ask the window server).
         let vp = viewport
         if windows.contains(where: { !$0.parked && camera.toView($0.canvasFrame).offsetBy(dx: vp.minX, dy: vp.minY).contains(point) }) { return }
-        // Any other window there (a dialog, the Dock, the menu bar, another app's panel)?
-        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-        let overWindow = info.contains { w in
-            guard (w[kCGWindowLayer as String] as? Int ?? 0) >= 0, (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
-                  let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return false }
-            return CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0).contains(point)
+        // Any other window there (a dialog, the Dock, the menu bar, another app's panel)? The one a
+        // click there would reach, as the window server works it out. Not every window it lists:
+        // some are invisible and let everything through, like the one Notification Center keeps
+        // over the whole screen (macOS 27), or a dictation app's over part of it, and counting
+        // those, the desktop never opened the canvas. Nothing there, the desktop's own windows
+        // (below every app's), or the backdrop: it's the desktop.
+        let hit = NSWindow.windowNumber(at: p, belowWindowWithWindowNumber: 0)
+        if hit > 0, hit != overlay.windowNumber,
+           let w = (CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(hit)) as? [[String: Any]])?.first,
+           (w[kCGWindowLayer as String] as? Int ?? 0) >= 0 {
+            return
         }
-        guard !overWindow else { return }
         enter(zoomOut: false)
     }
 
@@ -1547,8 +1577,16 @@ final class CanvasController: NSObject {
         // Until Screen Recording is in effect (granted, and Expanse relaunched), any
         // ScreenCaptureKit call makes macOS show its permission prompt again, every time.
         guard Self.screenCaptureAllowed ?? CGPreflightScreenCaptureAccess() else { completion?(); return }
-        // Window discovery queries every app; don't let it land in the middle of a glide.
-        if gliding || view.isDragging || (animation != nil && completion == nil) {
+        // Window discovery queries every app; don't let it land in the middle of a glide. Nor
+        // while the mouse button is down: a tab dragged out of Chrome is a new window its browser
+        // moves with the pointer, and taking it on then moved it from under you. It goes beside
+        // the window it came from once you let go.
+        let held = buttonHeld()
+        if held != scanWaitingForButton {
+            scanWaitingForButton = held
+            if held { logger.info("scans wait: mouse button held") }
+        }
+        if gliding || view.isDragging || held || (animation != nil && completion == nil) {
             if let completion { pendingSyncCompletions.append(completion) }
             guard !syncRetryScheduled else { return }
             syncRetryScheduled = true
@@ -1623,7 +1661,10 @@ final class CanvasController: NSObject {
                 // Asked for while this scan ran, so it may have missed what that was about.
                 var again = self.syncAgain
                 self.refreshSpaces()
-                if content != nil, !self.isPaused, !inFullScreenSpace {
+                if content != nil, !self.isPaused, !inFullScreenSpace, self.buttonHeld() {
+                    // The button went down while it ran (see sync): looked at again once it's up.
+                    again = true
+                } else if content != nil, !self.isPaused, !inFullScreenSpace {
                     let s3 = CACurrentMediaTime()
                     // Windows moved (a glide, leaving the canvas) or the camera changed while the
                     // scan ran: its frames say where windows were, which would read as you moving
@@ -1653,6 +1694,21 @@ final class CanvasController: NSObject {
                 completions.forEach { $0() }
             }
         }
+    }
+
+    /// Whether windows missing from a scan (`gone` of them) are kept rather than dropped as closed.
+    /// With no display to show them on (a dock unplugged with the lid shut, 2 Nov), the window
+    /// server lists none of your windows, and dropping them lost every window's spot: they came
+    /// back later as new windows, beside each other. So nothing is dropped then; and when every
+    /// window is missing at once (three or more), only once that's held for `allGoneWait`.
+    private func dropsHeld(gone: Int, now: CFTimeInterval = CACurrentMediaTime()) -> Bool {
+        guard gone > 0 else { allGoneAt = nil; return false }
+        guard displayAvailable() else { return true }
+        guard gone >= 3, gone == windows.count else { allGoneAt = nil; return false }
+        guard let since = allGoneAt else { allGoneAt = now; return true }
+        if now - since < Self.allGoneWait { return true }
+        allGoneAt = nil
+        return false
     }
 
     /// Tests stand in for Screen Recording being allowed or not (nil: ask macOS).
@@ -1988,14 +2044,14 @@ final class CanvasController: NSObject {
                     w.lastPlaced = f.origin
                 } else if live {
                     if let last = w.lastPlaced {
-                        if last.distance(to: f.origin) > 2, NSEvent.pressedMouseButtons & 1 == 0,
+                        if last.distance(to: f.origin) > 2, !buttonHeld(),
                            movedByFullScreen(w, inFullScreenSpace: false) || setDownByMacOS(w) {
                             // Put back later; its size isn't taken either.
                             continue
                         } else if last.distance(to: f.origin) > 2, selfResized {
                             w.lastPlaced = nil
                             replaceAny = true
-                        } else if last.distance(to: f.origin) > 2, NSEvent.pressedMouseButtons & 1 == 0, cameBack(w, to: f.origin) {
+                        } else if last.distance(to: f.origin) > 2, !buttonHeld(), cameBack(w, to: f.origin) {
                             replaceAny = true
                         } else if last.distance(to: f.origin) > 2 {
                             // Moved behind our back (by the user or the app): follow it.
@@ -2009,7 +2065,7 @@ final class CanvasController: NSObject {
                         let before = w.canvasFrame.origin
                         // Just back from full screen (or another window's), it's at the spot it
                         // had: wherever macOS set it down is put right, not followed.
-                        if before.distance(to: canvasPoint(forGlobal: f.origin)) > 2, NSEvent.pressedMouseButtons & 1 == 0,
+                        if before.distance(to: canvasPoint(forGlobal: f.origin)) > 2, !buttonHeld(),
                            movedByFullScreen(w, inFullScreenSpace: false) {
                             continue
                         }
@@ -2040,7 +2096,20 @@ final class CanvasController: NSObject {
         }
 
         let scanned = Dictionary(scWindows.map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
-        for w in windows where !seen.contains(w.id) {
+        let gone = windows.filter { !seen.contains($0.id) }
+        let held = dropsHeld(gone: gone.count)
+        if held, !holdingDrops {
+            logger.notice("\(gone.count) of \(self.windows.count) windows missing from a scan\(self.displayAvailable() ? "" : " with no display", privacy: .public): kept until it's clear they're closed")
+        }
+        holdingDrops = held
+        if held, allGoneAt != nil {
+            // Looked at again once the wait is over (the regular scan may be up to 5s later).
+            allGoneCheck?.cancel()
+            let check = DispatchWorkItem { [weak self] in self?.sync() }
+            allGoneCheck = check
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.allGoneWait + 0.2, execute: check)
+        }
+        for w in gone where !held {
             // Kept on disk (notice, not info), so a window that drops off the canvas can be
             // explained afterwards.
             let reason: String
@@ -3860,6 +3929,21 @@ final class CanvasController: NSObject {
     /// keyboard, or is about to.
     private var canvasShouldFollowSpace: Bool { isActive && !gliding && Spaces.current?.isDesktop == true }
 
+    /// The same at 100%, where the window draws the minimap, the Spaces panel and parked windows'
+    /// pictures on the desktop: back on a desktop Space, it's shown again. Otherwise it can stay
+    /// undrawn, its clicks falling through to the desktop picture, until the canvas next opens
+    /// (back from a full-screen app's Space with another app in front: SPACES-25).
+    private func backdropFollowsSpace() {
+        guard backdropShouldFollowSpace else { return }
+        overlay.orderOut(nil)
+        overlay.orderFrontRegardless()
+    }
+
+    /// Whether the backdrop is shown again (see backdropFollowsSpace; a property of its own for the
+    /// tests). Not while paused (it's put away then), nor with the canvas open or gliding (which
+    /// have it in front already).
+    private var backdropShouldFollowSpace: Bool { !isActive && !isPaused && Spaces.current?.isDesktop == true }
+
     /// The desktop Space the canvas's windows are on.
     var canvasDesktop: UInt64? {
         windows.last.flatMap { Spaces.spaces(of: $0.id).first }
@@ -4232,13 +4316,13 @@ final class CanvasController: NSObject {
 
     /// A scroll at 100% has ended, momentum and all (see CanvasView.scrollWheel): if it left windows
     /// cut off by the screen's edges, the view moves on a little, to where they're whole or out of
-    /// sight (see snappedCamera).
-    func scrollEnded() {
+    /// sight (see snappedCamera). `wheel`: a mouse wheel's, ended by a pause.
+    func scrollEnded(wheel: Bool = false) {
         let travel = scrollTravel
         scrollTravel = .zero
         guard isActive, !gliding, animation == nil, abs(camera.scale - 1) < 0.001 else { return }
         // (No travel recorded: which way is unknown, so any.)
-        let target = snappedCamera(going: travel == .zero ? nil : travel)
+        let target = snappedCamera(going: travel == .zero ? nil : travel, wheel: wheel)
         guard target != camera else { return }
         logger.info("scroll ended: view snapped by \(target.origin.x - self.camera.origin.x), \(target.origin.y - self.camera.origin.y)")
         animate(to: target, duration: 0.25)
@@ -4252,8 +4336,10 @@ final class CanvasController: NSObject {
     /// `travel`: which way the scroll moved the view's contents. The snap may carry on that way,
     /// but back the way you came only a tidying 40pt (two gaps), and across it no more than that
     /// either: further, and a window you were scrolling away from pulled you back to it every time
-    /// you lifted your fingers.
-    private func snappedCamera(going travel: CGVector? = nil) -> Camera {
+    /// you lifted your fingers. `wheel`: after a mouse wheel's scroll, only on your way and no more
+    /// than 40pt: a notch moves the view 12pt, and the snap after each one put it straight back
+    /// (or leapt to the next window), so a wheel turned a notch at a time went nowhere.
+    private func snappedCamera(going travel: CGVector? = nil, wheel: Bool = false) -> Camera {
         let screen = CGRect(origin: .zero, size: viewSize)
         let frames = windows.map { camera.toView($0.canvasFrame) }
         let shown = frames.filter { !$0.intersection(screen).isEmpty }
@@ -4271,6 +4357,7 @@ final class CanvasController: NSObject {
             guard abs(d) <= reach else { return false }
             guard let went else { return true }
             let tidy: CGFloat = 40
+            if wheel { return d == 0 || (abs(d) <= tidy && d * went > 0) }
             return abs(d) <= tidy || (abs(went) >= 1 && d * went > 0)
         }
         let xs = ([0] + shown.flatMap { moves($0.minX, $0.maxX, screen: screen.width) }).filter {

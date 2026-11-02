@@ -112,6 +112,9 @@ func isOnScreen(_ id: CGWindowID) -> Bool {
     static let commandNote = Notification.Name("com.invignation.expanse.integration.do")
     static let stateNote = Notification.Name("com.invignation.expanse.integration.state")
 
+    /// Where a window torn off with `tearOff` is held, from its top-left: by a tab in its title bar.
+    nonisolated static let tearOffGrab = CGVector(dx: 60, dy: 12)
+
     let name: String
     private(set) var app: NSRunningApplication?
     private(set) var windows: [CGWindowID] = []

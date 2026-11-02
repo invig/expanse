@@ -255,12 +255,81 @@ import AppKit
             try t.expect(hypot(landed.minX - spot2.x, landed.minY - spot2.y) > 40, "the new window\(reused) shouldn't go to F2's old spot \(spot2)")
             try t.expect(placeBeside(landed, anchor), "the new window\(reused) should be along an edge of F1, 20pt away and lined up: it's at \(landed), F1 at \(anchor)")
         },
+        Case("PLACE-18", "A tab dragged out into a new window is left alone until you let go") { t in
+            try t.needsInput()
+            let spot = placeClearSpot(try await t.state())
+            let f = try await t.fixture("PLACE-18", windows: 1, size: CGSize(width: 520, height: 340))
+            let own = try await t.placeFirstWindow(of: f)
+            t.link("place", ["id": own, "x": Int(spot.x), "y": Int(spot.y), "commit": 1])
+            t.link("focus", ["id": own])
+            try await t.until("the fixture's window in view", timeout: 10) {
+                let s = try await t.settle()
+                return !s.active && s.window(own)?.parked == false
+            }
+            let s0 = try await t.settle()
+            guard let app = s0.window(own)?.app, let src = realFrame(own) else { throw Failure("the fixture's window isn't on screen") }
+            // The button down in its page (not its title bar, which would drag the window itself),
+            // then a tab out of it: a new window under the pointer that the app moves with it.
+            let press = CGPoint(x: src.minX + 100, y: src.minY + 100)
+            placePost(.mouseMoved, press)
+            try await t.pause(0.05)
+            let mark = t.log.mark()
+            placePost(.leftMouseDown, press)
+            try await t.pause(0.1)
+            var torn: CGWindowID?
+            do {
+                let known = Set(f.windows)
+                try await f.send("tearoff")
+                torn = f.windows.first { !known.contains($0) }
+                guard let torn else { throw Failure("the fixture didn't tear a window off") }
+                // Dragged 300pt right and 150 down over 2.5s, longer than a scan takes to come (0.15s).
+                let grab = Fixture.tearOffGrab
+                var worst: CGFloat = 0
+                let steps = 150
+                for i in 1...steps {
+                    let p = CGPoint(x: press.x + 300 * CGFloat(i) / CGFloat(steps), y: press.y + 150 * CGFloat(i) / CGFloat(steps))
+                    placePost(.leftMouseDragged, p)
+                    try await t.pause(0.016)
+                    if i % 15 == 0, let r = realFrame(torn) {
+                        worst = max(worst, hypot(r.minX + grab.dx - p.x, r.minY + grab.dy - p.y))
+                    }
+                }
+                let taken = t.log.lines(since: mark).first { $0.hasPrefix("tracking ") && $0.contains("[\(torn)]") }
+                try t.expect(taken == nil, "Expanse took the new window on while the button was held: “\(taken ?? "")”")
+                try t.expect(worst <= 24, "the new window should stay under the pointer while it's dragged; it was \(Int(worst))pt away")
+            } catch {
+                placePost(.leftMouseUp, press)
+                throw error
+            }
+            let end = CGPoint(x: press.x + 300, y: press.y + 150)
+            placePost(.leftMouseUp, end)
+            guard let torn else { return }
+            // Let go: beside the window it came from, as any new window of its app.
+            let placed = try await t.placePlaced(app, since: mark)
+            try t.expect(placed.anchor == own, "the new window should go beside the window it came from [\(own)], not [\(placed.anchor.map { "\($0)" } ?? "none")]: \(placed.line)")
+            try await t.until("the new window on the canvas", timeout: 8) { try await t.state().window(torn) != nil }
+            let s1 = try await t.settle()
+            let r = CGRect(origin: placed.spot, size: try s1.placeFrame(torn).size)
+            try t.expect(placeBeside(r, try s1.placeFrame(own)), "the new window should be along an edge of its own, 20pt away and lined up: it's at \(r)")
+            try await t.until("the real window at its spot", timeout: 8) {
+                let s = try await t.settle()
+                guard let w = s.window(torn), !w.parked, let real = realFrame(torn) else { return false }
+                return hypot(real.minX - s.screenPoint(w.canvas.origin).x, real.minY - s.screenPoint(w.canvas.origin).y) < 3
+            }
+        },
     ]
 }
 
 // MARK: Helpers
 
 /// A spot on the canvas clear of every window on it: right of and above them all.
+/// A mouse event at `p` (global), with no modifiers (left unset, a key held elsewhere comes along).
+private func placePost(_ type: CGEventType, _ p: CGPoint) {
+    let e = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: p, mouseButton: .left)
+    e?.flags = []
+    e?.post(tap: .cghidEventTap)
+}
+
 private func placeClearSpot(_ s: ExpanseState) -> CGPoint {
     let all = s.windows.map(\.canvas).reduce(CGRect.null) { $0.union($1) }
     guard !all.isNull else { return .zero }

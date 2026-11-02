@@ -45,11 +45,14 @@ extension NAVTests {
             c.isActive = false
             WindowCapture.replaydStuck = stuck
         }
-        c.camera = Camera(origin: CGPoint(x: 100, y: 0), scale: 1)
+        // B cut off at the right, 40pt from lining up past it (see nav51).
+        c.camera = Camera(origin: CGPoint(x: -112, y: 0), scale: 1)
         // One tick of the wheel, sideways: no phases, so only a pause can say it's over.
         c.view.scrollWheel(with: try #require(Self.scroll(0, dx: -1, precise: false)))
-        let snapped = c.snappedCamera(going: c.scrollTravel)
-        try #require(snapped != c.camera)
+        #expect(c.camera.origin.x == -100)
+        // On the way it went, 28pt on: B whole, its right edge 20pt in.
+        let snapped = c.snappedCamera(going: c.scrollTravel, wheel: true)
+        #expect(snapped == Camera(origin: CGPoint(x: -72, y: 0), scale: 1))
         #expect(c.animation == nil) // not straight away
         #expect(c.view.scrollEnd != nil)
         try await Task.sleep(for: .milliseconds(700))
@@ -78,6 +81,37 @@ extension NAVTests {
             c.scrollEnded()
             #expect((c.animation?.to.origin.x ?? c.camera.origin.x) >= 60)
             #expect(c.scrollTravel == .zero)
+        }
+    }
+
+    @Test("NAV-63 A mouse wheel turned a notch at a time isn't pulled back")
+    func nav63() async throws {
+        let c = TestCanvas.make(windows: Self.snapRow())
+        // A notch to the right of where B's right edge lines up 20pt in (-72, see nav51): 12pt on,
+        // B cut off. After a trackpad scroll the snap tidies that back; after a wheel's, it stays,
+        // with nothing on its way within 40pt.
+        c.camera = Camera(origin: CGPoint(x: -60, y: 0), scale: 1)
+        let notch = CGVector(dx: -12, dy: 0)
+        #expect(c.snappedCamera(going: notch) == Camera(origin: CGPoint(x: -72, y: 0), scale: 1))
+        #expect(c.snappedCamera(going: notch, wheel: true) == c.camera)
+        // Nor does it leap on to the next window, the nearest edge its way over 500pt off.
+        c.camera = Camera(origin: CGPoint(x: 112, y: 0), scale: 1)
+        #expect(c.snappedCamera(going: notch, wheel: true) == c.camera)
+        // Through the view: notches a pause apart each move it on.
+        let stuck = WindowCapture.replaydStuck
+        WindowCapture.replaydStuck = true // no pictures asked for
+        c.isActive = true
+        defer {
+            c.cancelAnimation()
+            c.isActive = false
+            WindowCapture.replaydStuck = stuck
+        }
+        c.camera = Camera(origin: CGPoint(x: -72, y: 0), scale: 1)
+        for n in 1...3 {
+            c.view.scrollWheel(with: try #require(Self.scroll(0, dx: -1, precise: false)))
+            try await Task.sleep(for: .milliseconds(450))
+            let x = c.animation?.to.origin.x ?? c.camera.origin.x
+            #expect(x >= -72 + 12 * CGFloat(n), "notch \(n): back to \(x)")
         }
     }
 

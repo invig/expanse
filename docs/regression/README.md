@@ -1,6 +1,6 @@
 # Regression tests
 
-Every feature Expanse has, and every bug it has fixed, as a test case: 445 cases, from all 174
+Every feature Expanse has, and every bug it has fixed, as a test case: 465 cases, from all 174
 commits from 0.1.0 to 0.1.34 (26–30 Oct 2026) and the changes since. A bug fix's case says what
 went wrong **before** the fix and what must happen **now**, so a later change can't quietly bring
 it back. Every case has a test: unit tests for the logic, and end-to-end cases that drive the real
@@ -8,14 +8,14 @@ app (see Running them).
 
 | Area | What it covers | Cases | Bug fixes |
 |---|---|---|---|
-| [NAV](navigation.md) | Canvas, zoom and navigation | 61 | 13 |
+| [NAV](navigation.md) | Canvas, zoom and navigation | 63 | 15 |
 | [EDIT](arranging.md) | Arranging windows on the canvas, and screens you build | 34 | 3 |
-| [PLACE](new-windows.md) | New windows and where they go | 17 | 11 |
-| [TRACK](tracking.md) | Finding and following windows | 42 | 28 |
+| [PLACE](new-windows.md) | New windows and where they go | 18 | 12 |
+| [TRACK](tracking.md) | Finding and following windows | 43 | 29 |
 | [SIZE](sizes.md) | Window sizes | 19 | 9 |
 | [PERSIST](layouts-and-restarts.md) | Layouts, restarts and snapshots | 42 | 21 |
-| [DISPLAY](displays-lock-sleep.md) | Displays, lock and sleep | 28 | 21 |
-| [SPACES](spaces-and-full-screen.md) | Full-screen apps and Spaces | 24 | 14 |
+| [DISPLAY](displays-lock-sleep.md) | Displays, lock and sleep | 29 | 22 |
+| [SPACES](spaces-and-full-screen.md) | Full-screen apps and Spaces | 25 | 15 |
 | [CAPTURE](capture-and-performance.md) | Capture and performance | 38 | 27 |
 | [UI](panels-and-look.md) | Menu bar panel, minimap, Settings and the backdrop | 40 | 8 |
 | [SETUP](first-launch.md) | First launch and permissions | 27 | 7 |
@@ -23,7 +23,7 @@ app (see Running them).
 | [UPDATE](updates-and-install.md) | Updates, release builds and install | 19 | 2 |
 | [URL](url-scripting.md) | expanse:// scripting | 27 | 0 |
 | [SEC](security.md) | Security hardening | 30 | 25 |
-| | **Total** | **459** | **189** |
+| | **Total** | **465** | **195** |
 
 [Coverage](coverage.md) lists every commit with the cases that test it, or why none does (docs
 only, a reverted experiment, an empty merge, a release commit).
@@ -135,8 +135,14 @@ change), NAV-53 (the snap and a nearly screen-wide window) and SEC-01 (a pan lin
 number). SEC-22's wording was wrong, not the code. Mark a new one with `withKnownIssue` in a unit
 test, or `known:` on an end-to-end case, until it's fixed.
 
-None at the moment. SPACES-07, which failed in each complete run on 1 Nov, did so only straight
-after DISPLAY-18 (see Questions): the SPACES cases now wait for Expanse to settle first.
+None at the moment. SPACES-07's lost clicks (1–2 Nov: a click on a Spaces tile at 100% that
+reached nothing) were a bug in Expanse, now fixed and checked by SPACES-25. Back on the desktop
+from a full-screen app's Space, with another app in front, macOS can stop drawing the overlay at
+100% while still listing it on screen, so the minimap and Spaces panel vanish and their clicks
+fall through to the desktop picture. A glide shows the overlay again, which hid it most of the
+time; there's no glide while Expanse settles after a display change (it doesn't follow focus
+then), which is why it came straight after DISPLAY-18. An event tap on where the window server
+sent each click, and a screenshot, found it.
 
 NAV-49, which first ran in the VM on 31 Oct, looked like one (the keyboard in
 the wrong window after a click) until its log showed the click landing on another window of the
@@ -174,6 +180,11 @@ What the first runs in the VM taught (Tests/Integration):
   the window server first shows it.
 - The pointer is a window of the window server's own in its window list: leave it out when
   asking what's in front at a point (a click leaves it there).
+- The window list says what's on screen, not what's drawn: a window macOS has stopped drawing
+  is still listed (SPACES-25). For a click that goes nowhere, a listen-only event tap at
+  `.cgAnnotatedSessionEventTap` reads the window and pid the window server sent it to
+  (`.mouseEventWindowUnderMousePointer`, `.eventTargetUnixProcessID`), and a screenshot over
+  ssh (`sudo launchctl asuser 501 sudo -u admin screencapture`) shows what was drawn.
 - Zoomed out, a window's picture can lie under Expanse's panels in the bottom-right corner, which
   take the click: click it at `s.clickPoint(on: w.canvas)`, not its middle.
 - After a relaunch (or a fit), the whole layout can come back shifted on the canvas: earlier
@@ -247,20 +258,6 @@ yet:
   33 new windows. The logs don't say why; if one comes back, its saved log (`--keep-logs`) is
   where to start. Expanse now logs why it quits (`quitting: Quit in the menu bar panel`, `SIGTERM`, or `asked
   by <app> (pid …)` for a quit Apple event), so a repeat of UI-11's says who asked.
-- **Clicks on the backdrop at 100% while a display change settles** (VM, 1 Nov): for the 20s
-  after a display change (`display change settled` ends it; `settling=true` in `expanse://dump`),
-  a click on the Spaces bar's tile at 100% doesn't reach Expanse at all: not its overlay window,
-  not the desktop under it, though the window server lists the overlay in front there, opaque,
-  where it should be. Reproduced every time with `expanse://screen?w=1120&h=700`, then
-  `expanse://screen`, then SPACES-07; 25s later it works. A redraw of the overlay at its new size
-  didn't help, and nothing in Expanse's own click handling looks at the settling. On a Mac this
-  would be the 20s after plugging a display in or out. The SPACES cases wait for it to end;
-  since then DISPLAY then SPACES has passed 24 times in 25 (the last 23 in a row, by 2 Nov), two
-  complete runs included. The one failure came with nothing
-  settling, so the settling isn't the whole story. SPACES-07 now clicks a second time when the
-  first reaches nothing and fails saying whether that one got through: the next failure should
-  tell a click that was swallowed from a backdrop that takes no clicks. Ruled out: a click swallowed
-  just after Expanse's instant Space switch (clicking with no pause after it passed 8 of 8).
 - **Pause and Quit hold Expanse up while apps are slow:** `restoreOriginals` moves every window
   back with Accessibility calls on the main thread, one after another, so with a busy app (or
   in a VM) Expanse answers nothing for seconds (URL-01 saw more than 8s). `commitAsync` already

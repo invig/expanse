@@ -665,4 +665,31 @@ import ScreenCaptureKit
             #expect(Self.window(c, 1712)?.canvasFrame.origin == CGPoint(x: 6000, y: 200))
         }
     }
+
+    // MARK: PLACE-18 (manual)
+
+    @Test("PLACE-18 Scans wait while the mouse button is held, and run once it's let go (logic)")
+    func place18() async throws {
+        let c = Self.canvas()
+        defer { Self.finish(c) }
+        CanvasController.screenCaptureAllowed = true
+        defer { CanvasController.screenCaptureAllowed = nil }
+        // A tab being dragged out of a browser: a scan now would take its new window on, and move it.
+        var held = true
+        c.buttonHeld = { held }
+        c.sync()
+        #expect(c.syncRetryScheduled)
+        #expect(!c.syncing)
+        // Still held when the retry comes due (0.4s): it waits again.
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(c.syncRetryScheduled)
+        #expect(!c.syncing)
+        // Let go: the next retry runs. A scan is marked as running, so it only notes that another
+        // is wanted (nothing is scanned here); the new window is then placed as in PLACE-03.
+        held = false
+        c.syncing = true
+        try await Task.sleep(for: .milliseconds(600))
+        #expect(!c.syncRetryScheduled)
+        #expect(c.syncAgain)
+    }
 }

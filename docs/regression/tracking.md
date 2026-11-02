@@ -523,3 +523,15 @@
 - **Expected:** Step 1: taken on within about 2s (measured under 1s). Step 2: after its first minute it's asked about every 10s, so it's taken on within 10s.
 - **Check in log:** "not on the canvas: <App>[<id>]: its app doesn't list it as one of its windows (Accessibility) yet; asked again every 2s for a minute, then every 10s".
 - **Automate:** unit: WindowKind.askAgainAfter (2s within 60s of unlistedSince, 10s after).
+
+## TRACK-43 The move that lands just after you let go of a just-opened window isn't put back
+- **Type:** Bug fix
+- **Area:** TRACK
+- **Commits:** unreleased (2 Nov)
+- **Before:** A move of a window in its first 5s with the button up is taken for its app placing it late, and put back (TRACK-32). The last move of your own drag of such a window can land a moment after you let go: it was put back, and the window jumped back to where the drag was last seen.
+- **Setup:** At 100%, an app that opens windows.
+- **Steps:**
+  1. Open a new window and drag it by its title bar within 5s; let go mid-flick.
+- **Expected:** It stays where you let go of it.
+- **Check in log:** no `moved to … by its app right after being placed; putting it back` for it.
+- **Automate:** unit: `realWindowChanged` with `userDragging` false within 0.5s of a drag (`lastDraggedAt`).

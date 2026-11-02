@@ -809,4 +809,46 @@ struct DISPLAYTests {
         c.suspendTracking = false
         #expect(!c.settling)
     }
+
+    // MARK: DISPLAY-29
+
+    @Test("DISPLAY-29 A scan with no display drops no windows, and one missing every window waits 3s (logic)")
+    func display29() {
+        let ws = (0..<4).map { Self.win(CGWindowID(2901 + $0), CGFloat($0) * 720, 0, 700, 500) }
+        let c = Self.bigCanvas(ws)
+        defer {
+            c.allGoneCheck?.cancel()
+            Self.finish(c)
+        }
+        let none = CanvasController.AXSnapshot()
+        // A dock unplugged with the lid shut: no display, and the window server lists no windows.
+        c.displayAvailable = { false }
+        c.apply([], ax: none)
+        #expect(c.windows.count == 4)
+        // A display again, still none listed: every window at once, so kept for now...
+        c.displayAvailable = { true }
+        c.apply([], ax: none)
+        #expect(c.windows.count == 4)
+        // ...back in the next scan: nothing was lost, and the wait starts over.
+        c.apply(ws.map(\.scWindow), ax: none)
+        #expect(c.windows.count == 4 && c.allGoneAt == nil)
+        // Some of them gone (closed): dropped at once.
+        c.apply(ws.prefix(2).map(\.scWindow), ax: none)
+        #expect(c.windows.map(\.id) == [2901, 2902])
+        // Under three: the last ones closing go at once too.
+        c.apply([], ax: none)
+        #expect(c.windows.isEmpty)
+        // Every window gone and still gone 3s later (you closed them all): dropped then.
+        let again = (0..<3).map { Self.win(CGWindowID(2911 + $0), CGFloat($0) * 720, 0, 700, 500) }
+        let d = Self.bigCanvas(again)
+        defer {
+            d.allGoneCheck?.cancel()
+            Self.finish(d)
+        }
+        d.apply([], ax: none)
+        #expect(d.windows.count == 3)
+        d.allGoneAt = CACurrentMediaTime() - CanvasController.allGoneWait - 0.1
+        d.apply([], ax: none)
+        #expect(d.windows.isEmpty)
+    }
 }

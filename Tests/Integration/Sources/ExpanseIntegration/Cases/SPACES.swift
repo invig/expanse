@@ -45,23 +45,43 @@ import AppKit
                 if let other = spacesCovering(t, p) { throw Skip("\(other) covers the Spaces panel at 100% (hide the Dock automatically to run this)") }
                 let mark = t.log.mark()
                 Input.click(at: p)
-                // DIAGNOSTIC: a first click that reaches nothing (seen after the DISPLAY cases), and
-                // whether a second one gets there.
-                var second = "not needed"
-                if await t.log.wait(since: mark, timeout: 2, { $0.hasPrefix("click at 100%") || $0.hasPrefix("switching from") }) == nil {
-                    Input.click(at: p)
-                    second = await t.log.wait(since: mark, timeout: 2, { $0.hasPrefix("click at 100%") || $0.hasPrefix("switching from") }) == nil
-                        ? "lost too" : "reached Expanse"
+                try await spacesArrived(t, sc, typing: field, since: mark)
+            }
+        },
+        Case("SPACES-25", "The Spaces panel at 100% is back after a full-screen app's Space") { t in
+            try t.needsInput()
+            try await spacesScene(t, "Spaces25", showing: false) { sc in
+                let tile = try await spacesTile(t, sc.fsSpace)
+                if let other = spacesCovering(t, tile) { throw Skip("\(other) covers the Spaces panel at 100% (hide the Dock automatically to run this)") }
+                // Another app in front on the desktop, clicked there: one of the fixture's windows (in
+                // view first, if the scene left the view elsewhere).
+                let panels = try await t.state().spacesTiles.values.reduce(CGRect.null) { $0.union($1) }.insetBy(dx: -40, dy: -40)
+                @MainActor func spot() -> CGPoint? {
+                    sc.ids.compactMap(realFrame).map { CGPoint(x: $0.midX, y: $0.minY + 12) }.first { t.screen.contains($0) && !panels.contains($0) }
                 }
-                do {
-                    try await spacesArrived(t, sc, typing: field, since: mark)
-                    if second != "not needed" { throw Failure("the first click on the tile reached nothing; a second \(second)") }
-                } catch {
-                    // Twice in complete runs the click switched nothing and logged nothing: say what was there.
-                    let s = try? await t.state()
-                    throw Failure("\(error) (clicked \(NSStringFromPoint(p)); a second click: \(second); in front there now: \(spacesCovering(t, p) ?? "Expanse"); "
-                                  + "the panel's tiles: \(s.map { $0.spacesTiles.mapValues(NSStringFromRect).description } ?? "?"); "
-                                  + "Expanse's windows: \(spacesExpanseWindows(t)); at the point, Accessibility finds \(spacesAXAt(p)))")
+                if spot() == nil {
+                    t.link("focus", ["id": sc.ids[0]])
+                    try await t.until("one of \(sc.f.name)'s windows in view", timeout: 6) { spot() != nil }
+                    try await t.settle()
+                }
+                guard let pid = sc.f.pid, let at = spot() else { throw Failure("none of \(sc.f.name)'s windows is on screen to click") }
+                Input.click(at: at)
+                try await t.until("\(sc.f.name) in front", timeout: 4) { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid }
+                var mark = t.log.mark()
+                Input.click(at: tile)
+                try await t.spacesLine("switching from Space", "(\(sc.fsSpace))", since: mark, timeout: 5)
+                try await t.until("on the full-screen window's Space", timeout: 5) { SpacesNow().current == sc.fsSpace }
+                try await t.pause(1)
+                try await spacesGo(t, to: sc.desktop, "back on the canvas's desktop")
+                // Drawn again, and taking its clicks: one between the tiles reaches Expanse, not the desktop.
+                let tiles = try await t.state().spacesTiles.values.sorted { $0.minX < $1.minX }
+                guard tiles.count >= 2 else { throw Failure("the Spaces panel shows \(tiles.count) tiles back on the desktop") }
+                let gap = CGPoint(x: (tiles[0].maxX + tiles[1].minX) / 2, y: tiles[0].midY)
+                mark = t.log.mark()
+                Input.click(at: gap)
+                guard await t.log.wait(since: mark, timeout: 2, { $0.hasPrefix("click at 100%") }) != nil else {
+                    throw Failure("a click on the Spaces panel, back on the desktop, didn't reach Expanse "
+                                  + "(at the point, Accessibility finds \(spacesAXAt(gap)); Expanse's windows: \(spacesExpanseWindows(t)))")
                 }
             }
         },
@@ -416,9 +436,6 @@ private func spacesOf(_ id: CGWindowID) -> [UInt64] {
     guard let desktop = start.current, start.currentSpace?.fullScreen == false else {
         throw Skip("needs to start on a desktop, not a full-screen app's Space")
     }
-    // Not straight after a display change (DISPLAY-18 runs just before these): while Expanse
-    // settles, a click on its Spaces bar at 100% doesn't reach it in the VM (README, Questions).
-    try await t.until("Expanse to settle after the last display change", timeout: 30) { try await !t.state().settling }
     let f = try await t.fixture(name, windows: 2)
     let ids = f.windows
     try await t.until("Expanse to take on \(name)'s windows", timeout: 10) {
