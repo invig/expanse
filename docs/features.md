@@ -41,16 +41,13 @@ in Copy Logs for a Bug Report).
    centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
    is on (Accessibility › Display), which Expanse doesn't follow yet.
 6. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 503 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 229
+   has a test. 532 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 234
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
-   - End-to-end, 1 Nov: in the last full run 128 of the 144 automatic cases passed and 12 skipped
-     (a Developer ID release, a longer `--timeout`, a Dock that hides, or something covering the
-     screen). Since then the rest are fixed and pass on repeat runs: TRACK-21, UI-23/24 (macOS's
-     screen-recording prompt had been left up in the VM: it needs an Allow by hand), UI-34, NAV-49
-     (the case clicked under another of its windows) and SPACES-23 (fixed in Expanse). Timing
-     limits are noted rather than failed in a VM, and the runner keeps windows from earlier cases,
-     and notices over the screen, out of the way.
+   - End-to-end, 2 Nov: a complete run of 0.1.36 in the VM passed all 145 automatic cases, in one
+     go (`--timeout 800`). Four skip by design: three need a Developer ID release, and NAV-50's
+     Dock step needs a Dock that stays shown. macOS's screen-recording prompt still comes back now
+     and then (it needs an Allow by hand); finish a run it interrupted with `--only`.
    - The 54 guided and 31 look cases haven't been run yet.
 
 7. **Groups of windows as places** (asked 31 Oct). Released in 0.1.35:

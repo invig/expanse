@@ -176,6 +176,9 @@ What the first runs in the VM taught (Tests/Integration):
   asking what's in front at a point (a click leaves it there).
 - Zoomed out, a window's picture can lie under Expanse's panels in the bottom-right corner, which
   take the click: click it at `s.clickPoint(on: w.canvas)`, not its middle.
+- After a relaunch (or a fit), the whole layout can come back shifted on the canvas: earlier
+  display changes leave windows shown off their home spots, and a relaunch goes by home spots
+  (DISPLAY-17 came back 120pt up). Check sizes and where windows are relative to each other.
 - replayd ignores SIGTERM: `killall -KILL replayd` is a restart (launchd starts a new one).
 - Two windows a gap apart that fit the screen together are a screen group (NAV-55): a hop
   between them only moves focus, and going to one frames both. Put windows more than 40pt apart
@@ -252,10 +255,12 @@ yet:
   `expanse://screen`, then SPACES-07; 25s later it works. A redraw of the overlay at its new size
   didn't help, and nothing in Expanse's own click handling looks at the settling. On a Mac this
   would be the 20s after plugging a display in or out. The SPACES cases wait for it to end;
-  since then DISPLAY then SPACES has passed 6 times in 7. The one failure came with nothing
+  since then DISPLAY then SPACES has passed 24 times in 25 (the last 23 in a row, by 2 Nov), two
+  complete runs included. The one failure came with nothing
   settling, so the settling isn't the whole story. SPACES-07 now clicks a second time when the
   first reaches nothing and fails saying whether that one got through: the next failure should
-  tell a click that was swallowed from a backdrop that takes no clicks.
+  tell a click that was swallowed from a backdrop that takes no clicks. Ruled out: a click swallowed
+  just after Expanse's instant Space switch (clicking with no pause after it passed 8 of 8).
 - **Pause and Quit hold Expanse up while apps are slow:** `restoreOriginals` moves every window
   back with Accessibility calls on the main thread, one after another, so with a busy app (or
   in a VM) Expanse answers nothing for seconds (URL-01 saw more than 8s). `commitAsync` already

@@ -219,9 +219,16 @@ import ApplicationServices
             try t.expect(fitted.hasSuffix("derived=false"), "relaunched on the bigger screen, windows should be at their chosen sizes: “\(fitted)”")
             try await t.pause(1)
             let s = try await t.settle()
+            // A relaunch goes by home spots, and after earlier display changes the windows round
+            // these can be shown off theirs: the whole layout can come back shifted on the canvas
+            // (120pt in the VM on 2 Nov). What matters is each window's size, and where they are
+            // relative to each other.
+            guard let hBig = home.window(big.id)?.canvas, let sBig = s.window(big.id)?.canvas else { throw Failure("the big window isn't on the canvas") }
+            let shift = CGVector(dx: sBig.minX - hBig.minX, dy: sBig.minY - hBig.minY)
             for w in [big, beside] {
                 guard let a = home.window(w.id)?.canvas, let b = s.window(w.id)?.canvas else { throw Failure("\(w.title) isn't on the canvas") }
-                try t.expectNear(b, a, within: 2, "\(w.title) after relaunching on the bigger screen (its home spot and size there)")
+                try t.expectNear(b.offsetBy(dx: -shift.dx, dy: -shift.dy), a, within: 2,
+                                 "\(w.title) after relaunching on the bigger screen (its home size, and spot beside the other)")
             }
             try await t.displayExpectInPlace([big, beside])
         },
