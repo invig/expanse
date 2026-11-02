@@ -4,19 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- Back on your desktop from a full-screen app's Space, the minimap and Spaces panel stay at
-  100%. They could vanish until you next zoomed out, and clicks on them went to the desktop.
-- **A tab dragged out of Chrome or Brave is left alone while you hold the button.** Expanse
-  used to place the new window mid-drag and fight the browser for it; now it waits until you let
-  go, then puts it beside the window it came from (PLACE-18, TRACK-43).
-- **Scrolling and pinching on the bare desktop at 100% work again.** An invisible window over the
-  desktop (Notification Center's, on macOS 27) counted as a window under the pointer, and after
-  you left the canvas at an empty spot the gesture went to Expanse itself, which only watched
-  other apps'. Either way nothing opened the canvas. A mouse wheel's slow notches no longer snap
-  back either (NAV-62, NAV-63).
-- **Unplugging a display with the lid shut keeps your layout.** With no display, Expanse no
-  longer drops windows it can't see; when every window goes missing at once it waits 3s before
-  taking them as closed. Before, they all came back as new windows in new spots (DISPLAY-29).
+Nothing yet.
 
 ## Bugs
 
@@ -102,6 +90,10 @@ Not decided yet.
 
 ## Done
 
+- 0.1.37: A tab dragged out of Chrome or Brave is left alone while you hold the button, then
+  goes beside its window; scrolling and pinching on the bare desktop at 100% open the canvas
+  again, and a mouse wheel's slow notches no longer snap back; unplugging a display with the lid
+  shut keeps your layout; the minimap and Spaces panel stay put after a full-screen app's Space.
 - 0.1.36: A window grown back to its size after a smaller screen (unplugging a display, say)
   keeps that size, instead of sometimes slipping back to the smaller one; a notice that fades
   while the screen is locked goes away.
