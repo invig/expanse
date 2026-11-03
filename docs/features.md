@@ -4,21 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- **Fill grows a window from its top-left on the canvas** (asked 3 Nov): the green button's Fill
-  (or Window › Fill, fn ⌃ F) still fills the screen, but zoomed out the window grew right and
-  down from where it was, so the windows above and to its left aren't covered; the view moves
-  instead. Return to Previous Size puts everything back as it was (SIZE-20).
-- **The layout is saved while things keep changing**: each change put the save off another
-  second, so while window scans kept coming (an app with a window not takeable yet, as TextEdit
-  after a Fill) nothing was saved, and a size you'd just chosen could be lost (PERSIST-43).
-- **Restore all windows while zoomed out sticks**: it gave the windows no new spots, so leaving
-  the canvas parked them straight back out of view (TRACK-44).
-- **`expanse://fit` and `zoom` do nothing at 100%**, as `pan` doesn't: they moved the view out
-  from under your windows, which moved them the next time you left the canvas (URL-28).
-- **No 10ms loop while replayd is stuck**: zoomed out with more than ten windows, capture asked
-  again every 10ms for as long as the stall lasted (CAPTURE-39).
-- **The Expanse tile is the desktop's** when a canvas window has gone full screen: it could point
-  at that window's Space, and so could leaving the canvas over a full-screen app (SPACES-26).
+Nothing yet.
 
 ## Bugs
 
@@ -106,6 +92,12 @@ Not decided yet.
 
 ## Done
 
+- 0.1.38: Fill (the green button, Window › Fill, fn ⌃ F) grows a window right and down from
+  its top-left on the canvas, so the windows above and to its left aren't covered, and Return to
+  Previous Size puts everything back; the layout is saved even while windows keep changing, so
+  a size you've just chosen isn't lost; Restore all windows works zoomed out; the Expanse tile
+  stays on your desktop when a window is full screen; less CPU while macOS's capture service is
+  stuck; `expanse://fit` and `zoom` do nothing at 100%.
 - 0.1.37: A tab dragged out of Chrome or Brave is left alone while you hold the button, then
   goes beside its window; scrolling and pinching on the bare desktop at 100% open the canvas
   again, and a mouse wheel's slow notches no longer snap back; unplugging a display with the lid
