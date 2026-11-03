@@ -600,6 +600,42 @@ import ObjectiveC
         }
     }
 
+    @Test("CAPTURE-40 Quitting waits for pictures still with replayd, at most a second (logic)")
+    func capture40() async throws {
+        try await withCapture(stuck: false) { lab in
+            let a = window(1, CGRect(x: 100, y: 100, width: 600, height: 400))
+            let quitReason = AppDelegate.quitReason
+            defer { WindowCapture.closing = false; AppDelegate.quitReason = quitReason }
+            Env.isolate()
+            let app = AppDelegate()
+            var replies: [Bool] = []
+            app.replyToTerminate = { replies.append($0) }
+            lab.shots.holding = true   // replayd answers when the test says
+            func snapshot() { a.capture.snapshot(window: a.scWindow, pixelSize: CGSize(width: 300, height: 200)) { _ in } }
+            // Nothing with replayd: it quits at once.
+            #expect(WindowCapture.unanswered == 0)
+            #expect(app.applicationShouldTerminate(NSApplication.shared) == .terminateNow)
+            // A picture asked for: quitting waits for its answer, and asks for nothing new meanwhile.
+            snapshot()
+            #expect(WindowCapture.unanswered == 1)
+            #expect(app.applicationShouldTerminate(NSApplication.shared) == .terminateLater)
+            #expect(!WindowCapture.canAsk)
+            try await Task.sleep(for: .milliseconds(150))
+            #expect(replies.isEmpty)
+            lab.shots.answerAll()
+            try await Task.sleep(for: .milliseconds(150))
+            #expect(WindowCapture.unanswered == 0)
+            #expect(replies == [true])
+            // No answer at all: it goes anyway, a second later.
+            WindowCapture.closing = false
+            snapshot()
+            #expect(app.applicationShouldTerminate(NSApplication.shared) == .terminateLater)
+            try await Task.sleep(for: .milliseconds(1300))
+            #expect(replies == [true, true])
+            lab.shots.answerAll()
+        }
+    }
+
     @Test("CAPTURE-04 At 100%, windows on screen carry no purple capture badge (logic)")
     func capture04() async throws {
         try await withCapture { lab in

@@ -624,6 +624,7 @@ final class CanvasController: NSObject {
     func refreshWallpaper() {
         guard !isPaused else { return }
         lastWallpaperRefresh = CACurrentMediaTime()
+        guard !WindowCapture.closing else { return }
         guard Wallpaper.enabled, CGPreflightScreenCaptureAccess() else { view.setWallpaper(nil); return }
         Wallpaper.capture(screen: screen) { [weak self] image in
             guard Wallpaper.enabled else { return }
@@ -2515,15 +2516,25 @@ final class CanvasController: NSObject {
     /// The lowest window level of another app's dialog on screen: a window above app windows and
     /// floating panels (modal-panel level and up) but under the canvas, other than the Dock's.
     static func lowestDialogLevel() -> Int? {
-        let modal = Int(CGWindowLevelForKey(.modalPanelWindow)), canvas = OverlayWindow.canvasLevel.rawValue
         let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return lowestDialogLevel(in: info, screen: CGDisplayBounds(CGMainDisplayID()).size, ownPID: getpid()) {
+            NSRunningApplication(processIdentifier: $0)?.bundleIdentifier == "com.apple.dock"
+        }
+    }
+
+    /// The same, from a window list. Not a window over the whole screen: that's no dialog but an
+    /// overlay, like the invisible one Notification Center keeps up after a notification (macOS
+    /// 27), which every zoom-out took for one and opened the canvas under (UI-41).
+    static func lowestDialogLevel(in info: [[String: Any]], screen: CGSize, ownPID: pid_t, isDock: (pid_t) -> Bool) -> Int? {
+        let modal = Int(CGWindowLevelForKey(.modalPanelWindow)), canvas = OverlayWindow.canvasLevel.rawValue
         return info.compactMap { w -> Int? in
             guard let layer = w[kCGWindowLayer as String] as? Int, layer >= modal, layer < canvas,
-                  let pid = w[kCGWindowOwnerPID as String] as? pid_t, pid != getpid(),
+                  let pid = w[kCGWindowOwnerPID as String] as? pid_t, pid != ownPID,
                   (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
                   let bounds = w[kCGWindowBounds as String] as? [String: CGFloat],
                   bounds["Width"] ?? 0 >= 100, bounds["Height"] ?? 0 >= 50,
-                  NSRunningApplication(processIdentifier: pid)?.bundleIdentifier != "com.apple.dock"
+                  bounds["Width"] ?? 0 < screen.width || bounds["Height"] ?? 0 < screen.height,
+                  !isDock(pid)
             else { return nil }
             return layer
         }.min()

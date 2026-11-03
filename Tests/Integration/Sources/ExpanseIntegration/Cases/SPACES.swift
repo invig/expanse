@@ -573,16 +573,16 @@ private func spacesAt(_ dx: CGFloat, _ dy: CGFloat) -> CGPoint { CGPoint(x: -700
 /// panels on the desktop at 100%), else whose window it is. The pointer is the window server's own window, and
 /// doesn't count: a click on a tile (SPACES-06) leaves it there.
 @MainActor private func spacesCovering(_ t: Ctx, _ p: CGPoint) -> String? {
-    let expanse = t.expanse?.processIdentifier
-    let pointer = Int(CGWindowLevelForKey(.cursorWindow))
-    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-    for w in info {
-        guard let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b), r.contains(p),
-              (w[kCGWindowAlpha as String] as? Double ?? 1) > 0, (w[kCGWindowLayer as String] as? Int ?? 0) < pointer else { continue }
-        if (w[kCGWindowOwnerPID as String] as? pid_t) == expanse { return nil }
-        return w[kCGWindowOwnerName as String] as? String ?? "a window"
+    // The window a click there reaches, as the window server works it out: not every window listed
+    // there. Notification Center keeps an invisible one over the whole screen after a notification
+    // (macOS 27) that lets every click through.
+    let h = NSScreen.screens.first?.frame.height ?? 0
+    let hit = NSWindow.windowNumber(at: NSPoint(x: p.x, y: h - p.y), belowWindowWithWindowNumber: 0)
+    guard hit > 0, let w = (CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(hit)) as? [[String: Any]])?.first else {
+        return "nothing of Expanse's"
     }
-    return "nothing of Expanse's"
+    if (w[kCGWindowOwnerPID as String] as? pid_t) == t.expanse?.processIdentifier { return nil }
+    return w[kCGWindowOwnerName as String] as? String ?? "a window"
 }
 
 /// Moves the view at 100% to an empty part of the canvas, which puts every window out of view: nothing then

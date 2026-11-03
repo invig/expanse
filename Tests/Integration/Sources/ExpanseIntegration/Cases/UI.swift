@@ -938,6 +938,7 @@ fileprivate extension Ctx {
     /// app windows and under the canvas, at least 100×50pt, not see-through, not the Dock's.
     func uiDialogsOnScreen() -> [String] {
         let modal = Int(CGWindowLevelForKey(.modalPanelWindow)), pid = uiPID
+        let screen = CGDisplayBounds(CGMainDisplayID()).size
         let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
         return info.compactMap { w in
             guard let layer = w[kCGWindowLayer as String] as? Int, layer >= modal, layer < uiCanvasLevel,
@@ -945,6 +946,8 @@ fileprivate extension Ctx {
                   (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
                   let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b),
                   r.width >= 100, r.height >= 50,
+                  // Not a window over the whole screen, as Expanse counts them (UI-41).
+                  r.width < screen.width || r.height < screen.height,
                   NSRunningApplication(processIdentifier: pid_t(owner))?.bundleIdentifier != "com.apple.dock" else { return nil }
             return w[kCGWindowOwnerName as String] as? String ?? "?"
         }

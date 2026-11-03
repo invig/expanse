@@ -32,7 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
             source.setEventHandler {
                 Self.quitReason = sig == SIGTERM ? "SIGTERM" : "SIGINT"
-                NSApp.terminate(nil)
+                // From the run loop, not this block on the main queue: a quit that waits (see
+                // applicationShouldTerminate) needs the main queue for its answers, and it's held
+                // for as long as this block runs, so Expanse never quit (PERSIST-05).
+                RunLoop.main.perform { NSApp.terminate(nil) }
             }
             source.resume()
             signalSources.append(source)
@@ -310,8 +313,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let app = pid.flatMap { NSRunningApplication(processIdentifier: $0)?.localizedName } ?? "unknown"
             Self.quitReason = "asked by \(app) (pid \(pid.map(String.init) ?? "?"))"
         }
-        return .terminateNow
+        // A picture or stream start still with replayd once Expanse is gone makes macOS ask you to
+        // allow Expanse again: it can't check a request whose app has quit. So nothing new is
+        // asked for, and those under way get a moment to be answered, at most a second (CAPTURE-40).
+        guard WindowCapture.unanswered > 0 else { return .terminateNow }
+        WindowCapture.closing = true
+        let deadline = CACurrentMediaTime() + 1
+        // A timer in the common modes: AppKit waits for the reply in its modal-panel mode, and a
+        // timer fires there whatever called terminate.
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
+            guard WindowCapture.unanswered == 0 || CACurrentMediaTime() >= deadline else { return }
+            timer.invalidate()
+            self?.replyToTerminate(true)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        return .terminateLater
     }
+
+    /// Lets a quit put off by applicationShouldTerminate go ahead. Tests stand in their own.
+    var replyToTerminate: (Bool) -> Void = { NSApp.reply(toApplicationShouldTerminate: $0) }
 
     func applicationWillTerminate(_ notification: Notification) {
         logger.notice("quitting: \(Self.quitReason ?? "unknown", privacy: .public)")

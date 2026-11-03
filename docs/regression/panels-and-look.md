@@ -483,3 +483,14 @@
 - **Expected:** Step 1: the real window stays parked; the backdrop draws what shows of it, under the minimap. Step 2: the window is put on screen. Step 3: the window is put on screen. A sliver is less than 200pt (or a third of the window) showing in either direction; only one that would overlap the minimap or a visible Spaces panel stays parked.
 - **Automate:** unit: CanvasController.goesOnScreen(_:in:panels:) (120pt over the panels → false; 300pt → true; 120pt elsewhere → true).
 - **Note:** Since 2f6c592 the backdrop's picture of a sliver is taken once, as it comes into view.
+
+## UI-41 An invisible window over the whole screen isn't taken for a dialog
+- **Type:** Bug fix
+- **Area:** UI
+- **Commits:** unreleased (3 Nov)
+- **Before:** After a notification, macOS 27 keeps an invisible Notification Center window over the whole screen, at a dialog's level. Expanse took it for a dialog (UI-23), so every zoom-out opened the canvas under it (`canvas level 23 -> 20 (under a dialog)` in the log), and the end-to-end UI-23 and UI-24 could never run (found 3 Nov in the VM).
+- **Setup:** At 100%. `osascript -e 'display notification "Expanse test"'`, then wait for the banner to go.
+- **Steps:**
+  1. Zoom out (⌥`).
+- **Expected:** No `canvas level … (under a dialog)` line; a real dialog still puts the canvas under it (UI-23).
+- **Automate:** unit: `lowestDialogLevel(in:screen:ownPID:isDock:)` leaves out a window the size of the screen and keeps a real one; end-to-end: UI-23 and UI-24 count dialogs the same way.

@@ -14,7 +14,13 @@ enum Wallpaper {
     }
 
     /// Calls back on the main thread.
-    static func capture(screen: NSScreen, completion: @escaping (CGImage?) -> Void) {
+    static func capture(screen: NSScreen, completion done: @escaping (CGImage?) -> Void) {
+        // A request to replayd, which quitting waits for (see WindowCapture.unanswered).
+        WindowCapture.requestSent()
+        let completion = { (image: CGImage?) in
+            WindowCapture.requestAnswered()
+            done(image)
+        }
         let size = screen.frame.size
         let scale = screen.backingScaleFactor
         SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, _ in

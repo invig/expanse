@@ -1,6 +1,6 @@
 # Regression tests
 
-Every feature Expanse has, and every bug it has fixed, as a test case: 471 cases, from all 174
+Every feature Expanse has, and every bug it has fixed, as a test case: 473 cases, from all 174
 commits from 0.1.0 to 0.1.34 (26–30 Oct 2026) and the changes since. A bug fix's case says what
 went wrong **before** the fix and what must happen **now**, so a later change can't quietly bring
 it back. Every case has a test: unit tests for the logic, and end-to-end cases that drive the real
@@ -16,14 +16,14 @@ app (see Running them).
 | [PERSIST](layouts-and-restarts.md) | Layouts, restarts and snapshots | 43 | 22 |
 | [DISPLAY](displays-lock-sleep.md) | Displays, lock and sleep | 29 | 22 |
 | [SPACES](spaces-and-full-screen.md) | Full-screen apps and Spaces | 26 | 16 |
-| [CAPTURE](capture-and-performance.md) | Capture and performance | 39 | 28 |
-| [UI](panels-and-look.md) | Menu bar panel, minimap, Settings and the backdrop | 40 | 8 |
+| [CAPTURE](capture-and-performance.md) | Capture and performance | 40 | 29 |
+| [UI](panels-and-look.md) | Menu bar panel, minimap, Settings and the backdrop | 41 | 9 |
 | [SETUP](first-launch.md) | First launch and permissions | 27 | 7 |
 | [SUPPORT](troubleshooting.md) | Troubleshooting and logs | 11 | 0 |
 | [UPDATE](updates-and-install.md) | Updates, release builds and install | 19 | 2 |
 | [URL](url-scripting.md) | expanse:// scripting | 28 | 1 |
 | [SEC](security.md) | Security hardening | 30 | 25 |
-| | **Total** | **471** | **200** |
+| | **Total** | **473** | **202** |
 
 [Coverage](coverage.md) lists every commit with the cases that test it, or why none does (docs
 only, a reverted experiment, an empty merge, a release commit).

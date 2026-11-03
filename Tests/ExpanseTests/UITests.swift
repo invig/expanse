@@ -686,4 +686,25 @@ import SwiftUI
         #expect(!c.goesOnScreen(bottom, in: vp))
         #expect(CanvasController.goesOnScreen(bottom, in: vp, panels: panels))
     }
+
+    // MARK: UI-41
+
+    @Test("UI-41 An invisible window over the whole screen isn't taken for a dialog (logic)") func ui41() {
+        func w(_ pid: pid_t, layer: Int, _ r: CGRect, alpha: Double = 1) -> [String: Any] {
+            [kCGWindowLayer as String: layer, kCGWindowOwnerPID as String: pid, kCGWindowAlpha as String: alpha,
+             kCGWindowBounds as String: ["X": r.minX, "Y": r.minY, "Width": r.width, "Height": r.height] as [String: CGFloat]]
+        }
+        let screen = CGSize(width: 1600, height: 1000)
+        let notificationCenter = w(400, layer: 21, CGRect(origin: .zero, size: screen))
+        let alert = w(401, layer: 8, CGRect(x: 600, y: 300, width: 400, height: 200))
+        let dock = w(402, layer: 20, CGRect(x: 0, y: 900, width: 1600, height: 100))
+        func level(_ ws: [[String: Any]]) -> Int? {
+            CanvasController.lowestDialogLevel(in: ws, screen: screen, ownPID: 1) { $0 == 402 }
+        }
+        #expect(level([notificationCenter]) == nil, "Notification Center's overlay over the whole screen")
+        #expect(level([notificationCenter, alert]) == 8, "a real dialog still counts")
+        #expect(level([dock]) == nil)
+        #expect(level([w(403, layer: 8, CGRect(x: 0, y: 0, width: 1600, height: 600))]) == 8, "a wide dialog that doesn't cover the screen")
+        #expect(level([w(404, layer: 8, CGRect(x: 600, y: 300, width: 400, height: 200), alpha: 0)]) == nil, "an invisible one")
+    }
 }

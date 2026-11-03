@@ -490,3 +490,16 @@
   2. `killall -CONT replayd`.
 - **Expected:** Step 1: Expanse's CPU stays near idle. Step 2: streams start, ten a pass, as CAPTURE-32.
 - **Automate:** unit: `updateStreaming` with replayd stuck queues no further pass (`moreStartsQueued`), and `askAgain` is what resumes.
+
+## CAPTURE-40 Quitting mid-capture doesn't make macOS ask to allow Expanse again
+- **Type:** Bug fix
+- **Area:** CAPTURE
+- **Commits:** unreleased (3 Nov)
+- **Before:** Expanse quit at once, even with a picture or stream start still with replayd. replayd then couldn't find the app the request came from (`requireAlertWithCanonicalBundleID … Error resolving binary path and audit token` in its log) and showed its alert: "Expanse is requesting to bypass the system private window picker…", until someone answered it. In the VM, TRACK-11 (which quits Expanse 0.3s after launching it) brought it up every time, and the cases after it skipped (found 3 Nov).
+- **Setup:** Expanse running with Screen Recording allowed, several windows on the canvas.
+- **Steps:**
+  1. Zoom out (⌥`) and, straight away, Quit from the menu bar panel (or `osascript -e 'quit app "Expanse"'`).
+  2. Open Expanse again.
+- **Expected:** No "bypass the system private window picker" alert. Quitting takes at most a second longer, only while a request is under way.
+- **Automate:** unit: `applicationShouldTerminate` answers `.terminateLater` while `WindowCapture.unanswered` > 0, asks for nothing new meanwhile, and lets the quit go on once it's answered, or after a second; end-to-end: TRACK-11 then TRACK-12 with no prompt.
+- **Note:** The wait first hung Ctrl-C and kill (PERSIST-05 caught it before a release): the signal handler is a block on the main queue, and AppKit's wait for the reply ran inside it, where nothing else on the main queue runs. The handler now quits from the run loop, and the wait uses a timer in the common modes.

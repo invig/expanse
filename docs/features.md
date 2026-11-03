@@ -4,7 +4,12 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- **No "bypass the private window picker" alert after quitting**: quitting while a picture was
+  still with macOS's capture service made macOS ask you to allow Expanse again. Quitting now
+  waits for it, at most a second (CAPTURE-40).
+- **No invisible "dialog" after a notification**: macOS 27 keeps an invisible Notification Center
+  window over the screen after a notification, and every zoom-out opened the canvas under it
+  (UI-41).
 
 ## Bugs
 
@@ -47,9 +52,10 @@ in Copy Logs for a Bug Report).
    - End-to-end, 3 Nov (0.1.37 and the fixes since): every automatic case passed across a complete
      run and its reruns, apart from SPACES-25, UI-23 and UI-24, which a notification stuck on the
      VM's screen kept from running. SIZE-11's failures were a real bug (PERSIST-43); NAV-34's was
-     the Mac sleeping mid-case. The screen-recording prompt comes back right after TRACK-11 (four
-     times out of four), which quits Expanse and launches it with no saved layout; cases after it
-     then skip until it's answered.
+     the Mac sleeping mid-case. The screen-recording prompt that came back right after TRACK-11
+     (four times out of four) was Expanse quitting with a picture still with replayd (CAPTURE-40);
+     SPACES-25, UI-23 and UI-24 couldn't run because of an invisible Notification Center window
+     (UI-41). Both fixed; those three pass.
    - The 54 guided and 31 look cases haven't been run yet.
 
 7. **Groups of windows as places** (asked 31 Oct). Released in 0.1.35:

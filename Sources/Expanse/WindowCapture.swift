@@ -40,7 +40,18 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     static var replaydStuck = false {
         didSet { if oldValue, !replaydStuck, canAsk { askAgain?() } }
     }
-    static var canAsk: Bool { overdue < 3 && !replaydStuck }
+    static var canAsk: Bool { overdue < 3 && !replaydStuck && !closing }
+    /// Expanse is quitting: nothing new is asked for (see AppDelegate.applicationShouldTerminate).
+    static var closing = false
+    /// Stream starts and pictures sent to replayd and not answered yet. Main thread only. A request
+    /// replayd gets to after Expanse has quit is one it can't check (it can't find the app), and
+    /// macOS then asks you to allow Expanse again ("bypass the system private window picker"), so
+    /// quitting waits a moment for these (CAPTURE-40).
+    private(set) static var unanswered = 0
+    /// One more request on its way to replayd (main thread).
+    static func requestSent() { unanswered += 1 }
+    /// One answered, or failed before it reached replayd (main thread).
+    static func requestAnswered() { unanswered = max(0, unanswered - 1) }
     /// Starts what was held back, once replayd answers again.
     static var askAgain: (() -> Void)?
     /// How long an overdue request counts against new ones: as long as replayd had gone without
@@ -60,6 +71,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// A request was answered (or failed before it reached replayd).
     private static func noteAnswer(late: inout Bool) {
         lastAnswer = CACurrentMediaTime()
+        requestAnswered()
         if late { late = false; overdueAnswered() }
     }
 
@@ -90,6 +102,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         // Held back while replayd isn't answering: still wanted, so askAgain starts it.
         guard Self.canAsk else { return }
         starting = true
+        Self.requestSent()
         startToken += 1
         let token = startToken
         // Main thread only, like the counter.
@@ -98,7 +111,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             if !answered {
                 late = true; Self.overdue += 1
                 DispatchQueue.main.asyncAfter(deadline: .now() + Self.expiry) {
-                    if late { late = false; Self.overdueAnswered() }
+                    if late { late = false; Self.requestAnswered(); Self.overdueAnswered() }
                 }
             }
             guard let self, self.starting, self.startToken == token else { return }
@@ -172,6 +185,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             finished = true
             completion(ok)
         }
+        Self.requestSent()
         queue.async { [weak self] in
             Self.screenshot(window, config) { sample, error in
                 let ok = sample?.imageBuffer != nil
@@ -188,7 +202,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
             if !answered {
                 late = true; Self.overdue += 1
                 DispatchQueue.main.asyncAfter(deadline: .now() + Self.expiry) {
-                    if late { late = false; Self.overdueAnswered() }
+                    if late { late = false; Self.requestAnswered(); Self.overdueAnswered() }
                 }
             }
             if !finished { logger.info("snapshot of \(window.windowID) timed out") }
