@@ -4,12 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- **No "bypass the private window picker" alert after quitting**: quitting while a picture was
-  still with macOS's capture service made macOS ask you to allow Expanse again. Quitting now
-  waits for it, at most a second (CAPTURE-40).
-- **No invisible "dialog" after a notification**: macOS 27 keeps an invisible Notification Center
-  window over the screen after a notification, and every zoom-out opened the canvas under it
-  (UI-41).
+Nothing yet.
 
 ## Bugs
 
@@ -98,6 +93,9 @@ Not decided yet.
 
 ## Done
 
+- 0.1.39: Quitting Expanse no longer makes macOS ask you to allow it again ("bypass the
+  system private window picker"); after a notification, zooming out no longer opens the canvas
+  under an invisible window.
 - 0.1.38: Fill (the green button, Window › Fill, fn ⌃ F) grows a window right and down from
   its top-left on the canvas, so the windows above and to its left aren't covered, and Return to
   Previous Size puts everything back; the layout is saved even while windows keep changing, so
