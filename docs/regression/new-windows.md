@@ -222,7 +222,7 @@
 ## PLACE-18 A tab dragged out into a new window is left alone until you let go
 - **Type:** Bug fix
 - **Area:** PLACE
-- **Commits:** unreleased (2 Nov)
+- **Commits:** 4df566d (0.1.37)
 - **Before:** Dragging a tab out of Chrome or Brave makes a new window that the browser moves with the pointer while you hold the button. Expanse took it on mid-drag (a scan comes 0.15s after a window opens), placed it beside its window and moved it there, or glided to it (fitting it to the screen, parking it off screen): the window jumped away from the pointer, and the browser and Expanse fought over it until you let go.
 - **Setup:** At 100%, a Chrome or Brave window with a few tabs in view, free space beside it.
 - **Steps:**

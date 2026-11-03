@@ -106,7 +106,7 @@ Troubleshooting (logs for a bug report), and Settings (updates, opening at login
 <details>
 <summary><strong>The corner or <kbd>⌃</kbd> + arrows do nothing</strong></summary>
 
-macOS got there first. Run the walkthrough again (menu bar icon › Welcome & Shortcuts), or change
+macOS got there first. Run the walkthrough again (menu bar icon › the **?** button), or change
 the settings yourself:
 
 - **Corners:** System Settings › Desktop & Dock › Hot Corners. Set the corners you want for Expanse
@@ -119,10 +119,11 @@ the settings yourself:
 <details>
 <summary><strong>My windows ended up somewhere odd</strong></summary>
 
-Menu bar icon › **Restore Layout** puts them back the way they were earlier. Expanse keeps your
-last three layouts, saved at least 15 minutes apart, and a restore can be undone too. **Tidy Up**
-neatens things where they are. As a last resort, **Restore All Windows** brings every window
-into view, stacked in the middle of the screen.
+Menu bar icon › **Earlier layouts**: click one to put your windows back the way they were then.
+Expanse keeps your last three, taken 15 minutes apart as you work (or when you press **Take
+snapshot**), and a restore can be undone too: the layout you had becomes the newest earlier one.
+**Tidy Up** neatens things where they are. As a last resort, **Restore all windows** (beside Take
+snapshot) brings every window that's out of view back on screen, cascaded from the top middle.
 
 </details>
 

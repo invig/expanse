@@ -245,3 +245,17 @@
 - **Expected:** It takes the size it had when Expanse first took it on (the size Quit puts back), top-left staying put.
 - **Check in log:** `resize <App>[<id>] {…} -> {…} (its own size)`.
 - **Automate:** unit: the menu item and `originalFrame`.
+
+## SIZE-20 Fill grows a window from its top-left on the canvas; Return to Previous Size puts everything back
+- **Type:** Feature
+- **Area:** SIZE
+- **Commits:** unreleased (3 Nov)
+- **Before:** Fill was followed like any move: the window's spot on the canvas became the screen's top-left, so zoomed out it covered its neighbours on every side.
+- **Setup:** At 100%, a window smaller than the screen with others close by on all four sides.
+- **Steps:**
+  1. Hover the green button › Fill (or Window › Fill, fn ⌃ F).
+  2. Zoom out (⌥`), then Esc.
+  3. Green button › Return to Previous Size (or fn ⌃ R).
+- **Expected:** Step 1: it fills the screen, as macOS does it. Step 2: it grew right and down from its top-left; the windows above and to its left are clear of it (those to the right and below are under it). Step 3: it's back at its size and every window is where it was before step 1.
+- **Check in log:** `filled <app>[<id>]: kept its top-left; view moved by …`, then `unfilled …`.
+- **Automate:** unit: `fills(_:usable:)`, and Fill and Return through `realWindowChanged` (with `resizeIsYours`); end-to-end in the VM (SIZE-20).

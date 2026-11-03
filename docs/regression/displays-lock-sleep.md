@@ -367,7 +367,7 @@
 ## DISPLAY-29 Unplugging a dock with the lid shut keeps every window's spot
 - **Type:** Bug fix
 - **Area:** DISPLAY
-- **Commits:** unreleased (2 Nov)
+- **Commits:** 4df566d (0.1.37)
 - **Before:** With no display to show them on (the external display or dock unplugged with the laptop's lid shut), the window server lists none of your windows. A scan then dropped every window from the canvas as closed, and since 0.1.31 a dropped window's spot goes with it: when the Mac woke on a display again, every window was taken on as a new one, beside each other (2 Nov: 13 windows dropped at 16:23:54, back at 17:16).
 - **Setup:** A laptop with its lid shut on an external display (or a dock with one), several windows laid out on the canvas.
 - **Steps:**

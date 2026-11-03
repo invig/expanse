@@ -801,4 +801,23 @@ struct PERSISTTests {
         #expect(s1.home == nil && s2.home == nil)
         #expect(a.canvasFrame == Self.rect(100, 100) && b.canvasFrame == Self.rect(2000, 100))
     }
+
+    // MARK: PERSIST-43
+
+    @Test("PERSIST-43 The layout is saved a second after a change, even while changes keep coming")
+    func persist43() async throws {
+        let w = Fake.window(id: 4301, canvas: Self.rect(100, 100))
+        let c = Self.synced([w])
+        defer { c.saveWork?.cancel(); c.isPaused = true }
+        // A size you chose, then a change every 0.4s after it (a window scan every second or two,
+        // while an app's window isn't takeable yet, calls for a save each time).
+        w.preferredSize = CGSize(width: 1512, height: 949)
+        for _ in 0..<4 {
+            c.scheduleSave()
+            try await Task.sleep(for: .milliseconds(400))
+        }
+        // 1.6s in, with changes still coming: saved, with the size you chose.
+        let saved = LayoutStore.load()?.windows.first { $0.id == 4301 }
+        #expect(saved?.pw == 1512 && saved?.ph == 949)
+    }
 }

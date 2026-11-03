@@ -349,17 +349,18 @@ import SwiftUI
         let app = AppDelegate()
         let c = app.controller
         #expect(!app.isOn)
-        // A link that only starts a camera animation (at 100% nothing moves until a frame is drawn)
-        // shows whether it ran.
+        // A link that only starts a camera animation (nothing moves until a frame is drawn) shows
+        // whether it ran: zoom, as if zoomed out (at 100% it does nothing, URL-28).
         let zoom = URL(string: "expanse://zoom?scale=0.5")!
+        c.isActive = true
         app.application(NSApplication.shared, open: [zoom])
         #expect(c.animation == nil)
-        #expect(!c.isActive)
 
         app.isOn = true
         app.application(NSApplication.shared, open: [zoom])
         #expect(c.animation != nil)
         c.cancelAnimation()
+        c.isActive = false
 
         // Started already: a second turnOn does nothing (no second set of shortcuts).
         app.turnOn()

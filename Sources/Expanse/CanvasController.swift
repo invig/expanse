@@ -55,6 +55,13 @@ final class CanvasController: NSObject {
     /// The left mouse button is down (tests stand in their own): you may be dragging a window,
     /// or a tab out of a browser into a window of its own, and scans wait (see sync).
     var buttonHeld: () -> Bool = { NSEvent.pressedMouseButtons & 1 != 0 }
+    /// A change to `w`'s real window right after you clicked or pressed a key in its app, that
+    /// Expanse didn't cause by resizing it: yours (see realWindowChanged). Tests stand in their own.
+    var resizeIsYours: (ManagedWindow) -> Bool = { w in
+        let now = CACurrentMediaTime()
+        return CanvasController.inputSince(now - 1.5) && now - w.lastSizedAt > 2
+            && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.appPID
+    }
     /// A scan is waiting for the button to come up (logged once per press).
     private var scanWaitingForButton = false
     /// A display to show windows on (tests stand in their own): one connected and awake.
@@ -685,7 +692,7 @@ final class CanvasController: NSObject {
     private var lastFocusRequest: (id: CGWindowID, pid: pid_t, at: CFTimeInterval, reasserted: Bool)?
 
     /// Whether you clicked or typed since `time` (CACurrentMediaTime).
-    private func inputSince(_ time: CFTimeInterval) -> Bool {
+    private static func inputSince(_ time: CFTimeInterval) -> Bool {
         let elapsed = CACurrentMediaTime() - time
         return [.leftMouseDown, .rightMouseDown, .keyDown].contains { type in
             CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: type) < elapsed
@@ -726,7 +733,7 @@ final class CanvasController: NSObject {
         // Not if the window you picked is going into the Dock: minimising it is what moved focus,
         // and focusing it again would bring it straight back out.
         if let request = lastFocusRequest, !request.reasserted, request.pid == w.pid, request.id != id,
-           CACurrentMediaTime() - request.at < 1, !inputSince(request.at),
+           CACurrentMediaTime() - request.at < 1, !Self.inputSince(request.at),
            let picked = windows.first(where: { $0.id == request.id }), !(picked.knownAX.map(AX.isMinimized) ?? false) {
             logger.info("\(w.appName, privacy: .public)[\(id)] took focus just after [\(request.id)] was picked; giving it back")
             focusWindow(picked, reasserting: true)
@@ -735,7 +742,7 @@ final class CanvasController: NSObject {
         let r = camera.toView(w.canvasFrame)
         let fullyVisible = !w.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r)
         guard !fullyVisible else { return }
-        if let close = lastClose, close.pid == w.pid, CACurrentMediaTime() - close.at < 1.5, !inputSince(close.at) {
+        if let close = lastClose, close.pid == w.pid, CACurrentMediaTime() - close.at < 1.5, !Self.inputSince(close.at) {
             // You closed a window, and macOS gave focus to another of the app's, wherever that is.
             // The view stays where you were; going to it looked like a window reopening.
             logger.info("\(w.appName, privacy: .public)[\(w.id)] got focus after a window of its app closed; the view stays")
@@ -1138,16 +1145,14 @@ final class CanvasController: NSObject {
             let ours = w.lastPlaced.flatMap { last in position.map { last.distance(to: $0) < 2 } } ?? false
             if !ours, movedByFullScreen(w, inFullScreenSpace: inFullScreenSpace()) { return }
         }
+        let now = CACurrentMediaTime()
+        if let c = w.changing, now - c.at < 0.5 { w.changing = (c.from, now) } else { w.changing = (w.canvasFrame, now) }
         let selfResized = !userDragging && resizedItself(w, to: size)
-        if let size {
-            // Dragging an edge, or a resize right after you clicked or pressed a key in the window's
-            // app (macOS's Fill from the green button or the Window menu, its keyboard shortcuts, an
-            // app's zoom button), that Expanse didn't cause: the size you chose.
-            let now = CACurrentMediaTime()
-            let yours = userDragging || (inputSince(now - 1.5) && now - w.lastSizedAt > 2
-                                         && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.appPID)
-            adoptSize(w, size, fromUser: yours)
-        }
+        // Dragging an edge, or a resize right after you clicked or pressed a key in the window's
+        // app (macOS's Fill from the green button or the Window menu, its keyboard shortcuts, an
+        // app's zoom button), that Expanse didn't cause: the size you chose.
+        let yours = userDragging || resizeIsYours(w)
+        if let size { adoptSize(w, size, fromUser: yours) }
         let pos = isActive ? nil : position
         // Around a display change macOS keeps shoving windows for a while; only a drag with the
         // mouse button down counts as you moving a window then, and the move that lands just after
@@ -1170,6 +1175,9 @@ final class CanvasController: NSObject {
             } else if !yourDrag, cameBack(w, to: pos) {
                 // (Not the move that lands just after you let go of it: that's still yours.)
                 if !gliding { commitInBackground() }
+            } else if yours, !userDragging, let size, let from = w.changing?.from,
+                      let filled = filling(from: from.size, to: CGRect(origin: pos, size: size)) {
+                keepTopLeft(w, at: from.origin, real: pos, filled: filled)
             } else {
                 logger.info("follow \(w.appName, privacy: .public)[\(w.id)] moved to \(NSStringFromPoint(pos), privacy: .public) (last placed \(w.lastPlaced.map { NSStringFromPoint($0) } ?? "never", privacy: .public))")
                 if !yourDrag { w.noteFollowed() }
@@ -1182,6 +1190,55 @@ final class CanvasController: NSObject {
         }
         view.render()
         scheduleSave()
+    }
+
+    /// The usable part of the screen (no menu bar, nor a Dock that's always shown), in the window
+    /// server's coordinates: what macOS's Fill fills.
+    private var usableRectCG: CGRect {
+        let f = screenFrame, usable = usableFrame
+        return CGRect(x: usable.minX - f.minX, y: f.maxY - usable.maxY, width: usable.width, height: usable.height)
+    }
+
+    /// The size of macOS's Fill on this usable area: it, or a little less all round ("Tiled windows
+    /// have margins" in Desktop & Dock).
+    static func fills(_ size: CGSize, usable: CGRect) -> Bool {
+        size.width <= usable.width + 2 && size.height <= usable.height + 2
+            && size.width >= usable.width - 48 && size.height >= usable.height - 48
+    }
+
+    /// The same, and where Fill puts it.
+    static func fills(_ frame: CGRect, usable: CGRect) -> Bool {
+        fills(frame.size, usable: usable) && abs(frame.midX - usable.midX) <= 2 && abs(frame.midY - usable.midY) <= 2
+    }
+
+    /// A resize into Fill (true) or out of it (false: Return to Previous Size, Move & Resize, a
+    /// shortcut), from `size` to `frame`; nil for any other change.
+    private func filling(from size: CGSize, to frame: CGRect) -> Bool? {
+        let was = Self.fills(size, usable: usableRectCG), now = Self.fills(frame.size, usable: usableRectCG)
+        if !was, now, Self.fills(frame, usable: usableRectCG) { return true }
+        if was, !now { return false }
+        return nil
+    }
+
+    /// Fill, or a resize out of it: the window keeps its top-left on the canvas (`origin`, where
+    /// it was before the change began) and grows or shrinks from there, and the view moves to
+    /// where macOS put it (`real`) instead. The windows above and to the left of a filled window
+    /// aren't covered, and Return to Previous Size puts the view back where it was (SIZE-20).
+    /// The others move to match straight away (a scan meanwhile would take where they are for
+    /// moves of yours): behind a filled window, out of sight.
+    private func keepTopLeft(_ w: ManagedWindow, at origin: CGPoint, real: CGPoint, filled: Bool) {
+        let before = camera.origin
+        w.canvasFrame.origin = origin
+        camera.origin = CGPoint(x: origin.x - (real.x - viewport.minX) / camera.scale,
+                                y: origin.y - (real.y - viewport.minY) / camera.scale)
+        w.lastPlaced = real
+        w.parked = false
+        noteUserMove(w, from: origin)
+        let d = CGVector(dx: camera.origin.x - before.x, dy: camera.origin.y - before.y)
+        if abs(d.dx) > 0.5 || abs(d.dy) > 0.5 {
+            logger.info("\(filled ? "filled" : "unfilled", privacy: .public) \(w.appName, privacy: .public)[\(w.id)]: kept its top-left; view moved by \(Int(d.dx.rounded())), \(Int(d.dy.rounded()))")
+        }
+        if !gliding { commitInBackground() }
     }
 
     /// A VM or remote-screen window (see ManagedWindow.sizesItself) whose app just changed its
@@ -1252,9 +1309,16 @@ final class CanvasController: NSObject {
         if !isDerived, !suspendTracking { windows.forEach { $0.home = $0.canvasFrame.origin } }
     }
 
+    /// Saves the layout a second after it changes, so a burst of changes (a glide, a drag) is one
+    /// save. A second after the first of them, not the last: while changes kept coming (a window
+    /// scan every second or two, while an app has a window that isn't takeable yet) it was put
+    /// off each time and never happened, and a size you'd just chosen was lost (PERSIST-43).
     func scheduleSave() {
-        saveWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.save() }
+        if let pending = saveWork, !pending.isCancelled { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.saveWork = nil
+            self?.save()
+        }
         saveWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
     }
@@ -3574,7 +3638,10 @@ final class CanvasController: NSObject {
         for w in toStart.prefix(Self.streamStartsPerPass) {
             w.capture.start(window: w.scWindow, pixelSize: pixelSize(for: w), fps: captureFPS(for: w))
         }
-        if toStart.count > Self.streamStartsPerPass, !moreStartsQueued {
+        // Not while replayd isn't answering: starts held back never count as running, so a pass
+        // every 10ms would follow for as long as the stall lasts; askAgain picks up when it answers
+        // (CAPTURE-39).
+        if toStart.count > Self.streamStartsPerPass, WindowCapture.canAsk, !moreStartsQueued {
             moreStartsQueued = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
                 self?.moreStartsQueued = false
@@ -3946,7 +4013,18 @@ final class CanvasController: NSObject {
 
     /// The desktop Space the canvas's windows are on.
     var canvasDesktop: UInt64? {
-        windows.last.flatMap { Spaces.spaces(of: $0.id).first }
+        Self.canvasDesktop(front: windows.map(\.id), desktops: Set(Spaces.list().spaces.filter(\.isDesktop).map(\.id)))
+    }
+
+    /// The Space of the front-most of `windows` (back to front) that's on a desktop. Not just the
+    /// front-most's: a window gone full screen keeps its spot on the canvas, on a Space of its own,
+    /// and the Expanse tile (and leaving the canvas over a full-screen app) went there (SPACES-26).
+    static func canvasDesktop(front windows: [CGWindowID], desktops: Set<UInt64>,
+                              spacesOf: (CGWindowID) -> [UInt64] = Spaces.spaces(of:)) -> UInt64? {
+        for id in windows.reversed() {
+            if let space = spacesOf(id).first(where: desktops.contains) { return space }
+        }
+        return nil
     }
 
     /// What AltTab does to reach a window on another Space, which is what makes macOS go there:
@@ -3971,6 +4049,21 @@ final class CanvasController: NSObject {
                 }
             }
         }
+    }
+
+    /// Where leaving the canvas without picking a window takes the view, and whether that's a view
+    /// you placed (nil: as it is).
+    private func leavingCamera() -> (camera: Camera, placed: Bool?) {
+        if let back = returnCamera {
+            // Back to the window you were in, as you left it. If it moved meanwhile (you dragged it,
+            // Tidy Up), it's centred where it is now.
+            if let w = returnWindow, windows.contains(where: { $0 === w }), let f = returnFrame, w.canvasFrame.origin != f.origin {
+                return (viewCamera(for: w), false)
+            }
+            return (back, returnPlaced)
+        }
+        // Opened at 100% (a scroll or pinch on the desktop): where you've moved the view to.
+        return (Camera.centered(on: camera.center(in: viewSize), scale: 1, viewSize: viewSize), nil)
     }
 
     /// Animate to 100% (onto `focus` if given), put real windows where the camera says, drop the overlay.
@@ -4005,19 +4098,10 @@ final class CanvasController: NSObject {
                 viewPlaced = false
                 target = viewCamera(for: focus)
             }
-        } else if let back = returnCamera {
-            // Back to the window you were in, as you left it. If it moved meanwhile (you dragged it,
-            // Tidy Up), it's centred where it is now.
-            if let w = returnWindow, windows.contains(where: { $0 === w }), let f = returnFrame, w.canvasFrame.origin != f.origin {
-                viewPlaced = false
-                target = viewCamera(for: w)
-            } else {
-                viewPlaced = returnPlaced
-                target = back
-            }
         } else {
-            // Opened at 100% (a scroll or pinch on the desktop): where you've moved the view to.
-            target = Camera.centered(on: camera.center(in: viewSize), scale: 1, viewSize: viewSize)
+            let leaving = leavingCamera()
+            if let placed = leaving.placed { viewPlaced = placed }
+            target = leaving.camera
         }
         // Back where you were: the window you were in gets the keyboard back, rather than whichever
         // is in front there (one cut off at the edge would then be glided to).
@@ -4172,14 +4256,23 @@ final class CanvasController: NSObject {
     func restoreAll() {
         var i = 0
         let vp = viewport
+        // Zoomed out, leaving puts each window where its spot is in the view you go back to: they
+        // get spots there, and leaving moves them. Moved now with their spots left as they were,
+        // they went straight back out of view (TRACK-44).
+        let leaving = isActive ? leavingCamera().camera : nil
         for w in windows where w.parked {
             let p = CGPoint(x: vp.midX - w.canvasFrame.width / 2 + CGFloat(i % 8) * 28,
                             y: vp.minY + 40 + CGFloat(i % 8) * 28)
-            w.place(at: p)
             w.parked = false
-            if !isActive { w.canvasFrame.origin = canvasPoint(forGlobal: w.lastPlaced ?? p) }
+            if let leaving {
+                w.canvasFrame.origin = leaving.toCanvas(CGPoint(x: p.x - vp.minX, y: p.y - vp.minY))
+            } else {
+                w.place(at: p)
+                w.canvasFrame.origin = canvasPoint(forGlobal: w.lastPlaced ?? p)
+            }
             i += 1
         }
+        if leaving != nil { view.render() }
     }
 
     func shutdown() {
@@ -4276,6 +4369,9 @@ final class CanvasController: NSObject {
         w.canvasFrame.size = size
         let ours = w.lastSized.map { abs($0.width - size.width) < 2 && abs($0.height - size.height) < 2 } ?? false
         if (fromUser || w.sizesItself) && !ours && !suspendTracking {
+            if abs(size.width - w.preferredSize.width) > 2 || abs(size.height - w.preferredSize.height) > 2 {
+                logger.info("chosen size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(w.preferredSize), privacy: .public) -> \(NSStringFromSize(size), privacy: .public)")
+            }
             w.preferredSize = size
             w.lastSized = nil
         }

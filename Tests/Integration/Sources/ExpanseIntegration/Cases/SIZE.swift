@@ -233,6 +233,89 @@ import AppKit
             try t.expect(sizeLast(line).map { sizeNear($0, chosen) } ?? false, "the glide should resize it back to \(Int(chosen.width))×\(Int(chosen.height)): \(line)")
             try await t.until("the window back at the size you chose", timeout: 8) { realFrame(id).map { sizeNear($0.size, chosen) } ?? false }
         },
+
+        Case("SIZE-20", "Fill grows a window from its top-left on the canvas; Return to Previous Size puts everything back") { t in
+            try t.needsInput()
+            let bundle = "com.apple.TextEdit"
+            let wasRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: bundle).isEmpty
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Expanse Tests SIZE-20", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let file = folder.appendingPathComponent("SIZE-20 Fill.txt")
+            try "Expanse Tests: a document to Fill and put back.\n".write(to: file, atomically: true, encoding: .utf8)
+            var opened: [AXUIElement] = []
+            defer {
+                opened.forEach(sizeAXClose)
+                if !wasRunning { NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.terminate() }
+                try? FileManager.default.removeItem(at: folder)
+            }
+            let doc = try await t.sizeNewTextEditWindow(titled: "SIZE-20 Fill") { try t.open(file.path, in: "TextEdit") }
+            let takenOn = Date()
+            opened.append(doc.ax)
+            guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.processIdentifier else {
+                throw Failure("TextEdit isn't running")
+            }
+            let s0 = try await t.state()
+            let vf = sizeVisibleFrame()
+            let size = try s0.sizeFrame(doc.id).size
+            guard size.width < vf.width - 100 || size.height < vf.height - 100 else {
+                throw Skip("TextEdit's window already about fills the screen, so Fill wouldn't change it")
+            }
+            // The document somewhere clear, one window to its left and one above it, 40pt away.
+            let spot = sizeClearSpot(s0)
+            let left = try await t.window("SIZE-20 Left", CGRect(x: 160, y: 160, width: 400, height: 300))
+            let above = try await t.window("SIZE-20 Above", CGRect(x: 200, y: 200, width: 400, height: 260))
+            t.link("place", ["id": doc.id, "x": Int(spot.x), "y": Int(spot.y), "commit": 0])
+            t.place(left, at: CGPoint(x: spot.x - 440, y: spot.y), commit: false)
+            t.place(above, at: CGPoint(x: spot.x, y: spot.y - 300))
+            try await t.settle()
+            t.link("focus", ["id": doc.id])
+            try await t.sizeInView(doc.id)
+            try await t.until("TextEdit in front", timeout: 5) { NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundle }
+            guard let fill = sizeAXMenuItem(pid, ["Window", "Fill"]) else {
+                throw Skip("TextEdit's Window menu has no Fill (macOS 15 or later)")
+            }
+            // Past Expanse's own resizes and the window's first 5s (as SIZE-11).
+            try await t.pause(max(2.5, 5.5 - Date().timeIntervalSince(takenOn)))
+            let before = try await t.settle()
+            let d0 = try before.sizeFrame(doc.id), l0 = try before.sizeFrame(left.id), a0 = try before.sizeFrame(above.id)
+            guard let r = realFrame(doc.id) else { throw Failure("the document isn't on screen") }
+            // Fill, as you'd choose it: a key press in TextEdit, then the menu item.
+            var mark = t.log.mark()
+            Input.key(.escape)
+            AXUIElementPerformAction(fill, kAXPressAction as CFString)
+            try await t.until("the document to fill the screen", timeout: 5) {
+                realFrame(doc.id).map { $0.width > r.width + 40 || $0.height > r.height + 40 } ?? false
+            }
+            try await t.expectLog("filled TextEdit[\(doc.id)]: kept its top-left", since: mark, timeout: 5)
+            let filled = try await t.settle()
+            let d1 = try filled.sizeFrame(doc.id)
+            try t.expect(sizeNear(d1.origin, d0.origin), "the document should keep its top-left on the canvas (\(d0.origin), now \(d1.origin))")
+            try t.expect(d1.width >= vf.width - 60 && d1.height >= vf.height - 60, "Fill should make the document fill the screen (\(d1.size) on a \(vf.size) screen)")
+            for (name, f) in [("left", try filled.sizeFrame(left.id)), ("above", try filled.sizeFrame(above.id))] {
+                try t.expect(!f.intersects(d1), "the window \(name) of the document should be clear of it (\(f) and \(d1))")
+            }
+            try t.expect(realFrame(doc.id).map { abs($0.minX - vf.minX) <= 24 && abs($0.minY - vf.minY) <= 24 } ?? false,
+                         "on screen the document should fill the screen from its top-left (\(String(describing: realFrame(doc.id))))")
+            // Return to Previous Size: back as it was, and so is the view. (The menu item as it is
+            // now: TextEdit makes its Window menu anew, and only a filled window has it enabled.)
+            try await t.pause(2.5)
+            guard let back = sizeAXMenuItem(pid, ["Window", "Move & Resize", "Return to Previous Size"]) else {
+                throw Failure("TextEdit's Window › Move & Resize has no Return to Previous Size after Fill")
+            }
+            mark = t.log.mark()
+            Input.key(.escape)
+            AXUIElementPerformAction(back, kAXPressAction as CFString)
+            try await t.until("the document back at its size", timeout: 5) { realFrame(doc.id).map { sizeNear($0.size, r.size, 4) } ?? false }
+            try await t.expectLog("unfilled TextEdit[\(doc.id)]", since: mark, timeout: 5)
+            try await t.pause(0.5)
+            let after = try await t.settle()
+            try t.expect(sizeNear(try after.sizeFrame(doc.id).origin, d0.origin), "the document should still have its top-left (\(d0.origin))")
+            try t.expect(sizeNear(after.camera, before.camera, 4), "the view should be back where it was (\(before.camera), now \(after.camera))")
+            try t.expect(sizeNear(try after.sizeFrame(left.id).origin, l0.origin) && sizeNear(try after.sizeFrame(above.id).origin, a0.origin),
+                         "the other windows shouldn't have moved on the canvas")
+            try t.expect(realFrame(doc.id).map { sizeNear($0.origin, r.origin, 4) } ?? false,
+                         "on screen the document should be back where it was (\(r.origin), now \(String(describing: realFrame(doc.id)?.origin)))")
+        },
     ]
 }
 

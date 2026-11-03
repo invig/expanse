@@ -134,6 +134,23 @@ import AppKit
         }
     }
 
+    // MARK: URL-28
+
+    @Test("URL-28 expanse://fit and expanse://zoom at 100% leave the view alone (logic)") func url28() {
+        let app = Self.makeApp([Self.window(Self.a, at: CGPoint(x: -1500, y: 0), size: CGSize(width: 800, height: 600)),
+                                Self.window(Self.b, at: CGPoint(x: 1800, y: 900), size: CGSize(width: 800, height: 600))])
+        let c = app.controller
+        Self.held(app) {
+            c.camera = Camera(origin: CGPoint(x: 40, y: 0), scale: 1)
+            for link in ["expanse://fit", "expanse://zoom?scale=0.5"] {
+                Self.open(app, link)
+                #expect(!c.isActive, "\(link)")
+                #expect(c.animation == nil, "\(link)")
+                #expect(c.camera == Camera(origin: CGPoint(x: 40, y: 0), scale: 1), "\(link)")
+            }
+        }
+    }
+
     // MARK: URL-05
 
     @Test("URL-05 Camera.zoom clamps to 3%-150% and keeps the point under the anchor still") func url05a() {

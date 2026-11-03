@@ -4,16 +4,26 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- **Fill grows a window from its top-left on the canvas** (asked 3 Nov): the green button's Fill
+  (or Window › Fill, fn ⌃ F) still fills the screen, but zoomed out the window grew right and
+  down from where it was, so the windows above and to its left aren't covered; the view moves
+  instead. Return to Previous Size puts everything back as it was (SIZE-20).
+- **The layout is saved while things keep changing**: each change put the save off another
+  second, so while window scans kept coming (an app with a window not takeable yet, as TextEdit
+  after a Fill) nothing was saved, and a size you'd just chosen could be lost (PERSIST-43).
+- **Restore all windows while zoomed out sticks**: it gave the windows no new spots, so leaving
+  the canvas parked them straight back out of view (TRACK-44).
+- **`expanse://fit` and `zoom` do nothing at 100%**, as `pan` doesn't: they moved the view out
+  from under your windows, which moved them the next time you left the canvas (URL-28).
+- **No 10ms loop while replayd is stuck**: zoomed out with more than ten windows, capture asked
+  again every 10ms for as long as the stall lasted (CAPTURE-39).
+- **The Expanse tile is the desktop's** when a canvas window has gone full screen: it could point
+  at that window's Space, and so could leaving the canvas over a full-screen app (SPACES-26).
 
 ## Bugs
 
-1. **To check** (found writing the regression tests, 30–31 Oct; not confirmed): Restore all
-   windows while zoomed out doesn't update the windows' spots on the canvas; `expanse://fit` and
-   `zoom` move the view at 100% without opening the canvas; capture may spin every 10ms while
-   replayd is stuck; the Expanse tile may point at a full-screen Space just after a window goes
-   full screen; the README's Questions section and how-it-works still name old menu items and
-   `update?install=1`. Details in [regression/README.md](regression/README.md).
+None open. The "to check" list from writing the regression tests is settled (3 Nov): four were
+real and are fixed (Not released yet, above); the README and how-it-works now name the menu bar panel's items.
 
 If a new window doesn't make it onto the canvas, the log says why (look for "not on the canvas"
 in Copy Logs for a Bug Report).
@@ -41,13 +51,19 @@ in Copy Logs for a Bug Report).
    centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
    is on (Accessibility › Display), which Expanse doesn't follow yet.
 6. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 537 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 237
+   has a test. 541 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 237
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
    - End-to-end, 2 Nov: a complete run of 0.1.36 in the VM passed all 145 automatic cases, in one
      go (`--timeout 800`). Four skip by design: three need a Developer ID release, and NAV-50's
      Dock step needs a Dock that stays shown. macOS's screen-recording prompt still comes back now
      and then (it needs an Allow by hand); finish a run it interrupted with `--only`.
+   - End-to-end, 3 Nov (0.1.37 and the fixes since): every automatic case passed across a complete
+     run and its reruns, apart from SPACES-25, UI-23 and UI-24, which a notification stuck on the
+     VM's screen kept from running. SIZE-11's failures were a real bug (PERSIST-43); NAV-34's was
+     the Mac sleeping mid-case. The screen-recording prompt comes back right after TRACK-11 (four
+     times out of four), which quits Expanse and launches it with no saved layout; cases after it
+     then skip until it's answered.
    - The 54 guided and 31 look cases haven't been run yet.
 
 7. **Groups of windows as places** (asked 31 Oct). Released in 0.1.35:

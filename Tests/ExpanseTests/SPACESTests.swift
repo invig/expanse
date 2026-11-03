@@ -599,4 +599,18 @@ struct SPACESTests {
         c.apply(scan, ax: CanvasController.AXSnapshot())
         #expect(w.canvasFrame.origin == c.canvasPoint(forGlobal: setDown.origin))
     }
+
+    // MARK: SPACES-26
+
+    @Test("SPACES-26 The Expanse tile is the desktop's, with a window of the canvas full screen")
+    func spaces26() {
+        let spaces: [CGWindowID: [UInt64]] = [1: [3], 2: [3], 9: [41]]   // 9 full screen, on Space 41
+        let of = { (id: CGWindowID) in spaces[id] ?? [] }
+        // Window 9, front-most, went full screen: the canvas is still on desktop 3.
+        #expect(CanvasController.canvasDesktop(front: [1, 2, 9], desktops: [3, 5], spacesOf: of) == 3)
+        #expect(CanvasController.canvasDesktop(front: [9, 1, 2], desktops: [3, 5], spacesOf: of) == 3)
+        // Nothing on a desktop (every window full screen, or none): no tile to point at.
+        #expect(CanvasController.canvasDesktop(front: [9], desktops: [3, 5], spacesOf: of) == nil)
+        #expect(CanvasController.canvasDesktop(front: [], desktops: [3, 5], spacesOf: of) == nil)
+    }
 }

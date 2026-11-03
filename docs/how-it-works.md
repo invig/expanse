@@ -90,5 +90,6 @@ Development builds have debugging URL commands, off by default; turn them on wit
 `defaults write com.invignation.expanse debugURLCommands -bool true`. (A release ignores that
 setting: any app could change it, then move other apps' windows through Expanse.) Then
 `open "expanse://dump"` writes the full layout to the log, and `screen?w=1512&h=982` pretends the
-display is that size. The others are `place`, `prefer`, `focus?id=` with a window ID,
-`appearance?mode=light|dark`, and `update?install=1` to update without asking.
+display is that size. The others are `place`, `prefer`, `focus?id=` with a window ID, and
+`appearance?mode=light|dark`. (`update?install=1` is still accepted but does nothing: development
+builds don't update; see URL-19.)

@@ -1,6 +1,6 @@
 # Regression tests
 
-Every feature Expanse has, and every bug it has fixed, as a test case: 465 cases, from all 174
+Every feature Expanse has, and every bug it has fixed, as a test case: 471 cases, from all 174
 commits from 0.1.0 to 0.1.34 (26–30 Oct 2026) and the changes since. A bug fix's case says what
 went wrong **before** the fix and what must happen **now**, so a later change can't quietly bring
 it back. Every case has a test: unit tests for the logic, and end-to-end cases that drive the real
@@ -11,19 +11,19 @@ app (see Running them).
 | [NAV](navigation.md) | Canvas, zoom and navigation | 63 | 15 |
 | [EDIT](arranging.md) | Arranging windows on the canvas, and screens you build | 34 | 3 |
 | [PLACE](new-windows.md) | New windows and where they go | 18 | 12 |
-| [TRACK](tracking.md) | Finding and following windows | 43 | 29 |
-| [SIZE](sizes.md) | Window sizes | 19 | 9 |
-| [PERSIST](layouts-and-restarts.md) | Layouts, restarts and snapshots | 42 | 21 |
+| [TRACK](tracking.md) | Finding and following windows | 44 | 30 |
+| [SIZE](sizes.md) | Window sizes | 20 | 9 |
+| [PERSIST](layouts-and-restarts.md) | Layouts, restarts and snapshots | 43 | 22 |
 | [DISPLAY](displays-lock-sleep.md) | Displays, lock and sleep | 29 | 22 |
-| [SPACES](spaces-and-full-screen.md) | Full-screen apps and Spaces | 25 | 15 |
-| [CAPTURE](capture-and-performance.md) | Capture and performance | 38 | 27 |
+| [SPACES](spaces-and-full-screen.md) | Full-screen apps and Spaces | 26 | 16 |
+| [CAPTURE](capture-and-performance.md) | Capture and performance | 39 | 28 |
 | [UI](panels-and-look.md) | Menu bar panel, minimap, Settings and the backdrop | 40 | 8 |
 | [SETUP](first-launch.md) | First launch and permissions | 27 | 7 |
 | [SUPPORT](troubleshooting.md) | Troubleshooting and logs | 11 | 0 |
 | [UPDATE](updates-and-install.md) | Updates, release builds and install | 19 | 2 |
-| [URL](url-scripting.md) | expanse:// scripting | 27 | 0 |
+| [URL](url-scripting.md) | expanse:// scripting | 28 | 1 |
 | [SEC](security.md) | Security hardening | 30 | 25 |
-| | **Total** | **465** | **195** |
+| | **Total** | **471** | **200** |
 
 [Coverage](coverage.md) lists every commit with the cases that test it, or why none does (docs
 only, a reverted experiment, an empty merge, a release commit).
@@ -185,6 +185,10 @@ What the first runs in the VM taught (Tests/Integration):
   `.cgAnnotatedSessionEventTap` reads the window and pid the window server sent it to
   (`.mouseEventWindowUnderMousePointer`, `.eventTargetUnixProcessID`), and a screenshot over
   ssh (`sudo launchctl asuser 501 sudo -u admin screencapture`) shows what was drawn.
+- A wheel or pinch over the bare desktop, with no window under the pointer, goes to the front
+  app with no window, not to the desktop: the same tap shows window 0 and that app's pid. When
+  the front app is Expanse (after leaving the canvas at an empty part of it), only a local event
+  monitor sees it; a global one sees other apps' events only (NAV-62).
 - Zoomed out, a window's picture can lie under Expanse's panels in the bottom-right corner, which
   take the click: click it at `s.clickPoint(on: w.canvas)`, not its middle.
 - After a relaunch (or a fit), the whole layout can come back shifted on the canvas: earlier
@@ -222,24 +226,8 @@ What the first runs in the VM taught (Tests/Integration):
 Writing the cases and their tests against the code turned these up. They aren't confirmed bugs
 yet:
 
-- **Restore all windows while zoomed out** moves the real windows, but their spots on the canvas
-  stay where they were, so leaving the canvas may park them again (TRACK-09).
-- **`expanse://fit` and `expanse://zoom?scale=` with the canvas closed** move the view at 100%
-  without opening the canvas (URL-04, URL-05).
-- **`expanse://update?install=1`** can't do anything in any build: releases ignore debug links,
-  and development builds don't update (URL-19). docs/how-it-works.md still lists it.
-- **The README's Questions section** still names "Restore Layout", "Restore All Windows" and
-  "Welcome & Shortcuts", from before the menu bar panel. The panel says "Earlier layouts",
-  "Restore all windows" and "Welcome". "Restore all windows" also only moves windows that are
-  out of view.
 - **The hot corner with a second display** to the right of the main one may fire at that
   display's top edge (Expanse uses the main display only, so this is untested).
-- **Capture while replayd is stuck:** zoomed out with more than 10 windows to stream,
-  `updateStreaming` seems to schedule another pass every 10ms for as long as the stall lasts,
-  since starts held back never count as running (CAPTURE-31/32).
-- **The Expanse tile right after a window goes full screen:** `canvasDesktop` is the Space of
-  the front-most window on the canvas, which can briefly be the new full-screen window, so the
-  tile (and `space?name=expanse`) would point at the full-screen Space.
 - **A display change with many windows, on a slow window server:** each window macOS moves
   costs the main thread Accessibility reads (`AX.position`, `AX.isFullScreen`) and a window-server
   call for the Space (`Spaces.inFullScreenSpace`, in `realWindowChanged`). In the VM, with 67

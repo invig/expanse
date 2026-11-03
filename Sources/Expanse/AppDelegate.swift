@@ -209,7 +209,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "centre", "center": controller.centreCurrentWindow()
             case "enter": controller.enter(zoomOut: query["zoomOut"] != "0")
             case "exit": controller.exit()
-            case "fit": controller.animate(to: controller.fitCamera())
+            // Zoomed out only, as pan: at 100% the view is where your windows are, and the canvas
+            // opens wherever it's left, so moving it there moved them when you left (URL-28).
+            case "fit": if controller.isActive { controller.animate(to: controller.fitCamera()) }
             case "restore": controller.restoreAll()
             case "tidy": controller.tidy()
             case "layout":
@@ -256,7 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     controller.simulateScreen(nil)
                 }
-            case "zoom": if let s = number("scale") { controller.zoomAnimated(to: s) }
+            case "zoom": if controller.isActive, let s = number("scale") { controller.zoomAnimated(to: s) }
             case "pan":
                 // Each given must be a number (not nan, inf or text): otherwise the link is ignored,
                 // not half followed.

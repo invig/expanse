@@ -103,7 +103,7 @@
   1. Menu bar icon › "Restore all windows" (in Earlier layouts).
 - **Expected:** The panel closes. Each parked window is moved on screen near the top middle: the first centred 40pt below the menu bar, each next one 28pt further right and down (wrapping after eight). The windows already on screen don't move. Zoomed out afterwards, the canvas shows them at those new spots.
 - **Automate:** unit: the cascade offsets in `CanvasController.restoreAll()`.
-- **Note:** README says "brings every window into view, stacked in the middle"; the code moves only windows that were out of view (parked), as the panel's tooltip says.
+- **Note:** README said "brings every window into view, stacked in the middle"; the code moves only windows that were out of view (parked), as the panel's tooltip says, and README now says so (3 Nov). Zoomed out, see TRACK-44.
 
 ## TRACK-10 A minimised or hidden window comes back to its own spot
 - **Type:** Feature
@@ -527,7 +527,7 @@
 ## TRACK-43 The move that lands just after you let go of a just-opened window isn't put back
 - **Type:** Bug fix
 - **Area:** TRACK
-- **Commits:** unreleased (2 Nov)
+- **Commits:** 4df566d (0.1.37)
 - **Before:** A move of a window in its first 5s with the button up is taken for its app placing it late, and put back (TRACK-32). The last move of your own drag of such a window can land a moment after you let go: it was put back, and the window jumped back to where the drag was last seen.
 - **Setup:** At 100%, an app that opens windows.
 - **Steps:**
@@ -535,3 +535,15 @@
 - **Expected:** It stays where you let go of it.
 - **Check in log:** no `moved to … by its app right after being placed; putting it back` for it.
 - **Automate:** unit: `realWindowChanged` with `userDragging` false within 0.5s of a drag (`lastDraggedAt`).
+
+## TRACK-44 Restore all windows while zoomed out isn't undone by leaving the canvas
+- **Type:** Bug fix
+- **Area:** TRACK
+- **Commits:** unreleased (3 Nov)
+- **Before:** Zoomed out, "Restore all windows" moved the real windows on screen but left their spots on the canvas where they were, out of view; leaving the canvas puts windows where their spots say, so it parked them straight back out of view (found writing TRACK-09).
+- **Setup:** Several windows parked out of view; zoomed out (⌥`).
+- **Steps:**
+  1. Menu bar icon › "Restore all windows" (in Earlier layouts), still zoomed out.
+  2. Esc back to 100%.
+- **Expected:** Step 1: the canvas shows them cascaded in the view you'll go back to. Step 2: they're on screen there, as TRACK-09 puts them at 100%.
+- **Automate:** unit: `restoreAll()` zoomed out gives the windows spots in `leavingCamera()`'s view and leaves the real windows for leaving to move.

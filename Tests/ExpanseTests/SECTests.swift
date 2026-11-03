@@ -333,6 +333,9 @@ import ScreenCaptureKit
     @Test("SEC-08 zoom?scale=0.5&scale=2: the first value counts") func sec08a() {
         let d = started()
         defer { finish(d) }
+        // Zoomed out: zoom does nothing at 100% (URL-28).
+        d.controller.isActive = true
+        defer { d.controller.isActive = false }
         open(d, "expanse://zoom?scale=0.5&scale=2")
         #expect(d.controller.animation?.to.scale == 0.5)
         d.controller.cancelAnimation()
@@ -463,6 +466,9 @@ import ScreenCaptureKit
         defer { finish(d) }
         // No Apple event from a browser behind it: no browser, so no question.
         #expect(d.browserSending() == nil)
+        // Zoomed out: zoom does nothing at 100% (URL-28).
+        d.controller.isActive = true
+        defer { d.controller.isActive = false }
         open(d, "expanse://zoom?scale=0.5")
         #expect(d.controller.animation?.to.scale == 0.5)
     }

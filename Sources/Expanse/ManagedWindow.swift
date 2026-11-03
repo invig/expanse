@@ -43,6 +43,10 @@ final class ManagedWindow {
     func noteFollowed(from origin: CGPoint? = nil) {
         followedFrom = (origin ?? canvasFrame.origin, home, fitPush, CACurrentMediaTime())
     }
+    /// Its canvas frame before the changes to the real window now under way (each within 0.5s of
+    /// the last), and when the last came: macOS's Fill animates in steps, each followed, and a
+    /// Fill keeps the top-left it started from (see CanvasController.realWindowChanged).
+    var changing: (from: CGRect, at: CFTimeInterval)?
     /// When its app last changed its size (see sizesItself, CanvasController.resizedItself).
     var resizedItselfAt: CFTimeInterval = 0
     /// The size the user chose. On a small screen the real window may be shrunk to fit.

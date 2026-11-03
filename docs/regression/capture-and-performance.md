@@ -478,3 +478,15 @@
   3. Pause Expanse and switch Spaces.
 - **Expected:** Step 1: no capture and no blink at the 5-minute mark. Step 2: the backdrop shows the new desktop picture as the canvas opens. Step 3: no capture while paused. A Space change while running, a display change, and turning the switch on still take a fresh picture.
 - **Automate:** manual: desktop capture and DRM video.
+
+## CAPTURE-39 Zoomed out, starts held back while replayd is stuck don't spin
+- **Type:** Bug fix
+- **Area:** CAPTURE
+- **Commits:** unreleased (3 Nov)
+- **Before:** Zoomed out with more than ten windows to stream, each capture pass starts ten and books the next pass 10ms later. While replayd wasn't answering, starts were held back and never counted as running, so a pass followed every 10ms for as long as the stall lasted (found writing CAPTURE-31 and CAPTURE-32).
+- **Setup:** As CAPTURE-31, with 20 or more windows.
+- **Steps:**
+  1. `killall -STOP replayd`, wait for `window scan got no answer`, then zoom out (⌥`) and leave it for a minute; watch Expanse in Activity Monitor.
+  2. `killall -CONT replayd`.
+- **Expected:** Step 1: Expanse's CPU stays near idle. Step 2: streams start, ten a pass, as CAPTURE-32.
+- **Automate:** unit: `updateStreaming` with replayd stuck queues no further pass (`moreStartsQueued`), and `askAgain` is what resumes.

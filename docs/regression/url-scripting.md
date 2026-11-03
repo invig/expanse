@@ -221,7 +221,7 @@
   1. `open "expanse://update?install=1"`
 - **Expected:** In the release build it is ignored: `ignored debug URL command update (debugURLCommands is off)`. In the development build it is accepted (`url command update`) but nothing is checked or installed, because development builds have no updates.
 - **Automate:** unit: AppDelegate.debugURLCommands (false for releases) with Updater.check (returns early when !isRelease).
-- **Note:** At first (0cd0016) this installed a newer release without asking when debug commands were on. Since 47ed782, debug commands only work in development builds and development builds never update, so the command can't do anything in any build. README still lists it.
+- **Note:** At first (0cd0016) this installed a newer release without asking when debug commands were on. Since 47ed782, debug commands only work in development builds and development builds never update, so the command can't do anything in any build. docs/how-it-works.md says so (3 Nov).
 
 ## URL-20 Centre from the menu bar panel and expanse://centre
 - **Type:** Feature
@@ -323,3 +323,15 @@
 - **Check in log:** "url command poweroff", then "logging out or restarting: …"; when off, "ignored debug URL command poweroff (debugURLCommands is off)".
 - **Automate:** manual: URL dispatch and the workspace notification.
 - **Note:** In 4045597 the link called the handler directly; ed54a07 made it post the real notification. Release builds ignore it since 47ed782.
+
+## URL-28 expanse://fit and expanse://zoom at 100% leave the view alone
+- **Type:** Bug fix
+- **Area:** URL
+- **Commits:** unreleased (3 Nov)
+- **Before:** With the canvas closed, `fit` and `zoom?scale=` moved the view anyway, out from under your windows. The canvas opens where the view was left (scale aside), so the next time it opened it didn't line up with them, and leaving it moved your windows (found writing URL-04 and URL-05).
+- **Setup:** At 100%, the canvas closed.
+- **Steps:**
+  1. `open "expanse://fit"`, then `open "expanse://zoom?scale=0.5"`.
+  2. ⌥`, then Esc.
+- **Expected:** Step 1: nothing happens, as `pan` at 100%. Step 2: every window is where it was.
+- **Automate:** unit: `runURLCommand` for `fit` and `zoom` with the canvas closed starts no animation and leaves the camera.

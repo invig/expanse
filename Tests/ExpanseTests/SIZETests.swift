@@ -295,4 +295,67 @@ import AppKit
         c.adoptSize(w, Self.size(901, 700), fromUser: true)
         #expect(w.preferredSize == Self.size(900, 700))
     }
+
+    // MARK: SIZE-20 Fill grows a window from its top-left on the canvas
+
+    @Test("SIZE-20 What macOS's Fill fills: the usable area, or a little less all round") func size20a() {
+        let u = Self.r(0, 33, 1512, 949)   // the laptop, no Dock shown
+        #expect(CanvasController.fills(u, usable: u))
+        #expect(CanvasController.fills(u.insetBy(dx: 8, dy: 8), usable: u), "with margins between tiled windows")
+        #expect(!CanvasController.fills(Self.r(0, 33, 756, 949), usable: u), "a half")
+        #expect(!CanvasController.fills(Self.r(0, 0, 1512, 982), usable: u), "taller than the usable area")
+        #expect(!CanvasController.fills(Self.r(100, 33, 1512, 949), usable: u), "Fill's size somewhere else")
+        #expect(CanvasController.fills(Self.size(1512, 949), usable: u))
+        let docked = Self.r(0, 33, 1512, 879)   // a Dock that's always shown
+        #expect(CanvasController.fills(docked, usable: docked))
+        #expect(!CanvasController.fills(u, usable: docked))
+    }
+
+    /// A window at (300, 200) on the canvas, one above and to its left, one to its right; the view
+    /// at the canvas's origin, so the real windows are 33 lower (the menu bar).
+    private static func fillScene(yours: Bool) -> (CanvasController, w: ManagedWindow, aboveLeft: ManagedWindow, right: ManagedWindow) {
+        let w = Fake.window(id: 2001, canvas: Self.r(300, 200, 600, 400), real: Self.r(300, 233, 600, 400))
+        w.lastPlaced = CGPoint(x: 300, y: 233)
+        let aboveLeft = Fake.window(id: 2002, canvas: Self.r(-400, -300, 600, 400))
+        let right = Fake.window(id: 2003, canvas: Self.r(1000, 200, 600, 400))
+        let c = TestCanvas.make(windows: [aboveLeft, right, w])
+        c.resizeIsYours = { _ in yours }
+        c.gliding = true   // (no real windows to move)
+        return (c, w, aboveLeft, right)
+    }
+
+    private static func change(_ c: CanvasController, _ w: ManagedWindow, _ frame: CGRect) {
+        c.realWindowChanged(w, AXUIElementCreateApplication(w.pid), userDragging: false,
+                            size: frame.size, position: frame.origin, inFullScreenSpace: false)
+    }
+
+    @Test("SIZE-20 Fill keeps the window's top-left on the canvas; Return to Previous Size puts the view back (logic)")
+    func size20b() {
+        let (c, w, aboveLeft, right) = Self.fillScene(yours: true)
+        defer { c.isPaused = true }
+        // Fill, which macOS animates: each step is reported, the last fills the usable area.
+        Self.change(c, w, Self.r(150, 120, 1000, 700))
+        Self.change(c, w, Self.r(10, 40, 1450, 920))
+        Self.change(c, w, Self.r(0, 33, 1512, 949))
+        #expect(w.canvasFrame == Self.r(300, 200, 1512, 949), "grown right and down from where it was")
+        #expect(w.preferredSize == Self.size(1512, 949))
+        #expect(c.camera.origin == CGPoint(x: 300, y: 200), "the view moved to where the window fills the screen")
+        #expect(!aboveLeft.canvasFrame.intersects(w.canvasFrame))
+        #expect(right.canvasFrame.intersects(w.canvasFrame), "the one to the right is covered, as at 100%")
+        // Later, Return to Previous Size: macOS animates it back to where it was on screen.
+        w.changing = nil
+        Self.change(c, w, Self.r(100, 100, 1100, 800))
+        Self.change(c, w, Self.r(300, 233, 600, 400))
+        #expect(w.canvasFrame == Self.r(300, 200, 600, 400))
+        #expect(c.camera.origin == .zero, "everything is where it was before the Fill")
+    }
+
+    @Test("SIZE-20 A Fill you didn't make is followed as before (logic)") func size20c() {
+        let (c, w, _, _) = Self.fillScene(yours: false)
+        defer { c.isPaused = true }
+        Self.change(c, w, Self.r(0, 33, 1512, 949))
+        #expect(w.canvasFrame == Self.r(0, 0, 1512, 949))
+        #expect(c.camera.origin == .zero)
+        #expect(w.preferredSize == Self.size(600, 400))
+    }
 }

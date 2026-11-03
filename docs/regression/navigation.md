@@ -701,7 +701,7 @@
 ## NAV-62 Scrolling or pinching on the bare desktop works under an invisible window, and with Expanse in front
 - **Type:** Bug fix
 - **Area:** NAV
-- **Commits:** unreleased (2 Nov)
+- **Commits:** 4df566d (0.1.37)
 - **Before:** Expanse took a scroll or pinch on the desktop (NAV-18) only where the window server listed no window over it, and some apps keep invisible windows that let everything through: Notification Center one over the whole screen (macOS 27), a dictation app (Wispr Flow) one over the bottom middle. Under those, a mouse wheel, a two-finger scroll or a pinch on the desktop did nothing. It did nothing anywhere, too, while Expanse was still the front app (after leaving the canvas at an empty part of it, with nothing to focus): the gesture then went to Expanse itself, with no window, and Expanse only watched other apps' gestures (found by NAV-62 in the VM, 3 Nov).
 - **Setup:** At 100%, bare desktop under the pointer. Notification Center's window up (it is after a notification), or Wispr Flow running. Then again just after leaving the canvas at an empty part of it (Expanse still in front).
 - **Steps:**
@@ -714,7 +714,7 @@
 ## NAV-63 A mouse wheel turned a notch at a time isn't pulled back
 - **Type:** Bug fix
 - **Area:** NAV
-- **Commits:** unreleased (2 Nov)
+- **Commits:** 4df566d (0.1.37)
 - **Before:** A wheel's ticks have no phases, so a pause ends the scroll (NAV-52) and the snap follows. A notch moves the view 12pt, and the snap may go back the way you came up to 40pt (NAV-61): it put the view back after every notch, or leapt on to line up the next window.
 - **Setup:** At 100% on the canvas, a row of windows lined up with the screen's edge, a mouse with a scroll wheel.
 - **Steps:**

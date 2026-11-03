@@ -521,3 +521,15 @@
 - **Check in log:** "placed Calculator[<id>] at {x, y} beside <App>[<id>]: the saved layout has no spot for it".
 - **Automate:** unit: CanvasController.placeUnrecognised (free spots beside the anchor, no overlaps).
 - **Note:** Only when the saved layout restores at least one window; with no layout (first launch) windows stay where macOS has them.
+
+## PERSIST-43 The layout is saved a second after a change, even while changes keep coming
+- **Type:** Bug fix
+- **Area:** PERSIST
+- **Commits:** unreleased (3 Nov)
+- **Before:** Each change put the save off another second. While changes kept coming (a window scan every second or two, as when an app has a window Expanse can't take on yet, which TextEdit has after a Fill), the layout wasn't saved at all, so a size you'd just chosen or a window you'd just moved was lost if Expanse quit then (found by SIZE-11 failing now and then in the VM).
+- **Setup:** At 100%, a TextEdit window smaller than the screen.
+- **Steps:**
+  1. Green button › Fill.
+  2. Within a few seconds, quit Expanse from the menu bar panel and open it again.
+- **Expected:** The window keeps the Fill size as its chosen size (SIZE-11): `pw`/`ph` in `~/Library/Application Support/Expanse/layout.json` are the filled size a second or so after step 1.
+- **Automate:** unit: `scheduleSave` called every 0.4s still saves within a second of the first call; end-to-end: SIZE-11 reads the layout file.

@@ -581,6 +581,25 @@ import ObjectiveC
         }
     }
 
+    @Test("CAPTURE-39 Zoomed out, starts held back while replayd is stuck don't spin (logic)")
+    func capture39() async throws {
+        try await withCapture { lab in
+            var ws: [ManagedWindow] = []
+            for i in 0..<30 {
+                let x = CGFloat(i % 6) * 900, y = CGFloat(i / 6) * 700
+                ws.append(window(CGWindowID(1 + i), CGRect(x: x, y: y, width: 800, height: 600)))
+            }
+            let c = lab.canvas(ws, zoomedOut: true, camera: Camera(origin: .zero, scale: 0.25))
+            lab.stream(c)
+            // Sixteen to stream, ten asked for: no pass every 10ms for the rest while nothing starts.
+            #expect(c.windows.filter(\.capture.wanted).count == CanvasController.streamStartsPerPass)
+            #expect(!c.moreStartsQueued)
+            // replayd answering again is what picks them up.
+            WindowCapture.replaydStuck = false
+            #expect(lab.askedAgain == 1)
+        }
+    }
+
     @Test("CAPTURE-04 At 100%, windows on screen carry no purple capture badge (logic)")
     func capture04() async throws {
         try await withCapture { lab in

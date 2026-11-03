@@ -302,7 +302,7 @@
 ## SPACES-25 The minimap and Spaces panel are back at 100% after a full-screen app's Space
 - **Type:** Bug fix
 - **Area:** SPACES
-- **Commits:** unreleased (2 Nov)
+- **Commits:** 4df566d (0.1.37)
 - **Before:** Back on the desktop from a full-screen app's Space, with another app in front, macOS could stop drawing Expanse's window at 100% while still listing it on screen: the minimap, the Spaces panel and parked windows' pictures vanished, and clicks there went to the desktop picture, until the canvas next opened. A glide to the window you came back to showed it again, so it was seen only without one: in the 20s after a display change (when Expanse doesn't follow focus), or with the view already on that window (SPACES-07 lost its click now and then).
 - **Setup:** At 100% on the canvas's desktop, with the minimap and Spaces panel showing in the bottom-right. Safari is full screen on a Space of its own.
 - **Steps:**
@@ -312,3 +312,15 @@
   4. Click between the tiles in the Spaces panel, then click Safari's tile again.
 - **Expected:** At step 3 the minimap and Spaces panel are drawn on the desktop. At step 4 the clicks reach Expanse (`click at 100%` in the log), and the second one switches to Safari.
 - **Automate:** manual: end-to-end in the VM (SPACES-25), the rule in a unit test.
+
+## SPACES-26 The Expanse tile is the desktop's, with a window of the canvas full screen
+- **Type:** Bug fix
+- **Area:** SPACES
+- **Commits:** unreleased (3 Nov)
+- **Before:** The canvas's desktop was taken to be the Space of its front-most window. A window that goes full screen keeps its spot on the canvas, so with it front-most that was its full-screen Space: the Spaces panel called that Space "Expanse", `expanse://space?name=expanse` went there, and leaving the canvas opened over a full-screen app switched to it rather than the desktop (found writing the SPACES cases).
+- **Setup:** At 100% on the desktop, with a window of the canvas in front.
+- **Steps:**
+  1. Make that window full screen (green button), then ⌥` from its Space.
+  2. Look at the Spaces panel; then press Esc.
+- **Expected:** Step 2: the "Expanse" tile is the desktop, and the full-screen window has a tile of its own with its app's name. Esc goes back to the full-screen app (SPACES-15).
+- **Automate:** unit: `canvasDesktop(front:desktops:spacesOf:)` skips windows whose Space isn't a desktop.

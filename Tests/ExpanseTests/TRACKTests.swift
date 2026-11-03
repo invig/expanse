@@ -274,6 +274,34 @@ private final class QuitApp: NSRunningApplication {
         #expect(on2.canvasFrame.origin == CGPoint(x: 600, y: 100))
     }
 
+    // MARK: TRACK-44
+
+    @Test("TRACK-44 Restore all windows while zoomed out isn't undone by leaving the canvas")
+    func track44() {
+        let on = Self.placed(4401, canvas: CGRect(x: 3100, y: 2100, width: 400, height: 300))
+        let away = (0..<3).map { i in
+            let w = Fake.window(id: 4410 + CGWindowID(i), canvas: CGRect(x: 9000 + CGFloat(i) * 700, y: 6000, width: 600, height: 400))
+            w.parked = true
+            return w
+        }
+        let c = Self.canvas([on] + away)
+        defer { Self.finish(c) }
+        // Zoomed out from the view at (3000, 2000), which leaving goes back to.
+        c.isActive = true
+        c.returnCamera = Camera(origin: CGPoint(x: 3000, y: 2000), scale: 1)
+        c.camera = Camera(origin: CGPoint(x: -2000, y: -1000), scale: 0.2)
+        c.restoreAll()
+        for (i, w) in away.enumerated() {
+            // The same cascade as at 100% (TRACK-09), in the view leaving goes back to, so leaving
+            // puts them there; the real windows wait for it.
+            let step = CGFloat(i) * 28
+            #expect(w.canvasFrame.origin == CGPoint(x: 3000 + 756 - 300 + step, y: 2000 + 40 + step))
+            #expect(!w.parked)
+            #expect(w.lastPlaced == nil)
+        }
+        #expect(on.canvasFrame.origin == CGPoint(x: 3100, y: 2100))
+    }
+
     // MARK: TRACK-10, TRACK-15 (manual)
 
     /// TextEdit's window (900×650 on this screen, 1000×700 the size you chose) minimised or
