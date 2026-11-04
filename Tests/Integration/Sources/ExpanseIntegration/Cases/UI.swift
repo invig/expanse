@@ -542,7 +542,7 @@ import Security
                 if tree.has("Permission needed") { throw Skip("Expanse is missing a permission (the panel says Permission needed)") }
                 let parts = ["Expanse", uiOn(n), "Open Expanse", "Centre window", "Tidy up", "Auto-centre focused window",
                              "Desktop picture background", "Window names when zoomed out", "Hot corner", "Earlier layouts", "Take snapshot",
-                             "Restore all windows", "Permissions OK", "Welcome & Shortcuts", "Troubleshooting", "Settings…", "Quit Expanse"]
+                             "Restore all windows", "Permissions OK", "Welcome & Shortcuts", "Troubleshooting", "Settings", "Quit Expanse"]
                 let missing = parts.filter { !tree.has($0) }
                 try t.expect(missing.isEmpty, "the panel is missing: \(missing.joined(separator: "; "))")
                 try t.expect(tree.first("Expanse", role: kAXCheckBoxRole) != nil, "no on/off switch in the panel's header")
@@ -775,21 +775,22 @@ import Security
                 defer { if !settingsRan { uiQuitSystemSettings() } }
                 var failure: Error?
                 do {
-                    try await t.ask("In System Settings › Privacy & Security › Screen Recording, switch Expanse off, leaving Accessibility on. (If macOS offers to quit Expanse, choose Later.)")
+                    try await t.askToSwitchExpanse(false, in: .screenRecording, "If macOS offers to quit Expanse, choose Later.")
                     var tree = try await t.uiOpenPanelTree()
                     for text in ["Screen Recording is off", "Zoomed out, windows show as outlines without it. Once it's on, reopen Expanse.", "Permission needed"] {
                         try t.expect(tree.has(text), "the panel should say “\(text)”")
                     }
                     try await t.uiPressBanner(tree)
-                    try await t.look("macOS asked for Screen Recording for Expanse (its prompt, or System Settings at Screen Recording)?")
-                    try await t.ask("Switch Screen Recording back on for Expanse, and switch Accessibility off for it.")
+                    try await t.look("macOS asked for Screen Recording for Expanse (its prompt, or System Settings at \(SettingsPage.screenRecording.path))?")
+                    try await t.askToSwitchExpanse(true, in: .screenRecording, "If macOS offers to quit Expanse, choose Later.")
+                    try await t.askToSwitchExpanse(false, in: .accessibility)
                     tree = try await t.uiOpenPanelTree()
                     for text in ["Accessibility is off", "Expanse can't move windows without it.", "Permission needed"] {
                         try t.expect(tree.has(text), "the panel should say “\(text)”")
                     }
                     try await t.uiPressBanner(tree)
-                    try await t.look("macOS asked for Accessibility for Expanse (its prompt, or System Settings at Accessibility)?")
-                    try await t.ask("Switch Screen Recording off for Expanse too (Accessibility stays off).")
+                    try await t.look("macOS asked for Accessibility for Expanse (its prompt, or System Settings at \(SettingsPage.accessibility.path))?")
+                    try await t.askToSwitchExpanse(false, in: .screenRecording, "If macOS offers to quit Expanse, choose Later.")
                     tree = try await t.uiOpenPanelTree()
                     try t.expect(tree.has("Accessibility and Screen Recording are off"), "the panel should say “Accessibility and Screen Recording are off”")
                     try await t.uiClosePanel()
@@ -799,7 +800,8 @@ import Security
                 // Both back, and Expanse reopened so Screen Recording takes effect.
                 try? await t.uiClosePanel()
                 do {
-                    try await t.ask("Put both back: switch Accessibility and Screen Recording on for Expanse. Expanse reopens when you press Done.")
+                    try await t.askToSwitchExpanse(true, in: .accessibility)
+                    try await t.askToSwitchExpanse(true, in: .screenRecording, "If macOS offers to quit Expanse, choose Later: Expanse reopens when you click Done.")
                     try await t.relaunchExpanse()
                 } catch {
                     failure = failure ?? error
@@ -807,21 +809,14 @@ import Security
                 if let failure { throw failure }
             }
         },
-        Case("UI-38", "The Settings window", .guided) { t in
+        Case("UI-38", "The Settings page", .guided) { t in
             try await t.uiClosingUp {
                 try t.needsInput()
                 let settingsRan = uiSystemSettingsRunning()
                 defer { if !settingsRan { uiQuitSystemSettings() } }
                 let oldSetUp = expanseDefault("loginItemSetUp")
                 defer { setExpanseDefault("loginItemSetUp", oldSetUp) }
-                try await t.window("UI-38 A")
-                t.link("enter")
-                try await t.until("zoomed out") { try await t.settle().active }
-                // The canvas closes first, then a small Expanse Settings window opens in front.
                 let first = try await t.uiOpenSettings()
-                let s = try await t.settle()
-                try t.expect(!s.active, "the gear should close the canvas first (back to 100%)")
-                try t.uiExpectInFront(first.win, "Expanse Settings")
                 let tree = first.tree
                 let version = Bundle(url: t.expanseURL)?.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
                 guard let login = tree.first("Open Expanse at login", role: kAXCheckBoxRole) else { throw Failure("no “Open Expanse at login” switch") }
@@ -842,20 +837,79 @@ import Security
                 try await t.uiSetLogin(!wasOn)
                 NSWorkspace.shared.open(uiLoginItemsPane)
                 try await t.look("System Settings › General › Login Items: Expanse is \(wasOn ? "no longer" : "now") listed under Open at Login?")
-                // A change made in System Settings shows when the window is key again.
+                // A change made in System Settings shows when the page next opens.
                 try await t.uiSetLogin(true)
-                try await t.ask("In System Settings › Login Items, select Expanse under Open at Login and click −. Then click the Expanse Settings window.")
+                try await t.askInSettings(.loginItems, "Under Open at Login, click Expanse to select it.", "Click − under that list.")
+                _ = try await t.uiOpenSettings()
                 try await t.until("the switch to show the change", timeout: 5) { t.uiLoginSwitch() == false }
                 if wasOn { try await t.uiSetLogin(true) }
-                // The gear again brings back the same window.
-                if let w = t.uiSettings() { _ = uiPressClose(w.tree) }
-                try await t.until("Settings to close", timeout: 3) { t.uiSettings() == nil }
-                let second = try await t.uiOpenSettings()
-                try t.expect(second.win.id == first.win.id, "the gear should bring back the same Settings window (it was \(first.win.id), now \(second.win.id))")
-                _ = uiPressClose(second.tree)
+            }
+        },
+        Case("UI-42", "Settings is a page of the panel, not a window of its own") { t in
+            try await t.uiClosingUp {
+                try t.needsInput()
+                let keys = ["windowGap", "motion"]
+                let olds = keys.map { expanseDefault($0) }
+                defer { for (k, v) in zip(keys, olds) { setExpanseDefault(k, v) } }
+                try await t.window("UI-42 A")
+                t.link("enter")
+                try await t.until("zoomed out") { try await t.settle().active }
+                let firstPage = try await t.uiOpenPanel().frame
+                let panelTop = firstPage.minY
+                // In the panel, over the canvas: the same panel, with no window of its own.
+                var page = try await t.uiOpenSettings()
+                let s = try await t.settle()
+                try t.expect(s.active, "Settings shouldn't close the canvas")
+                try t.expect(abs(page.win.frame.minY - panelTop) < 1, "the panel's top should stay where it was (\(panelTop), now \(page.win.frame.minY))")
+                try t.expect(!page.tree.has("Hot corner"), "Settings should take the place of the panel's first page")
+                @MainActor func expectFirstPageFits() async throws {
+                    try await t.until("the panel to grow back to its first page", timeout: 3) { abs((t.uiPanel()?.frame.height ?? 0) - firstPage.height) < 3 }
+                    let tree = try await t.uiPanelTree()
+                    guard let gear = tree.button("Settings")?.frame, let frame = t.uiPanel()?.frame else { throw Failure("no gear on the panel's first page") }
+                    try t.expect(frame.contains(gear), "the gear (\(gear)) should be inside the panel (\(frame))")
+                    try t.expect(abs(frame.minY - panelTop) < 1, "the panel's top should stay where it was (\(panelTop), now \(frame.minY))")
+                }
+                try t.expect(uiCGWindowsNamed("Expanse Settings").isEmpty, "no Expanse Settings window should open")
+                // Each pick takes at once, and the panel stays on the page.
+                let picks: [(pill: String, key: String, shown: (Any?) -> Bool)] = [
+                    ("10pt", "windowGap", { ($0 as? Double) == 10 }),
+                    ("None", "windowGap", { ($0 as? Double) == 0 }),
+                    ("20pt", "windowGap", { ($0 as? Double) == 20 }),
+                    ("Jump", "motion", { ($0 as? String) == "jump" }),
+                    ("Animate", "motion", { ($0 as? String) == "glide" }),
+                    ("Match macOS", "motion", { ($0 as? String) == "follow" }),
+                ]
+                for pick in picks {
+                    try t.uiPress(pick.pill, in: page.tree)
+                    try await t.until("“\(pick.pill)” to take", timeout: 3) { pick.shown(expanseDefault(pick.key)) }
+                    try await t.pause(0.2)
+                    guard let now = t.uiSettings() else { throw Failure("picking “\(pick.pill)” should leave the page open") }
+                    page = now
+                }
+                // Esc goes back, and only then closes; the back button goes back too.
+                Input.key(.escape)
+                try await t.until("Esc to go back", timeout: 3) { t.uiSettings() == nil }
+                try t.expect(t.uiPanel() != nil, "Esc on Settings should go back to the panel's first page, not close it")
+                try await expectFirstPageFits()
+                page = try await t.uiOpenSettings()
+                try t.uiPress("Back", in: page.tree)
+                try await t.until("the back button to go back", timeout: 3) { t.uiSettings() == nil && t.uiPanel() != nil }
+                try await expectFirstPageFits()
+                // Closed from Settings, it opens again on the first page.
+                _ = try await t.uiOpenSettings()
+                try await t.uiClosePanel()
+                try t.expect(try await t.uiOpenPanelTree().has("Hot corner"), "the panel should open on its first page")
+                try await t.uiClosePanel()
+                t.link("exit")
             }
         },
     ]
+}
+
+/// On-screen windows with this title, of any app, as the window server lists them.
+private func uiCGWindowsNamed(_ name: String) -> [CGWindowID] {
+    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    return info.compactMap { $0[kCGWindowName as String] as? String == name ? $0[kCGWindowNumber as String] as? CGWindowID : nil }
 }
 
 // MARK: - Levels and sizes
@@ -1255,9 +1309,10 @@ fileprivate extension Ctx {
     func uiClosingUp(_ body: () async throws -> Void) async throws {
         var failure: Error?
         do { try await body() } catch { failure = error }
+        // On the Settings page, Esc goes back first.
+        if uiSettings() != nil, Input.allowed { Input.key(.escape) }
         if uiPanel() != nil, Input.allowed { Input.key(.escape) }
         if let w = uiWelcome(), let tree = uiTree(at: w.frame) { _ = uiPressClose(tree) }
-        if let settings = uiSettings() { _ = uiPressClose(settings.tree) }
         if let failure { throw failure }
     }
 
@@ -1324,9 +1379,14 @@ fileprivate extension Ctx {
         return try await uiPanelTree()
     }
 
-    /// Esc (the panel takes key focus without activating Expanse).
+    /// Esc (the panel takes key focus without activating Expanse). On the Settings page, it goes
+    /// back first.
     func uiClosePanel() async throws {
         guard uiPanel() != nil else { return }
+        if uiSettings() != nil, Input.allowed {
+            Input.key(.escape)
+            try await until("Esc to go back from Settings", timeout: 3) { self.uiSettings() == nil }
+        }
         if Input.allowed { Input.key(.escape) } else { try await ask("Press Esc to close Expanse's menu bar panel.") }
         try await until("the menu bar panel to close", timeout: 3) { self.uiPanel() == nil }
     }
@@ -1434,24 +1494,19 @@ fileprivate extension Ctx {
         if let failure { throw failure }
     }
 
-    /// The Expanse Settings window and its contents, if it's open.
+    /// The panel's Settings page and its contents, if it's showing.
     func uiSettings() -> (win: UIWin, tree: UINode)? {
-        for el in uiAXWindows() {
-            var one = 1
-            let shallow = UINode(el, budget: &one)
-            guard shallow.title == "Expanse Settings", let f = shallow.frame,
-                  let win = uiWindows().first(where: { $0.layer == 0 && uiSame($0.frame, f) }) else { continue }
-            var budget = 2000
-            return (win, UINode(el, budget: &budget))
-        }
-        return nil
+        guard let p = uiPanel(), let tree = uiTree(at: p.frame),
+              tree.first("Open Expanse at login", role: kAXCheckBoxRole) != nil else { return nil }
+        return (p, tree)
     }
 
     /// Settings, from the panel's gear.
     func uiOpenSettings() async throws -> (win: UIWin, tree: UINode) {
-        try uiPress("Settings…", in: try await uiOpenPanelTree())
+        if let open = uiSettings() { return open }
+        try uiPress("Settings", in: try await uiOpenPanelTree())
         var found: (win: UIWin, tree: UINode)?
-        try await until("the Expanse Settings window", timeout: 5) {
+        try await until("the panel's Settings page", timeout: 5) {
             found = self.uiSettings()
             return found != nil
         }
@@ -1463,13 +1518,15 @@ fileprivate extension Ctx {
     /// Settings' “Open Expanse at login”, flipped to `on` if it isn't. Switched off in System
     /// Settings, macOS may want your OK there first.
     func uiSetLogin(_ on: Bool) async throws {
-        guard let sw = uiSettings()?.tree.first("Open Expanse at login", role: kAXCheckBoxRole) else { throw Failure("Expanse Settings isn't open") }
+        guard let sw = try await uiOpenSettings().tree.first("Open Expanse at login", role: kAXCheckBoxRole) else { throw Failure("no “Open Expanse at login” switch") }
         if sw.on == on { return }
         sw.press()
         do {
             try await until("“Open Expanse at login” to turn \(on ? "on" : "off")", timeout: 3) { self.uiLoginSwitch() == on }
         } catch where on {
-            try await ask("macOS wants your OK: in System Settings › Login Items, switch Expanse on. Then click the Expanse Settings window.")
+            try await askInSettings(.loginItems, "Find Expanse on this page: under Open at Login, or under Background App Activity.",
+                                    "If it has a switch, click it so it's ON (blue).")
+            _ = try await uiOpenSettings()
             try await until("“Open Expanse at login” to show on", timeout: 5) { self.uiLoginSwitch() == true }
         }
     }

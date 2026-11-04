@@ -7,6 +7,7 @@ import SwiftUI
 @_private(sourceFile: "SpacesBar.swift") @testable import Expanse
 @_private(sourceFile: "GlassPanel.swift") @testable import Expanse
 @_private(sourceFile: "MenuPanel.swift") @testable import Expanse
+@_private(sourceFile: "AppDelegate.swift") @testable import Expanse
 @_private(sourceFile: "ManagedWindow.swift") @testable import Expanse
 @_private(sourceFile: "LayoutStore.swift") @testable import Expanse
 @_private(sourceFile: "HotCorner.swift") @testable import Expanse
@@ -624,7 +625,8 @@ import SwiftUI
                                            .restoreLayout(URL(fileURLWithPath: "/tmp/1.json")), .takeSnapshot]
         let working: [MenuPanel.Action] = [.autoCentre(true), .wallpaper(true), .names(true), .corner(.all), .corner(.off),
                                            .grantAccessibility, .grantScreenRecording, .installUpdate,
-                                           .detailedLogging(true), .copyLogs, .showLogFile, .reportIssue, .welcome, .settings, .quit]
+                                           .detailedLogging(true), .copyLogs, .showLogFile, .reportIssue, .welcome, .quit,
+                                           .openAtLogin(true), .gap(10), .motion("jump"), .automaticUpdates(true), .checkForUpdates]
         for action in waiting { #expect(action.needsCanvas, "\(action)") }
         for action in working { #expect(!action.needsCanvas, "\(action)") }
         #expect(Self.panelView(MenuPanel.State(isOn: false)).status == "Starts once the walkthrough is done")
@@ -643,8 +645,8 @@ import SwiftUI
         #expect(performed.isEmpty)
         panel.run(.names(true))
         panel.run(.corner(.bottomLeft))
-        panel.run(.settings)
-        #expect(performed == [MenuPanel.Action.names(true), .corner(.bottomLeft), .settings].map { "\($0)" })
+        panel.run(.gap(10))
+        #expect(performed == [MenuPanel.Action.names(true), .corner(.bottomLeft), .gap(10)].map { "\($0)" })
 
         // Started: they go through.
         state.isOn = true
@@ -652,6 +654,66 @@ import SwiftUI
         performed = []
         panel.run(.tidy)
         #expect(performed == ["tidy"])
+    }
+
+    @Test("UI-42 Settings is a page of the panel: its picks leave it open, Esc goes back, then closes") func ui42a() {
+        Env.isolate()
+        let panel = MenuPanel(button: NSStatusBarButton(frame: .zero), state: { MenuPanel.State(isOn: true) }, perform: { _ in })
+        for action in [MenuPanel.Action.openAtLogin(true), .gap(10), .motion("jump"), .automaticUpdates(false)] {
+            #expect(!action.closesPanel, "\(action)")
+        }
+        // Its answer is an alert.
+        #expect(MenuPanel.Action.checkForUpdates.closesPanel)
+        panel.isShown = true
+        panel.model.settings()
+        #expect(panel.model.page == .settings)
+        panel.escape()
+        #expect(panel.model.page == .main)
+        #expect(panel.isShown)
+        panel.escape()
+        #expect(!panel.isShown)
+    }
+
+    @Test("UI-42 Settings has what the window had, and says it's a development build") func ui42b() {
+        _ = NSApplication.shared
+        let model = MenuPanel.Model()
+        let page = Self.strings(in: SettingsPage(model: model).body)
+        for part in ["Open Expanse at login", "Gaps between windows", "20pt", "10pt", "None", "Glides and zooms", "Match macOS",
+                     "Animate", "Jump", "Updates", "Check for updates automatically", "Check Now",
+                     "This is a development build: it has no updates, and opening at login opens this copy."] {
+            #expect(page.contains { $0.contains(part) }, "\(part)")
+        }
+    }
+
+    @Test("UI-42 Settings' picks change the settings, and the panel's state shows them") func ui42c() {
+        let app = URLTests.makeApp()
+        let defaults = UserDefaults.standard
+        let saved = [CanvasController.gapKey, CanvasController.motionKey].map { ($0, defaults.object(forKey: $0)) }
+        let automatic = Updater.shared.automatic
+        defer {
+            for (key, value) in saved { defaults.set(value, forKey: key) }
+            Updater.shared.automatic = automatic
+        }
+        for gap in [10, 0, 20] as [CGFloat] {
+            app.perform(.gap(gap))
+            #expect(CanvasController.gap == gap)
+            #expect(app.menuState().gap == gap)
+        }
+        for motion in ["jump", "glide", "follow"] {
+            app.perform(.motion(motion))
+            #expect(CanvasController.motion == motion)
+            #expect(app.menuState().motion == motion)
+        }
+        // What low motion goes by is what was picked.
+        app.perform(.motion("jump"))
+        #expect(CanvasController.lowMotion)
+        for on in [false, true] {
+            app.perform(.automaticUpdates(on))
+            #expect(app.menuState().automaticUpdates == on)
+        }
+        // Anything unknown shows as Match macOS.
+        defaults.set("something else", forKey: CanvasController.motionKey)
+        #expect(CanvasController.motion == "follow")
     }
 
     @Test("UI-40 A sliver at the screen's edge doesn't cover the minimap or Spaces panel") func ui40() {

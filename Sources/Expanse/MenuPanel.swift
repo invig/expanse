@@ -1,24 +1,25 @@
 import AppKit
-import Combine
 import SwiftUI
 
 /// What the menu bar icon opens, in place of a menu: a Liquid Glass panel with the canvas at a
 /// glance (a live minimap, which opens it), the everyday commands and switches, the hot corner,
-/// earlier layouts to go back to, and anything that needs you (a permission, an update). Updates
-/// and Open at Login are in Settings (see SettingsWindow).
+/// earlier layouts to go back to, and anything that needs you (a permission, an update). The gear
+/// goes to a second page of the same panel, Settings (see SettingsPage).
 final class MenuPanel: NSObject, NSWindowDelegate {
     enum Action {
         case toggleCanvas, setPaused(Bool), centreWindow, tidy, restoreAll, restoreLayout(URL), takeSnapshot
         case autoCentre(Bool), wallpaper(Bool), names(Bool), corner(HotCorner.Corner)
         case grantAccessibility, grantScreenRecording, installUpdate
         case detailedLogging(Bool), copyLogs, showLogFile, reportIssue
-        case welcome, settings, quit
+        case openAtLogin(Bool), gap(CGFloat), motion(String), automaticUpdates(Bool), checkForUpdates
+        case welcome, quit
 
         /// Switches and picks leave the panel open, to see them take; commands close it, as a
         /// menu would.
         var closesPanel: Bool {
             switch self {
-            case .setPaused, .autoCentre, .wallpaper, .names, .corner, .detailedLogging, .takeSnapshot: false
+            case .setPaused, .autoCentre, .wallpaper, .names, .corner, .detailedLogging, .takeSnapshot,
+                 .openAtLogin, .gap, .motion, .automaticUpdates: false
             default: true
             }
         }
@@ -53,7 +54,14 @@ final class MenuPanel: NSObject, NSWindowDelegate {
         var update: String?
         var detailedLogging = false
         var hasLogFile = false
+        /// Asked of macOS as the Settings page opens, as the permissions are as the panel opens.
+        var openAtLogin = false
+        var gap: CGFloat = 20
+        var motion = "follow"
+        var automaticUpdates = true
     }
+
+    enum Page { case main, settings }
 
     /// An earlier layout (see LayoutStore.snapshots), drawn from its windows.
     struct Layout: Identifiable, Equatable {
@@ -65,8 +73,11 @@ final class MenuPanel: NSObject, NSWindowDelegate {
     final class Model: ObservableObject {
         @Published var state = State()
         @Published var layouts: [Layout] = []
+        @Published var page = Page.main
         var perform: (Action) -> Void = { _ in }
         var troubleshoot: () -> Void = {}
+        var settings: () -> Void = {}
+        var contentHeight: (CGFloat) -> Void = { _ in }
     }
 
     static let width: CGFloat = 360
@@ -85,7 +96,6 @@ final class MenuPanel: NSObject, NSWindowDelegate {
     private(set) var isShown = false
     private var monitors: [Any] = []
     private var refreshTimer: Timer?
-    private var resize: AnyCancellable?
     /// When it last closed: the click on the icon that took its focus, and so closed it, mustn't
     /// open it again.
     private var closedAt: CFTimeInterval = 0
@@ -94,6 +104,7 @@ final class MenuPanel: NSObject, NSWindowDelegate {
     /// The Troubleshooting menu is up: clicks in it aren't clicks outside the panel.
     private var menuOpen = false
     private var permissions = (accessibility: true, screenRecording: true)
+    private var openAtLogin = false
 
     init(button: NSStatusBarButton, state: @escaping () -> State, perform: @escaping (Action) -> Void) {
         self.button = button
@@ -102,6 +113,8 @@ final class MenuPanel: NSObject, NSWindowDelegate {
         super.init()
         model.perform = { [weak self] in self?.run($0) }
         model.troubleshoot = { [weak self] in self?.showTroubleshooting() }
+        model.settings = { [weak self] in self?.showSettings() }
+        model.contentHeight = { [weak self] height in DispatchQueue.main.async { self?.fit(height) } }
         button.target = self
         button.action = #selector(clicked)
         // On the press, as a menu opens.
@@ -116,6 +129,7 @@ final class MenuPanel: NSObject, NSWindowDelegate {
         guard !isShown else { return }
         isShown = true
         shows += 1
+        model.page = .main
         permissions = (AX.isTrusted(prompt: false), CGPreflightScreenCaptureAccess())
         refresh()
         model.layouts = Self.layouts()
@@ -131,8 +145,6 @@ final class MenuPanel: NSObject, NSWindowDelegate {
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.refresh() }
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
-        // A banner coming or going changes its height: grow or shrink downwards.
-        resize = model.objectWillChange.sink { [weak self] in DispatchQueue.main.async { self?.fit() } }
         let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         monitors = [
             NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in self?.close() },
@@ -150,7 +162,6 @@ final class MenuPanel: NSObject, NSWindowDelegate {
         closedAt = CACurrentMediaTime()
         refreshTimer?.invalidate()
         refreshTimer = nil
-        resize = nil
         monitors.forEach(NSEvent.removeMonitor)
         monitors = []
         button?.highlight(false)
@@ -166,6 +177,7 @@ final class MenuPanel: NSObject, NSWindowDelegate {
         guard !action.needsCanvas || model.state.isOn else { return }
         if action.closesPanel { close() }
         perform(action)
+        if case .openAtLogin = action { openAtLogin = LoginItem.enabled }
         refresh()
         // The new one, in front of the others.
         if case .takeSnapshot = action { model.layouts = Self.layouts() }
@@ -174,6 +186,7 @@ final class MenuPanel: NSObject, NSWindowDelegate {
     private func refresh() {
         var state = readState()
         (state.accessibility, state.screenRecording) = permissions
+        state.openAtLogin = openAtLogin
         if state != model.state { model.state = state }
     }
 
@@ -204,14 +217,27 @@ final class MenuPanel: NSObject, NSWindowDelegate {
         panel.setFrame(glass.insetBy(dx: -Self.margin, dy: -Self.margin), display: true)
     }
 
-    private func fit() {
+    /// A banner or the other page changes its height: it grows or shrinks downwards. SwiftUI says
+    /// once it's laid them out (see PanelView): asked straight after a change, it can give the old one.
+    private func fit(_ content: CGFloat) {
         guard isShown else { return }
-        let height = hosting.sizeThatFits(in: CGSize(width: Self.width, height: 10_000)).height + 2 * Self.margin
+        let height = content + 2 * Self.margin
         var frame = panel.frame
         guard abs(frame.height - height) > 0.5 else { return }
         frame.origin.y = frame.maxY - height
         frame.size.height = height
         panel.setFrame(frame, display: true)
+    }
+
+    private func showSettings() {
+        openAtLogin = LoginItem.enabled
+        refresh()
+        model.page = .settings
+    }
+
+    /// Esc: back from Settings, then closed.
+    private func escape() {
+        if model.page == .main { close() } else { model.page = .main }
     }
 
     /// A native menu, under the pointer.
@@ -247,7 +273,7 @@ final class MenuPanel: NSObject, NSWindowDelegate {
         p.becomesKeyOnlyIfNeeded = false
         p.animationBehavior = .none
         p.delegate = self
-        p.onEscape = { [weak self] in self?.close() }
+        p.onEscape = { [weak self] in self?.escape() }
         hosting.sizingOptions = []
         let content = hosting.view
         let glass: NSView
@@ -291,7 +317,7 @@ final class MenuPanel: NSObject, NSWindowDelegate {
     }
 
     /// Takes focus without bringing Expanse to the front (as Control Center's panels do), so the
-    /// app you're in stays the one ⌃⌥C centres; Escape closes it.
+    /// app you're in stays the one ⌃⌥C centres; Escape is the panel's to answer.
     private final class Panel: NSPanel {
         var onEscape: () -> Void = {}
         override var canBecomeKey: Bool { true }
@@ -325,6 +351,16 @@ private struct PanelView: View {
     private var state: MenuPanel.State { model.state }
 
     var body: some View {
+        Group {
+            if model.page == .settings { SettingsPage(model: model) } else { mainPage }
+        }
+        .padding(10)
+        .frame(width: MenuPanel.width)
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }, action: { model.contentHeight($0) })
+    }
+
+    private var mainPage: some View {
         VStack(spacing: 8) {
             header
             if !state.accessibility || !state.screenRecording { permissionBanner }
@@ -353,9 +389,6 @@ private struct PanelView: View {
             layouts
             footer
         }
-        .padding(10)
-        .frame(width: MenuPanel.width)
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var status: String {
@@ -483,7 +516,7 @@ private struct PanelView: View {
             Spacer()
             FooterButton(symbol: "questionmark.circle", help: "Welcome & Shortcuts") { model.perform(.welcome) }
             FooterButton(symbol: "stethoscope", help: "Troubleshooting") { model.troubleshoot() }
-            FooterButton(symbol: "gearshape", help: "Settings…") { model.perform(.settings) }
+            FooterButton(symbol: "gearshape", help: "Settings") { model.settings() }
             FooterButton(symbol: "power", help: "Quit Expanse") { model.perform(.quit) }
         }
         .padding(.leading, 8)
@@ -491,6 +524,100 @@ private struct PanelView: View {
 
     private func binding(_ value: Bool, _ action: @escaping (Bool) -> MenuPanel.Action) -> Binding<Bool> {
         Binding(get: { value }, set: { model.perform(action($0)) })
+    }
+}
+
+// MARK: - Settings
+
+/// What doesn't need to be one click away: opening at login, the gap between windows, how the view
+/// moves, and updates. A page of the panel, so it opens over the canvas as well as at 100%. Its
+/// picks are pills, not pop-up menus: a click in a menu counts as a click outside the panel.
+/// A development build has no updates, so those show greyed out; it opens at login only if you
+/// turn that on here (a release turns it on by itself: see LoginItem).
+private struct SettingsPage: View {
+    @ObservedObject var model: MenuPanel.Model
+    private var state: MenuPanel.State { model.state }
+    private let isRelease = Updater.shared.isRelease
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 4) {
+                FooterButton(symbol: "chevron.left", help: "Back") { model.page = .main }
+                Text("Settings").font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 0)
+            }
+            SwitchRow(title: "Open Expanse at login",
+                      isOn: Binding(get: { state.openAtLogin }, set: { model.perform(.openAtLogin($0)) }))
+                .padding(.vertical, 4)
+                .card()
+            PickCard(title: "Gaps between windows", note: "Snapping, Tidy up and the screens you build use it.",
+                     options: [("20pt", 20), ("10pt", 10), ("None", 0)], selected: state.gap) { model.perform(.gap($0)) }
+            PickCard(title: "Glides and zooms",
+                     note: "Jump goes straight to where a glide or zoom would end. Match macOS jumps when Reduce Motion is on.",
+                     options: [("Match macOS", "follow"), ("Animate", "glide"), ("Jump", "jump")],
+                     selected: state.motion) { model.perform(.motion($0)) }
+            updates
+            if !isRelease {
+                Text("This is a development build: it has no updates, and opening at login opens this copy.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
+            }
+        }
+    }
+
+    private var updates: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Updates")
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 2)
+            SwitchRow(title: "Check for updates automatically",
+                      isOn: Binding(get: { state.automaticUpdates }, set: { model.perform(.automaticUpdates($0)) }))
+            HStack(spacing: 8) {
+                Text("Expanse \(Updater.shared.currentVersion)").font(.system(size: 12))
+                Spacer(minLength: 8)
+                LinkButton(title: "Check Now") { model.perform(.checkForUpdates) }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+        }
+        .padding(.bottom, 4)
+        .opacity(isRelease ? 1 : 0.5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+        .disabled(!isRelease)
+    }
+}
+
+/// A title, a row of pills to pick from, and a line on what it does.
+private struct PickCard<Value: Equatable>: View {
+    let title: String
+    let note: String
+    let options: [(title: String, value: Value)]
+    let selected: Value
+    let pick: (Value) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.system(size: 12, weight: .medium))
+            HStack(spacing: 6) {
+                ForEach(options.indices, id: \.self) { i in
+                    Pill(title: options[i].title, selected: options[i].value == selected) { pick(options[i].value) }
+                }
+            }
+            Text(note)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
     }
 }
 
@@ -708,6 +835,7 @@ private struct Pill: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

@@ -46,7 +46,7 @@ import Security
                 try t.setupPressInWelcome("Open Settings")
                 try await t.setupPromptOrSystemSettings()
                 // Switched on in System Settings, the card ticks within about a second, with no relaunch.
-                try await t.ask("Switch Expanse on in System Settings › Privacy & Security › Accessibility (macOS's prompt's Open System Settings goes there). Leave the walkthrough as it is.")
+                try await t.askToSwitchExpanse(true, in: .accessibility, "Leave the walkthrough as it is.")
                 try await t.until("the Accessibility card to say On", timeout: 3) { (try? await t.setupWelcomeTree())?.has("On") == true }
                 try t.expect(t.setupPID == pid, "Expanse relaunched: the tick should come without one")
                 // The Screen Recording step's button.
@@ -60,7 +60,7 @@ import Security
             try await t.setupFirstLaunch(reset: ["ScreenCapture"], clear: ["onboardingDone", "onboardingPage"]) {
                 try await t.setupWalkthrough(to: "STEP 2 OF 4")
                 try t.setupPressInWelcome("Open Settings")
-                try await t.ask("Allow Screen Recording: click Open System Settings in macOS's prompt and switch Expanse on. If macOS offers to quit and reopen Expanse, choose Later.")
+                try await t.ask(setupPromptSteps("If macOS offers to quit and reopen Expanse, choose Later."))
                 try await t.until("the step's button to read Reopen Expanse", timeout: 5) {
                     (try? await t.setupWelcomeTree())?.button("Reopen Expanse") != nil
                 }
@@ -104,7 +104,7 @@ import Security
             try await t.setupFirstLaunch(reset: ["ScreenCapture"], clear: ["onboardingPage"]) {
                 try await t.setupWalkthrough(to: "STEP 2 OF 4")
                 try t.setupPressInWelcome("Open Settings")
-                try await t.ask("Click Open System Settings in macOS's prompt and switch Expanse on. If macOS offers to quit and reopen Expanse, choose Later: don't reopen it.")
+                try await t.ask(setupPromptSteps("If macOS offers to quit and reopen Expanse, choose Later: don't reopen it."))
                 let pid = t.setupPID
                 // Closing the walkthrough starts Expanse, as finishing does.
                 try await t.setupCloseWelcome()
@@ -184,7 +184,7 @@ import Security
                 try await t.until("the walkthrough to open") { t.setupWelcome() != nil }
                 try await t.setupWalkthrough(to: "STEP 2 OF 4")
                 try t.setupPressInWelcome("Open Settings")
-                try await t.ask("Allow Screen Recording: click Open System Settings in macOS's prompt and switch Expanse on. If macOS offers to quit and reopen Expanse, choose Later.")
+                try await t.ask(setupPromptSteps("If macOS offers to quit and reopen Expanse, choose Later."))
                 try await t.until("the step's button to read Reopen Expanse", timeout: 5) {
                     (try? await t.setupWelcomeTree())?.button("Reopen Expanse") != nil
                 }
@@ -227,7 +227,8 @@ import Security
                             setupCornersInTheWay().isEmpty, setupArrowsInTheWay().isEmpty]
                 try t.expect(setupTicks(tree) == done, "the four rows' ticks \(setupTicks(tree)) don't match what's done \(done)")
                 // Changed in System Settings, the matching row follows within about a second.
-                try await t.ask("In System Settings change one of the last two steps: set a macOS hot corner that Expanse uses to – (or back to an action), or switch one of Mission Control's ⌃-arrow shortcuts off (or on).")
+                try await t.askInSettings(.hotCorners, "Click Hot Corners… near the bottom of the page.",
+                                          "Change a corner Expanse uses: set it to –, or to an action if it's –.", "Click Done on that sheet.")
                 let now = [done[0], done[1], setupCornersInTheWay().isEmpty, setupArrowsInTheWay().isEmpty]
                 try t.expect(now != done, "neither macOS's hot corners nor its ⌃-arrow shortcuts changed in a way the walkthrough shows")
                 try await t.until("the rows to follow the change", timeout: 3) {
@@ -267,7 +268,7 @@ import Security
                 try await t.setupExpectPromptInFront(pressing: "Open Settings")
                 try await t.ask("In macOS's prompt, click Open System Settings.")
                 try await t.until("System Settings in front", timeout: 6) { setupSystemSettingsInFront() }
-                try await t.look("System Settings is at Privacy & Security › Screen Recording, with Expanse in the list?")
+                try await t.look("System Settings is at \(SettingsPage.screenRecording.path), with Expanse in the list?")
                 let tree = try await t.setupWelcomeTree()
                 try t.expect(tree.has("Switched it on? Reopen Expanse to finish."), "the card should read “Switched it on? Reopen Expanse to finish.”")
                 try t.expect(tree.button("Reopen Expanse") != nil, "the card's button should read Reopen Expanse")
@@ -302,7 +303,7 @@ import Security
             try await t.setupFirstLaunch(reset: ["Accessibility"], clear: ["onboardingPage"]) {
                 try await t.setupWalkthrough(to: "STEP 1 OF 4")
                 try await t.setupExpectPromptInFront(pressing: "Open Settings")
-                try await t.ask("In macOS's prompt click Open System Settings, then switch Expanse on in the Accessibility list.")
+                try await t.ask(setupPromptSteps())
                 try await t.until("the Accessibility card to say On", timeout: 3) { (try? await t.setupWelcomeTree())?.has("On") == true }
             }
         },
@@ -363,14 +364,13 @@ import Security
                 // (The case is written for a release; a development build's login item works the same since 4045597.)
                 let wasOn = try await t.setupOpenSettings().tree.first("Open Expanse at login", role: kAXCheckBoxRole)?.on ?? false
                 try await t.setupSetLogin(true, approving: true)
-                NSWorkspace.shared.open(setupLoginItemsPane)
-                try await t.ask("In System Settings › General › Login Items, select Expanse under Open at Login and click −.")
-                // The switch follows when Settings is key again.
+                try await t.askInSettings(.loginItems, "Under Open at Login, click Expanse to select it.", "Click − under that list.")
+                // The switch follows when the page next opens.
                 _ = try await t.setupOpenSettings()
                 try await t.until("the switch to show off", timeout: 5) { t.setupLoginSwitch() == false }
                 // On again from Expanse's Settings: on at once, or System Settings opens at Login Items for your OK,
                 // and the switch shows on only once it's really on.
-                guard let sw = t.setupSettings()?.tree.first("Open Expanse at login", role: kAXCheckBoxRole) else { throw Failure("Expanse Settings isn't open") }
+                guard let sw = t.setupSettings()?.tree.first("Open Expanse at login", role: kAXCheckBoxRole) else { throw Failure("Settings isn't open") }
                 sw.press()
                 try await t.pause(1.5)
                 if t.setupLoginSwitch() != true {
@@ -414,6 +414,12 @@ import Security
 private let setupCanvasLevel = Int(CGWindowLevelForKey(.mainMenuWindow)) - 1
 private let setupPanelLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
 private let setupPanelWidth: CGFloat = 360 + 2 * 24
+/// Answering macOS's own prompt: the case is about its button, so it isn't opened for you.
+private func setupPromptSteps(_ notes: String...) -> String {
+    numberedSteps(["In macOS's prompt, click Open System Settings.", "Find the row named Expanse (not ExpanseTests).",
+                   "Click its switch so it's ON (blue).", "If macOS asks for your password, enter it."] + notes + ["Click Done here."])
+}
+
 private let setupDevNote = "This is a development build: it has no updates, and opening at login opens this copy."
 private let setupLoginItemsPane = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!
 
@@ -761,9 +767,10 @@ fileprivate extension Ctx {
     func setupClosingUp(_ body: () async throws -> Void) async throws {
         var failure: Error?
         do { try await body() } catch { failure = error }
+        // On the Settings page, Esc goes back first.
+        if setupSettings() != nil, Input.allowed { Input.key(.escape) }
         if setupPanel() != nil, Input.allowed { Input.key(.escape) }
         if let w = setupWelcome(), let tree = setupTree(at: w.frame) { _ = tree.pressClose() }
-        if let settings = setupSettings() { _ = settings.tree.pressClose() }
         if let failure { throw failure }
     }
 
@@ -844,21 +851,16 @@ fileprivate extension Ctx {
         setupWindows().first { $0.layer == setupPanelLevel && abs($0.frame.width - setupPanelWidth) < 2 }
     }
 
-    /// The Expanse Settings window and its contents, if it's open.
+    /// The panel's Settings page and its contents, if it's showing.
     func setupSettings() -> (win: SetupWin, tree: SetupNode)? {
-        for el in setupAXWindows() {
-            var one = 1
-            let shallow = SetupNode(el, budget: &one)
-            guard shallow.title == "Expanse Settings", let f = shallow.frame,
-                  let win = setupWindows().first(where: { $0.layer == 0 && setupSame($0.frame, f) }) else { continue }
-            var budget = 2000
-            return (win, SetupNode(el, budget: &budget))
-        }
-        return nil
+        guard let p = setupPanel(), let tree = setupTree(at: p.frame),
+              tree.first("Open Expanse at login", role: kAXCheckBoxRole) != nil else { return nil }
+        return (p, tree)
     }
 
-    /// Settings, from the menu bar panel's gear (which also brings it back, and makes it key).
+    /// Settings, from the menu bar panel's gear.
     func setupOpenSettings() async throws -> (win: SetupWin, tree: SetupNode) {
+        if let open = setupSettings() { return open }
         if setupPanel() == nil { link("menu") }
         var panel: SetupNode?
         try await until("the menu bar panel", timeout: 5) {
@@ -866,10 +868,10 @@ fileprivate extension Ctx {
             panel = self.setupTree(at: p.frame)
             return panel?.has("Quit Expanse") == true
         }
-        guard let gear = panel?.button("Settings…") else { throw Failure("no Settings… button in the menu bar panel") }
-        try expect(gear.press(), "couldn't press Settings… in the menu bar panel")
+        guard let gear = panel?.button("Settings") else { throw Failure("no Settings button in the menu bar panel") }
+        try expect(gear.press(), "couldn't press Settings in the menu bar panel")
         var found: (win: SetupWin, tree: SetupNode)?
-        try await until("the Expanse Settings window", timeout: 5) {
+        try await until("the panel's Settings page", timeout: 5) {
             found = self.setupSettings()
             return found != nil
         }
@@ -877,9 +879,11 @@ fileprivate extension Ctx {
     }
 
     func setupCloseSettings() async throws {
-        guard let settings = setupSettings() else { return }
-        try expect(settings.tree.pressClose(), "couldn't close Expanse Settings")
-        try await until("Expanse Settings to close", timeout: 3) { self.setupSettings() == nil }
+        guard setupSettings() != nil else { return }
+        Input.key(.escape)
+        try await until("Esc to go back from Settings", timeout: 3) { self.setupSettings() == nil }
+        Input.key(.escape)
+        try await until("the menu bar panel to close", timeout: 3) { self.setupPanel() == nil }
     }
 
     func setupLoginSwitch() -> Bool? { setupSettings()?.tree.first("Open Expanse at login", role: kAXCheckBoxRole)?.on }
@@ -887,13 +891,14 @@ fileprivate extension Ctx {
     /// Settings' “Open Expanse at login” flipped to `on` if it isn't. Switched off in System
     /// Settings, macOS may want your OK there first (`approving`: ask you for it).
     func setupSetLogin(_ on: Bool, approving: Bool) async throws {
-        guard let sw = setupSettings()?.tree.first("Open Expanse at login", role: kAXCheckBoxRole) else { throw Failure("Expanse Settings isn't open") }
+        guard let sw = try await setupOpenSettings().tree.first("Open Expanse at login", role: kAXCheckBoxRole) else { throw Failure("no “Open Expanse at login” switch") }
         if sw.on == on { return }
         sw.press()
         do {
             try await until("“Open Expanse at login” to turn \(on ? "on" : "off")", timeout: 3) { self.setupLoginSwitch() == on }
         } catch where on && approving {
-            try await ask("macOS wants your OK: in System Settings › Login Items, switch Expanse on.")
+            try await askInSettings(.loginItems, "Find Expanse on this page: under Open at Login, or under Background App Activity.",
+                                    "If it has a switch, click it so it's ON (blue).")
             _ = try await setupOpenSettings()
             try await until("“Open Expanse at login” to show on", timeout: 5) { self.setupLoginSwitch() == true }
         }

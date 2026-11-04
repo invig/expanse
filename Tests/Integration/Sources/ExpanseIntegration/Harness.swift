@@ -303,6 +303,31 @@ struct Skip: Error, CustomStringConvertible {
         }
     }
 
+    /// Asks you to do something in System Settings: opens it at the page, and spells out the steps.
+    func askInSettings(_ page: SettingsPage, _ steps: String...) async throws {
+        NSWorkspace.shared.open(page.url)
+        let text = "System Settings is opening at \(page.path).\n\n" + numberedSteps(steps + ["Click Done here."])
+        switch await human.ask(text, buttons: ["Done", "Can't do this here"],
+                               extra: ("Open System Settings again", { NSWorkspace.shared.open(page.url) })) {
+        case 0: return
+        default: throw Skip("skipped by the tester: \(text)")
+        }
+    }
+
+    /// Asks you to switch Expanse on or off in one of System Settings' lists of apps.
+    func askToSwitchExpanse(_ on: Bool, in page: SettingsPage, _ notes: String...) async throws {
+        NSWorkspace.shared.open(page.url)
+        let steps = ["Find the row named Expanse (not ExpanseTests).",
+                     "Click its switch so it's \(on ? "ON (blue)" : "OFF (grey)").",
+                     "If macOS asks for your password, enter it."] + notes + ["Click Done here."]
+        let text = "System Settings is opening at \(page.path).\n\n" + numberedSteps(steps)
+        switch await human.ask(text, buttons: ["Done", "Can't do this here"],
+                               extra: ("Open System Settings again", { NSWorkspace.shared.open(page.url) })) {
+        case 0: return
+        default: throw Skip("skipped by the tester: \(text)")
+        }
+    }
+
     /// Asks whether something looks right.
     func look(_ question: String) async throws {
         switch await human.ask(question, buttons: ["Yes", "No", "Can't tell here"]) {
@@ -350,6 +375,39 @@ struct Skip: Error, CustomStringConvertible {
             _ = try? await settle()
         }
     }
+}
+
+/// A page of System Settings, named as this macOS names it (checked against macOS 27's own titles).
+enum SettingsPage {
+    case accessibility, screenRecording, loginItems, wallpaper, hotCorners
+
+    var path: String {
+        switch self {
+        case .accessibility:
+            if #available(macOS 27, *) { return "Privacy & Security › Device Control and Data Access" }
+            return "Privacy & Security › Accessibility"
+        case .screenRecording: return "Privacy & Security › Screen & System Audio Recording"
+        case .loginItems: return "General › Login Items"
+        case .wallpaper: return "Wallpaper"
+        case .hotCorners: return "Desktop & Dock"
+        }
+    }
+
+    var url: URL {
+        let id = switch self {
+        case .accessibility: "com.apple.preference.security?Privacy_Accessibility"
+        case .screenRecording: "com.apple.preference.security?Privacy_ScreenCapture"
+        case .loginItems: "com.apple.LoginItems-Settings.extension"
+        case .wallpaper: "com.apple.Wallpaper-Settings.extension"
+        case .hotCorners: "com.apple.Desktop-Settings.extension"
+        }
+        return URL(string: "x-apple.systempreferences:\(id)")!
+    }
+}
+
+/// Steps for the panel at the top of the screen, one to a line.
+func numberedSteps(_ steps: [String]) -> String {
+    steps.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
 }
 
 /// Changes one of Expanse's settings (its defaults domain), as `defaults write` would; nil removes

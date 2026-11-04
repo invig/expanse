@@ -355,7 +355,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                corner: c.hotCorner.corner,
                                update: Updater.shared.ready?.release.version,
                                detailedLogging: LogFile.shared.isEnabled,
-                               hasLogFile: FileManager.default.fileExists(atPath: LogFile.shared.url.path))
+                               hasLogFile: FileManager.default.fileExists(atPath: LogFile.shared.url.path),
+                               gap: CanvasController.gap, motion: CanvasController.motion,
+                               automaticUpdates: Updater.shared.automatic)
     }
 
     private func perform(_ action: MenuPanel.Action) {
@@ -392,10 +394,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .showLogFile: NSWorkspace.shared.activateFileViewerSelecting([LogFile.shared.url])
         case .reportIssue: NSWorkspace.shared.open(BugReport.issuesURL)
         case .welcome: showWelcome()
-        case .settings:
-            // An ordinary window: zoomed out, leave the canvas first, or it would open underneath.
+        case .openAtLogin(let on):
+            guard on != LoginItem.enabled else { return }
+            LoginItem.toggle()
+            // macOS wants your OK in System Settings: zoomed out, that would open underneath.
+            if LoginItem.needsApproval, controller.isActive, !controller.gliding { controller.exit() }
+        case .gap(let gap): UserDefaults.standard.set(Double(gap), forKey: CanvasController.gapKey)
+        case .motion(let motion): CanvasController.motion = motion
+        case .automaticUpdates(let on): Updater.shared.automatic = on
+        case .checkForUpdates:
+            // Its answer is an ordinary alert: zoomed out, leave the canvas first, or it would open underneath.
             if controller.isActive, !controller.gliding { controller.exit() }
-            SettingsWindow.show { [weak self] in self?.checkForUpdates() }
+            checkForUpdates()
         case .quit:
             Self.quitReason = "Quit in the menu bar panel"
             NSApp.terminate(nil)

@@ -4556,6 +4556,14 @@ final class CanvasController: NSObject {
     /// How the view moves (Settings): "glide", "jump", or unset ("follow"), which jumps when
     /// macOS's Reduce Motion is on.
     static let motionKey = "motion"
+    /// What Settings shows and sets: anything but "glide" or "jump" is "follow".
+    static var motion: String {
+        get {
+            let motion = UserDefaults.standard.string(forKey: motionKey)
+            return motion == "glide" || motion == "jump" ? motion! : "follow"
+        }
+        set { UserDefaults.standard.set(newValue, forKey: motionKey) }
+    }
     /// macOS's Reduce Motion, unless a test gives its own.
     static var reduceMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     /// Camera moves go straight to where they end. Read at each move, so a change to either

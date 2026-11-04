@@ -444,19 +444,19 @@
 - **Expected:** An orange banner "Screen Recording is off" with "Zoomed out, windows show as outlines without it. Once it's on, reopen Expanse."; the footer shows an orange dot and "Permission needed". The button asks macOS for Screen Recording (its prompt, or the Screen Recording list in System Settings). With Accessibility off the banner reads "Accessibility is off", "Expanse can't move windows without it.", and the button goes to Accessibility; with both off, "Accessibility and Screen Recording are off". Permissions are read as the panel opens.
 - **Automate:** manual: needs real privacy settings.
 
-## UI-38 The Settings window
+## UI-38 The Settings page
 - **Type:** Feature
 - **Area:** UI
-- **Commits:** a2d80de (0.1.31), 4045597 (0.1.31)
-- **Setup:** A release build; zoomed out.
+- **Commits:** a2d80de (0.1.31), 4045597 (0.1.31), unreleased (4 Nov)
+- **Setup:** A release build.
 - **Steps:**
   1. Open the panel and click the gear button.
   2. Flip "Open Expanse at login"; check System Settings › General › Login Items.
   3. Turn "Check for updates automatically" off and on; click Check Now.
-  4. Change the login item in System Settings, then click back into the Settings window.
-- **Expected:** The canvas closes first (back to 100%), then a small "Expanse Settings" window opens in front: an "Open Expanse at login" switch, and an Updates section with "Check for updates automatically" and "Expanse <version>" with a Check Now button. The login switch adds or removes Expanse in Login Items. Check Now says "You're up to date" (or offers the update). A change made in System Settings shows when the window becomes key again. Clicking the gear again brings back the same window.
+  4. Change the login item in System Settings, then open the page again.
+- **Expected:** The panel shows its Settings page (UI-42): an "Open Expanse at login" switch, Gaps between windows, Glides and zooms, and an Updates section with "Check for updates automatically" and "Expanse <version>" with Check Now. Step 2: Expanse is added to or removed from Login Items; if macOS wants your OK, System Settings opens at Login Items, leaving the canvas first if zoomed out, and the switch shows on only once it's really on. Step 3: Check Now closes the panel, leaves the canvas first if zoomed out, and answers in an alert. Step 4: the switch shows the change.
 - **Automate:** manual: SMAppService and the updater need a signed release.
-- **Note:** In a development build the Updates section is greyed out and a footnote reads "This is a development build: it has no updates, and opening at login opens this copy." The login switch works there since 4045597 (see SETUP-27); in a2d80de it was greyed too.
+- **Note:** In a development build the Updates section is greyed out and a footnote reads "This is a development build: it has no updates, and opening at login opens this copy." The login switch works there since 4045597 (see SETUP-27). This was a window of its own until 0.1.41 (it closed the canvas first, and came back as the same window), and its Gaps and Glides pickers were pop-up menus.
 
 ## UI-39 Before the walkthrough is done the panel says so
 - **Type:** Feature
@@ -494,3 +494,17 @@
   1. Zoom out (⌥`).
 - **Expected:** No `canvas level … (under a dialog)` line; a real dialog still puts the canvas under it (UI-23).
 - **Automate:** unit: `lowestDialogLevel(in:screen:ownPID:isDock:)` leaves out a window the size of the screen and keeps a real one; end-to-end: UI-23 and UI-24 count dialogs the same way.
+
+## UI-42 Settings is a page of the panel, not a window of its own
+- **Type:** Feature
+- **Area:** UI
+- **Commits:** unreleased (4 Nov)
+- **Setup:** Zoomed out, with a window or two.
+- **Steps:**
+  1. Open the panel and click the gear button.
+  2. Under Gaps between windows pick 10pt, None, then 20pt. Under Glides and zooms pick Jump, Animate, then Match macOS.
+  3. Press Esc.
+  4. Click the gear, then the back arrow.
+  5. Click the gear, press Esc twice, and open the panel again.
+- **Expected:** Step 1: Settings takes the place of the panel's first page, in the same panel with its top where it was. The canvas stays zoomed out, and no window opens. Step 2: each pick takes at once, and the panel stays on the page. Step 3: back to the first page, still open, the panel grown to fit it with its top where it was. Step 4: the same. Step 5: the second Esc closes the panel, and it opens again on its first page.
+- **Automate:** unit: `escape()`, `Action.closesPanel`, `SettingsPage` and the picks through `AppDelegate.perform`; end-to-end.

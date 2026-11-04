@@ -11,7 +11,7 @@ import Security
     static let cases: [Case] = [
         Case("UPDATE-03", "Settings: updates") { t in
             try await t.updateClosingUp {
-                guard AXIsProcessTrusted() else { throw Skip("needs Accessibility for Expanse Tests, to read Expanse's Settings window") }
+                guard AXIsProcessTrusted() else { throw Skip("needs Accessibility for Expanse Tests, to read Expanse's Settings page") }
                 guard !updateIsRelease(t.expanseURL) else { throw Skip("the runner drives development builds; this one is a release") }
                 // Step 3, a development build: the Updates section greyed out, with the footnote.
                 let settings = try await t.updateOpenSettings()
@@ -295,43 +295,58 @@ fileprivate extension Ctx {
         return nil
     }
 
-    /// The menu bar panel's contents, if it's open.
+    /// The menu bar panel's window and its contents, if it's open, on either page.
+    private func updatePanelWindow() -> UpdateNode? {
+        updateWindow { $0.frame.map { abs($0.width - (360 + 2 * 24)) < 2 } ?? false }
+    }
+
+    /// The menu bar panel's first page, if it's showing.
     func updatePanel() -> UpdateNode? {
-        let panel = updateWindow { $0.frame.map { abs($0.width - (360 + 2 * 24)) < 2 } ?? false }
+        let panel = updatePanelWindow()
         return panel?.has("Quit Expanse") == true ? panel : nil
+    }
+
+    /// The panel's Settings page, if it's showing.
+    func updateSettings() -> UpdateNode? {
+        let panel = updatePanelWindow()
+        return panel?.toggle("Open Expanse at login") != nil ? panel : nil
     }
 
     /// Settings, from the menu bar panel's gear.
     func updateOpenSettings() async throws -> UpdateNode {
+        if let open = updateSettings() { return open }
         link("menu")
         var panel: UpdateNode?
         try await until("the menu bar panel", timeout: 5) {
             panel = self.updatePanel()
             return panel != nil
         }
-        guard let gear = panel?.button("Settings…") else { throw Failure("no Settings… button in the menu bar panel") }
-        try expect(gear.press(), "couldn't press Settings… in the menu bar panel")
+        guard let gear = panel?.button("Settings") else { throw Failure("no Settings button in the menu bar panel") }
+        try expect(gear.press(), "couldn't press Settings in the menu bar panel")
         var settings: UpdateNode?
-        try await until("the Expanse Settings window", timeout: 5) {
-            settings = self.updateWindow { $0.title == "Expanse Settings" }
+        try await until("the panel's Settings page", timeout: 5) {
+            settings = self.updateSettings()
             return settings != nil
         }
         return settings!
     }
 
-    /// Runs `body`, then closes Settings or the menu bar panel if it left them open, passing or
-    /// failing, so the next case starts clear.
+    /// Runs `body`, then closes the menu bar panel if it left it open, passing or failing, so the
+    /// next case starts clear.
     func updateClosingUp(_ body: () async throws -> Void) async throws {
         var failure: Error?
         do { try await body() } catch { failure = error }
-        if updatePanel() != nil, Input.allowed { Input.key(.escape) }
-        if let settings = updateWindow({ $0.title == "Expanse Settings" }) { _ = settings.pressClose() }
+        // On the Settings page, Esc goes back first.
+        if updateSettings() != nil, Input.allowed { Input.key(.escape) }
+        if updatePanelWindow() != nil, Input.allowed { Input.key(.escape) }
         if let failure { throw failure }
     }
 
     func updateCloseSettings() async throws {
-        guard let settings = updateWindow({ $0.title == "Expanse Settings" }) else { return }
-        try expect(settings.pressClose(), "couldn't close Expanse Settings")
-        try await until("Expanse Settings to close", timeout: 3) { self.updateWindow { $0.title == "Expanse Settings" } == nil }
+        guard updateSettings() != nil else { return }
+        Input.key(.escape)
+        try await until("Esc to go back from Settings", timeout: 3) { self.updateSettings() == nil }
+        Input.key(.escape)
+        try await until("the menu bar panel to close", timeout: 3) { self.updatePanelWindow() == nil }
     }
 }

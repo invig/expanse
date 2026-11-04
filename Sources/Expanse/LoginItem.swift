@@ -8,6 +8,8 @@ enum LoginItem {
     private static let setUpKey = "loginItemSetUp"
 
     static var enabled: Bool { SMAppService.mainApp.status == .enabled }
+    /// Turned off in System Settings, it only comes back on with your OK there.
+    static var needsApproval: Bool { SMAppService.mainApp.status == .requiresApproval }
 
     /// When Expanse starts (after the walkthrough, so macOS's "login item added" notice doesn't
     /// land in the middle of it).
@@ -30,7 +32,6 @@ enum LoginItem {
         } catch {
             logger.error("login item change failed: \(error.localizedDescription, privacy: .public)")
         }
-        // Turned off in System Settings, it only comes back on with your OK there.
-        if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        if needsApproval { SMAppService.openSystemSettingsLoginItems() }
     }
 }

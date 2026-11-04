@@ -299,7 +299,7 @@
   3. Start a fresh development build with `loginItemSetUp` deleted.
 - **Expected:** Step 2: it stays off; Expanse doesn't register itself again. Step 3: the development build never registers by itself, and Settings says "This is a development build: it has no updates, and opening at login opens this copy."
 - **Automate:** manual: SMAppService.
-- **Note:** The switch moved from the menu to the Settings window, and development builds can turn it on by hand there, since a2d80de.
+- **Note:** The switch moved from the menu to the Settings window, and development builds can turn it on by hand there, since a2d80de. Settings has been a page of the menu bar panel since 0.1.41 (UI-42).
 
 ## SETUP-26 Turning Open at Login back on after switching it off in System Settings
 - **Type:** Feature

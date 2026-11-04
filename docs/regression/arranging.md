@@ -368,7 +368,7 @@
 - **Type:** Feature
 - **Area:** EDIT
 - **Commits:** unreleased (1 Nov)
-- **Setup:** Settings › Arranging.
+- **Setup:** Settings › Gaps between windows.
 - **Steps:**
   1. Build a screen of two windows; look at the gap between them and round the edge at 100%.
   2. Set Gaps between windows to 10pt, build another; then None.

@@ -116,7 +116,7 @@
   2. Open Settings.
 - **Expected:** At step 1 there is no update check: no `update available`, `up to date` or `update check failed` lines. At step 2 the Updates section is greyed out, with "This is a development build: it has no updates, and opening at login opens this copy."
 - **Automate:** unit: Updater.isRelease is false for a non-Developer-ID signature, and Updater.start/check return without a request.
-- **Note:** The note and greyed section come from the Settings window, added in a2d80de.
+- **Note:** The note and greyed section come from the Settings window, added in a2d80de, a page of the menu bar panel since 0.1.41 (UI-42).
 
 ## UPDATE-11 When it can't replace itself, the update opens the release page
 - **Type:** Feature

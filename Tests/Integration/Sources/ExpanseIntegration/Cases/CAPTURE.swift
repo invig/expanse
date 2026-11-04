@@ -626,8 +626,7 @@ import AppKit
         },
         Case("CAPTURE-34", "Refused window scans back off", .guided) { t in
             let ids = try await t.captureFixtures("CAPTURE-34", windows: 4)
-            try await t.ask("Open System Settings › Privacy & Security › Screen & System Audio Recording and turn Expanse off "
-                            + "(if macOS offers to quit Expanse, choose Later). Then click Done.")
+            try await t.askToSwitchExpanse(false, in: .screenRecording, "If macOS offers to quit Expanse, choose Later.")
             var mark = t.log.mark()
             // The first refusal; none at all if macOS now says Expanse has no access (then it
             // doesn't scan in the first place: also right).
@@ -778,8 +777,7 @@ import AppKit
             let pictures = replayd.count(.picture, since: mark), streams = replayd.count(.streamStart, since: mark)
             try t.expect(pictures == 0 && streams == 0, "over 5 minutes at rest replayd was asked for \(pictures) pictures and \(streams) streams (none expected)")
             // 2: the canvas opening takes the desktop as it is now.
-            try await t.ask("Change the desktop picture in System Settings › Wallpaper to one that's easy to tell apart "
-                            + "(you can change it back afterwards). Then click Done.")
+            try await t.askInSettings(.wallpaper, "Pick a desktop picture that's easy to tell apart (you can change it back afterwards).")
             mark = replayd.mark()
             t.link("enter")
             try await t.until("the canvas to open", timeout: 8) { try await t.settle().active }

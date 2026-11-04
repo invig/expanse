@@ -727,7 +727,7 @@
 - **Type:** Feature
 - **Area:** NAV
 - **Commits:** 88eb6a1 (0.1.40)
-- **Setup:** Settings › Moving around › Glides and zooms: Jump (or Match macOS, with Reduce Motion on). Windows spread out on the canvas.
+- **Setup:** Settings › Glides and zooms: Jump (or Match macOS, with Reduce Motion on). Windows spread out on the canvas.
 - **Steps:**
   1. Hop with ⌃ + an arrow key, and click a window zoomed out.
   2. Zoom out (⌥`), and go back (Esc).
@@ -741,7 +741,7 @@
 - **Type:** Feature
 - **Area:** NAV
 - **Commits:** 88eb6a1 (0.1.40)
-- **Setup:** Settings › Moving around › Glides and zooms, left at Match macOS (where it starts). Reduce Motion in System Settings › Accessibility › Motion.
+- **Setup:** Settings › Glides and zooms, left at Match macOS (where it starts). Reduce Motion in System Settings › Accessibility › Motion.
 - **Steps:**
   1. Turn Reduce Motion on, and hop. Turn it off, and hop.
   2. Set Glides and zooms to Animate with Reduce Motion on, then to Jump with it off.

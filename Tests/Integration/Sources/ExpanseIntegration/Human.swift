@@ -8,7 +8,8 @@ import AppKit
     /// The case being asked about, shown in the panel.
     var caseLabel = ""
 
-    func ask(_ text: String, buttons: [String]) async -> Int {
+    /// `extra`: a button that does something without answering.
+    func ask(_ text: String, buttons: [String], extra: (title: String, action: () -> Void)? = nil) async -> Int {
         guard present else { return buttons.count - 1 }
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 10),
                             styleMask: [.titled, .nonactivatingPanel, .utilityWindow, .hudWindow], backing: .buffered, defer: false)
@@ -20,6 +21,7 @@ import AppKit
         let label = NSTextField(wrappingLabelWithString: text)
         label.font = .systemFont(ofSize: 14)
         label.preferredMaxLayoutWidth = 520
+        label.widthAnchor.constraint(equalToConstant: 520).isActive = true
         let row = NSStackView()
         row.orientation = .horizontal
         row.spacing = 8
@@ -41,6 +43,7 @@ import AppKit
                 if i == 0 { b.keyEquivalent = "\r" }
                 row.addArrangedSubview(b)
             }
+            if let extra { row.addArrangedSubview(ClosureButton(title: extra.title, extra.action)) }
             panel.contentView = stack
             panel.setContentSize(stack.fittingSize)
             if let screen = NSScreen.screens.first {

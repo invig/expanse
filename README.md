@@ -103,8 +103,8 @@ Centre and Tidy Up, which corner to use, earlier layouts to go back to, the walk
 Troubleshooting (logs for a bug report), and Settings (updates, opening at login, the gap between
 windows).
 
-**Prefer less movement?** Settings › Moving around makes glides and zooms jump straight to where
-they end. If macOS's Reduce Motion is on, Expanse does this by itself.
+**Prefer less movement?** Settings › Glides and zooms can make the view jump straight to where
+it's going. If macOS's Reduce Motion is on, Expanse does this by itself.
 
 ## See it work
 
@@ -181,7 +181,8 @@ snapshot) brings every window that's out of view back on screen, cascaded from t
 <details>
 <summary><strong>Expanse doesn't see any of my windows</strong></summary>
 
-Open System Settings › Privacy & Security › Accessibility, then turn Expanse off and on again.
+Open System Settings › Privacy & Security › Accessibility (Device Control and Data Access on macOS
+27), then turn Expanse off and on again.
 
 </details>
 
