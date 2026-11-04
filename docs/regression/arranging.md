@@ -402,7 +402,7 @@
 ## EDIT-35 Windows 80pt or more apart stay separate zones through Tidy Up
 - **Type:** Bug fix
 - **Area:** EDIT
-- **Commits:** unreleased (4 Nov)
+- **Commits:** fc52b9e (0.1.42)
 - **Before:** Windows within 240pt counted as one group, chaining through neighbours, so Tidy Up pulled zones you'd kept apart on purpose back together.
 - **Setup:** Two zones, 100pt apart. Inside each: two windows with a 50pt gap, the second's top 30pt lower.
 - **Steps:**

@@ -4,8 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- Tidy Up leaves zones alone (asked 4 Nov): windows now count as one group only when they're less
-  than 80pt apart, down from 240pt, so zones you keep apart stay apart. EDIT-35.
+Nothing yet.
 
 ## Bugs
 
@@ -89,6 +88,8 @@ Not decided yet.
 
 ## Done
 
+- 0.1.42: Tidy Up leaves zones alone: windows count as one group only when they're less than 80pt
+  apart, down from 240pt, so zones you keep apart stay apart.
 - 0.1.41: Settings is now a page of the menu bar panel, opened with the gear, instead of a window
   of its own: it opens over the canvas too, and Esc or the back arrow takes you back.
 - 0.1.40: Low motion: glides, zooms and centring can jump straight to where they end (Settings ›
