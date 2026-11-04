@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/hero.svg" alt="Expanse: windows arranged on an infinite canvas" width="900">
+  <img src="docs/hero.svg" alt="Expanse: windows on one big canvas, with a lit frame showing the part your screen sees, gliding from window to window while the windows stay put" width="900">
 </p>
 
 <p align="center">
