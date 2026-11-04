@@ -34,21 +34,21 @@ Every case has a test (`scripts/test-coverage.sh` checks it): a unit test for ea
 **unit**, and an end-to-end case, a unit test of its logic, or both, for each case marked
 **manual**. A test's name starts with its case's ID.
 
-**Unit tests** (Tests/ExpanseTests, 503 of them, about a minute and a half). Run them before every commit:
+**Unit tests** (Tests/ExpanseTests, 547 of them, about a minute and a half). Run them before every commit:
 ```bash
 scripts/test.sh
 ```
 `scripts/test.sh --filter NAV` runs one area. They never touch real windows, your layout, logs
 or the Keychain: windows are stand-ins, the display is pretend, and files go to temp folders.
 
-**End-to-end cases** (Tests/Integration, 229). An app, Expanse Tests, drives a running
+**End-to-end cases** (Tests/Integration, 238). An app, Expanse Tests, drives a running
 development build of Expanse with links, its own windows, other apps and real key and pointer
 events, and reads back what Expanse did from its log. They move real windows, so run them in the
-VM (expanse-demo), not on your desktop:
+VM (see [Using the VM](#using-the-vm)), not on your desktop:
 ```bash
 scripts/vm-integration.sh
 ```
-That builds both apps, copies them into the VM, runs the 144 cases that need nobody, and copies
+That builds both apps, copies them into the VM, runs the 153 cases that need nobody, and copies
 the report back to build/integration-vm/, with Expanse's log for each failed case beside it
 (`NAV-17.log`: the VM keeps its detailed log only for minutes). `--all` adds the 54 guided cases
 (it asks you to do something, such as lock the Mac or unplug a display, in a panel at the top of
@@ -57,30 +57,6 @@ it looks right). `--area NAV` or `--only NAV-03,URL-01` narrows it, `--repeat 3`
 cases three times over (to tell a flaky case from a broken one), and `--keep-logs` keeps the log of
 every case, passed ones too. A few long cases skip unless given time (`--timeout 800`); a few need
 a Developer ID release (`--release /path/to/Expanse.app`).
-
-The VM's window server stalls now and then (a frame, an event or a call held up for 100ms to
-several seconds), so limits on smoothness and speed (`expectTiming`) don't fail a case there: a
-miss is noted in the report beside the pass, and the rest of the case still has to pass. Judge
-those on a Mac. Restart the VM before a full run (`tart stop expanse-demo`, then
-`tart run expanse-demo`): after an hour or two of cases its window server is slower still. Keep
-its window showing: macOS asks again whether Expanse may record the screen ("bypass the system
-private window picker") every so often (in the VM, within the hour, even with the same build),
-and until you click Allow its prompt sits in the middle of the screen and takes the cases'
-clicks. While one is up, the runner skips each automatic case
-with the reason ("macOS is asking something on screen"). On 1 Nov it came three complete runs
-in a row just as TRACK-12 began, about 25 minutes in (twice after a VM restart, once without),
-so something there may set it off. After Allow, `--only` with the skipped IDs finishes the pass.
-The VM's disk is 60GB (`tart set expanse-demo --disk-size 60`, 1 Nov): at 41GB it filled up
-partway through a run (macOS downloads several GB of assets by itself), and cases failed
-saving files ("No space left on device"). `df -h /` in the VM shows what's left. A heavy app on this Mac (a game) slows
-the VM too.
-
-One-time VM setup: this Mac's SSH key in the VM (`ssh-copy-id admin@<VM address>`, the
-image's password is admin); Expanse Tests switched on in the VM's System Settings › Privacy &
-Security › Device Control and Data Access (Accessibility before macOS 27; `ExpanseTests.app
---args --ask-access` adds it to the list); and Expanse allowed to record the screen when macOS
-asks. Builds signed with the same certificate keep these. In the VM, links opened over SSH don't
-reach Expanse; the runner opens them from inside the VM's login session.
 
 Watching the log while you test by hand (in zsh, plain `log` is a shell builtin):
 ```bash
@@ -91,6 +67,64 @@ Debug-only links (`dump`, `screen`, `place`, `prefer`, `snapshot`, `poweroff`, `
 `defaults write com.invignation.expanse debugURLCommands -bool true`; releases ignore them.
 Expected results describe the code as of 0.1.34. A case's Note says when a later commit changed
 the behaviour it was written for.
+
+### Using the VM
+
+End-to-end runs use the expanse-demo VM (8 CPUs, 12GB of memory). `scripts/vm-integration.sh`
+starts it if it's stopped but never stops it, so stopping it is the last step of the work.
+
+**Start a run** with the Mac kept awake: the VM freezes when the Mac sleeps, and the case it was on
+fails.
+```bash
+caffeinate -i -s scripts/vm-integration.sh --timeout 800
+```
+Do one run at a time: each one replaces the apps and the report in the VM, then
+build/integration-vm/. Don't edit `scripts/vm-integration.sh` during a run, because bash reads it
+as it goes. A full run needs a freshly started VM, because after an hour or two of cases its window
+server is slower: if it's been up, `tart stop expanse-demo` first and the run starts it again.
+
+**During a run**, keep the VM's window showing (don't start it with `--no-graphics`, which leaves
+nowhere to click). macOS asks again whether Expanse may record the screen ("bypass the system
+private window picker") every so often: within the hour in the VM, even with the same build, and
+often soon after a run starts. Until someone clicks Allow, its prompt sits in the middle of the
+screen and takes the cases' clicks, so the runner skips each automatic case with the reason ("macOS
+is asking something on screen"). Clicking Allow is a person's step, so a Claude session asks for it
+and waits. After Allow, `--only` with the skipped IDs finishes the pass.
+
+**Stop it when the work that needed it is finished:** the last planned run is done, its report is
+read, and no failure is still being chased. Between a fix and its rerun, leave it up. First check
+that no run is going, since stopping the VM mid-run loses that run's report. This should print
+nothing:
+```bash
+pgrep -fl vm-integration
+```
+Then stop it, and check that `tart list` shows it as `stopped`:
+```bash
+tart stop expanse-demo
+```
+Stopping costs nothing: the disk, the apps and their permissions are kept, and the next run starts
+it again. So don't leave it up overnight or for the next session. The one exception is someone
+working in it (testing by hand, recording a demo video): leave it up and say so. A Claude session
+stops it without being asked and says it did.
+
+**Its limits.** The VM's window server stalls now and then (a frame, an event or a call held up for
+100ms to several seconds), so limits on smoothness and speed (`expectTiming`) don't fail a case
+there: a miss is noted in the report beside the pass, and the rest of the case still has to pass.
+Judge those on a Mac. A heavy app on this Mac (a game) slows the VM too. The VM's disk is 60GB
+(`tart set expanse-demo --disk-size 60`, 1 Nov): at 41GB it filled up partway through a run (macOS
+downloads several GB of assets by itself), and cases failed saving files ("No space left on
+device"). `df -h /` in the VM shows what's left.
+
+**Looking inside it.** `ssh admin@$(tart ip expanse-demo)` gets you in. From there, this takes a
+picture of its screen: `sudo launchctl asuser 501 sudo -u admin screencapture -x /tmp/shot.png`.
+`/usr/bin/log show --start` needs whole seconds: with fractions it prints nothing.
+
+**One-time setup:** this Mac's SSH key in the VM (`ssh-copy-id admin@<VM address>`, the
+image's password is admin); Expanse Tests switched on in the VM's System Settings › Privacy &
+Security › Device Control and Data Access (Accessibility before macOS 27; `ExpanseTests.app
+--args --ask-access` adds it to the list); and Expanse allowed to record the screen when macOS
+asks. Builds signed with the same certificate keep these. In the VM, links opened over SSH don't
+reach Expanse; the runner opens them from inside the VM's login session.
 
 ## Each case
 

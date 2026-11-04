@@ -1,9 +1,10 @@
 #!/bin/bash
 # Runs the end-to-end regression cases (scripts/integration.sh) inside a tart VM, so they drive the
 # VM's windows instead of yours. Builds Expanse and Expanse Tests here, copies them in, and copies
-# the report back to build/integration-vm/.
+# the report back to build/integration-vm/. It starts the VM if it's stopped but never stops it:
+# run `tart stop expanse-demo` when you've finished with it.
 #
-# One-time setup in the VM (see docs/regression/README.md, Running them):
+# One-time setup in the VM (see docs/regression/README.md, Using the VM):
 #   - this Mac's SSH key in the VM's ~/.ssh/authorized_keys (ssh-copy-id admin@<VM address>);
 #   - Accessibility and Screen Recording for Expanse, and Accessibility for Expanse Tests, in the
 #     VM's System Settings (they're kept across rebuilds signed with the same certificate).
@@ -54,4 +55,5 @@ ARGS=$(printf ' %q' "$@")
 rm -rf build/integration-vm; mkdir -p build/integration-vm
 scp -q -o BatchMode=yes "$VM_USER@$IP:ExpanseTestsReport/*" build/integration-vm/
 echo "Report: build/integration-vm/report.md"
+echo "$VM is still running. When you've finished with it: tart stop $VM"
 ! grep -q "| FAILED |" build/integration-vm/report.md
