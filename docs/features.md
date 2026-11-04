@@ -4,9 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- Low motion: glides, zooms and centring can jump straight to where they end (Settings › Moving
-  around). Expanse does this by itself when macOS's Reduce Motion is on, and the walkthrough's
-  picture holds still too.
+Nothing yet.
 
 ## Bugs
 
@@ -90,6 +88,9 @@ Not decided yet.
 
 ## Done
 
+- 0.1.40: Low motion: glides, zooms and centring can jump straight to where they end (Settings ›
+  Moving around). Expanse does this by itself when macOS's Reduce Motion is on, and the
+  walkthrough's picture holds still too.
 - 0.1.39: Quitting Expanse no longer makes macOS ask you to allow it again ("bypass the
   system private window picker"); after a notification, zooming out no longer opens the canvas
   under an invisible window.

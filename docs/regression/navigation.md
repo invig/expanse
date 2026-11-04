@@ -726,7 +726,7 @@
 ## NAV-64 Low motion: glides, zooms and centring jump straight to where they end
 - **Type:** Feature
 - **Area:** NAV
-- **Commits:** unreleased (4 Nov)
+- **Commits:** 88eb6a1 (0.1.40)
 - **Setup:** Settings › Moving around › Glides and zooms: Jump (or Match macOS, with Reduce Motion on). Windows spread out on the canvas.
 - **Steps:**
   1. Hop with ⌃ + an arrow key, and click a window zoomed out.
@@ -740,12 +740,13 @@
 ## NAV-65 Low motion follows macOS's Reduce Motion unless Settings says otherwise
 - **Type:** Feature
 - **Area:** NAV
-- **Commits:** unreleased (4 Nov)
-- **Setup:** Settings › Moving around › Glides and zooms, left at Match macOS (where it starts). Reduce Motion in System Settings.
+- **Commits:** 88eb6a1 (0.1.40)
+- **Setup:** Settings › Moving around › Glides and zooms, left at Match macOS (where it starts). Reduce Motion in System Settings › Accessibility › Motion.
 - **Steps:**
   1. Turn Reduce Motion on, and hop. Turn it off, and hop.
   2. Set Glides and zooms to Animate with Reduce Motion on, then to Jump with it off.
   3. With low motion on, open the walkthrough (menu bar icon › the **?** button).
 - **Expected:** Match macOS jumps with Reduce Motion on and animates with it off. Animate and Jump win over Reduce Motion. In low motion the walkthrough's canvas holds still, zoomed out (on a window, on the page about hopping), and its text doesn't slide in.
 - **Automate:** unit: `lowMotion(setting:reduceMotion:)` and the `reduceMotion` seam.
+- **Note:** Checked in the VM on 4 Nov with the real switch, pressed through Accessibility while Expanse ran: it counts from the next hop, on and off. A running Expanse doesn't see `defaults write com.apple.universalaccess reduceMotion`, which sends no notification; a test needs the switch.
 
