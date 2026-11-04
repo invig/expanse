@@ -40,7 +40,7 @@ in Copy Logs for a Bug Report).
    - an open-hand cursor over the minimap, and at 100% a click goes to that spot.
 4. **Multiple monitor support** (asked again 28 Oct). Today Expanse uses the main display only.
 5. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 549 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 239
+   has a test. 552 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 240
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
    - End-to-end, 2 Nov: a complete run of 0.1.36 in the VM passed all 145 automatic cases, in one
@@ -88,6 +88,8 @@ Not decided yet.
 
 ## Done
 
+- 0.1.41: Settings is now a page of the menu bar panel, opened with the gear, instead of a window
+  of its own: it opens over the canvas too, and Esc or the back arrow takes you back.
 - 0.1.40: Low motion: glides, zooms and centring can jump straight to where they end (Settings ›
   Moving around). Expanse does this by itself when macOS's Reduce Motion is on, and the
   walkthrough's picture holds still too.

@@ -447,7 +447,7 @@
 ## UI-38 The Settings page
 - **Type:** Feature
 - **Area:** UI
-- **Commits:** a2d80de (0.1.31), 4045597 (0.1.31), unreleased (4 Nov)
+- **Commits:** a2d80de (0.1.31), 4045597 (0.1.31), 2aa60a6 (0.1.41)
 - **Setup:** A release build.
 - **Steps:**
   1. Open the panel and click the gear button.
@@ -498,7 +498,7 @@
 ## UI-42 Settings is a page of the panel, not a window of its own
 - **Type:** Feature
 - **Area:** UI
-- **Commits:** unreleased (4 Nov)
+- **Commits:** 2aa60a6 (0.1.41)
 - **Setup:** Zoomed out, with a window or two.
 - **Steps:**
   1. Open the panel and click the gear button.
