@@ -4,12 +4,19 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- Low motion: glides, zooms and centring can jump straight to where they end (Settings › Moving
+  around). Expanse does this by itself when macOS's Reduce Motion is on, and the walkthrough's
+  picture holds still too.
 
 ## Bugs
 
 None open. The "to check" list from writing the regression tests is settled (3 Nov): four were
-real and are fixed (Not released yet, above); the README and how-it-works now name the menu bar panel's items.
+real and are fixed; the README and how-it-works now name the menu bar panel's items.
+
+To check (4 Nov): with the screenshots' stock apps still open in the VM, EDIT-14 and EDIT-26 fail
+with low motion on or off: Tidy Up moves a group's left end by 288pt, and the log says
+`derived=true`. They pass with those apps closed. It may only be the scene asking Chess for a size
+it won't take, which would make the layout look shrunk for a smaller screen.
 
 If a new window doesn't make it onto the canvas, the log says why (look for "not on the canvas"
 in Copy Logs for a Bug Report).
@@ -34,11 +41,8 @@ in Copy Logs for a Bug Report).
    - a press state on Space tiles, with the switch happening on mouse-up;
    - an open-hand cursor over the minimap, and at 100% a click goes to that spot.
 4. **Multiple monitor support** (asked again 28 Oct). Today Expanse uses the main display only.
-5. **Low-motion mode** (asked 28 Oct): animated screen moves turned off, so glides, zooms and
-   centring jump straight to where they end. Probably on by default when macOS's Reduce Motion
-   is on (Accessibility › Display), which Expanse doesn't follow yet.
-6. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 541 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 237
+5. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
+   has a test. 549 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 239
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
    - End-to-end, 2 Nov: a complete run of 0.1.36 in the VM passed all 145 automatic cases, in one
@@ -53,14 +57,6 @@ in Copy Logs for a Bug Report).
      SPACES-25, UI-23 and UI-24 couldn't run because of an invisible Notification Center window
      (UI-41). Both fixed; those three pass.
    - The 54 guided and 31 look cases haven't been run yet.
-
-7. **Groups of windows as places** (asked 31 Oct). Released in 0.1.35:
-   windows a gap or so apart that fit the screen together are one place. A hop to one frames the
-   group, hops inside a group on screen only move focus, a click zoomed out or ⌃⌥C frames it, and
-   hovering it zoomed out outlines it (NAV-55 to NAV-60).
-8. **Build screens zoomed out** (asked 1 Nov). Released in 0.1.35: put two to
-   four windows into halves and quarters of a screen, three ways (drop zones, select and S, the
-   screen tool), and resize windows zoomed out. A built screen is a group, so it gets all of 7.
 
 ## In progress elsewhere
 

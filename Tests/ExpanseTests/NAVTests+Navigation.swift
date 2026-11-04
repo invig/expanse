@@ -481,3 +481,82 @@ extension NAVTests {
         }
     }
 }
+
+// MARK: - Low motion
+
+extension NAVTests {
+    /// Runs `body` with Settings at `setting` and macOS's Reduce Motion as `reduce`.
+    static func withMotion(_ setting: String?, reduce: Bool = false, _ body: () throws -> Void) rethrows {
+        let saved = UserDefaults.standard.object(forKey: CanvasController.motionKey)
+        let savedReduce = CanvasController.reduceMotion
+        UserDefaults.standard.set(setting, forKey: CanvasController.motionKey)
+        CanvasController.reduceMotion = { reduce }
+        defer {
+            UserDefaults.standard.set(saved, forKey: CanvasController.motionKey)
+            CanvasController.reduceMotion = savedReduce
+        }
+        try body()
+    }
+
+    @Test("NAV-64 Low motion: a camera move goes straight to where it ends, and what follows it still runs")
+    func nav64() {
+        let (a, b, c) = Self.groupLayout()
+        let canvas = TestCanvas.make(windows: [a, b, c])
+        let target = Camera(origin: CGPoint(x: 300, y: 40), scale: 0.5)
+        Self.withMotion("jump") {
+            Self.onCanvas(canvas) {
+                var done = false
+                canvas.animate(to: target) { done = true }
+                #expect(canvas.animation?.duration == 0)
+                #expect(!done) // never during the call: callers count on it coming after
+                canvas.advanceAnimation()
+                #expect(canvas.camera == target)
+                #expect(canvas.animation == nil)
+                #expect(done)
+                // Every way of moving the view goes through it: the ones that ask for a time too.
+                canvas.zoomAnimated(to: 0.8)
+                #expect(canvas.animation?.duration == 0)
+                canvas.cancelAnimation()
+                canvas.enter(zoomOut: true)
+                #expect(canvas.animation?.duration == 0)
+                canvas.cancelAnimation()
+                canvas.exit(focus: a)
+                #expect(canvas.animation?.duration == 0)
+                #expect(canvas.animation?.handsBack == true)
+                canvas.cancelAnimation()
+            }
+            Self.onCanvas(canvas, active: false, gliding: true) {
+                canvas.glide(to: c)
+                #expect(canvas.animation?.duration == 0)
+            }
+        }
+        // Animated, it starts on its way and takes its time.
+        Self.withMotion("glide") {
+            Self.onCanvas(canvas) {
+                canvas.camera = Camera(origin: .zero, scale: 1)
+                canvas.animate(to: target)
+                #expect((canvas.animation?.duration ?? 0) > 0)
+                canvas.advanceAnimation()
+                #expect(canvas.animation != nil)
+                #expect(canvas.camera != target)
+            }
+        }
+    }
+
+    @Test("NAV-65 Low motion follows macOS's Reduce Motion unless Settings says otherwise")
+    func nav65() {
+        // Match macOS: unset (as for everyone at first), chosen, or anything unknown.
+        for setting in [nil, "follow", "something else"] as [String?] {
+            #expect(CanvasController.lowMotion(setting: setting, reduceMotion: true))
+            #expect(!CanvasController.lowMotion(setting: setting, reduceMotion: false))
+        }
+        // Settings wins, either way.
+        #expect(CanvasController.lowMotion(setting: "jump", reduceMotion: false))
+        #expect(!CanvasController.lowMotion(setting: "glide", reduceMotion: true))
+        // And they're what a move reads, at the move.
+        Self.withMotion(nil, reduce: true) { #expect(CanvasController.lowMotion) }
+        Self.withMotion(nil, reduce: false) { #expect(!CanvasController.lowMotion) }
+        Self.withMotion("glide", reduce: true) { #expect(!CanvasController.lowMotion) }
+        Self.withMotion("jump", reduce: false) { #expect(CanvasController.lowMotion) }
+    }
+}

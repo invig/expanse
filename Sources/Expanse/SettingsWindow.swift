@@ -27,6 +27,8 @@ private struct SettingsView: View {
     @State private var automatic = Updater.shared.automatic
     /// See CanvasController.gap.
     @AppStorage(CanvasController.gapKey) private var gap: Double = 20
+    /// See CanvasController.lowMotion.
+    @AppStorage(CanvasController.motionKey) private var motion = "follow"
     private let isRelease = Updater.shared.isRelease
 
     var body: some View {
@@ -44,6 +46,16 @@ private struct SettingsView: View {
                     Text("None").tag(0.0)
                 }
                 Text("Snapping, Tidy up and the screens you build use it.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Moving around") {
+                Picker("Glides and zooms", selection: $motion) {
+                    Text("Match macOS").tag("follow")
+                    Text("Animate").tag("glide")
+                    Text("Jump").tag("jump")
+                }
+                Text("Jump goes straight to where a glide or zoom would end. Match macOS jumps when Reduce Motion is on.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

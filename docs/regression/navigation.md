@@ -722,3 +722,30 @@
 - **Expected:** Each notch moves the view 12pt on and it stays there; after a wheel the snap only finishes a move your way of 40pt or less (a window's edge lining up 20pt in), never back.
 - **Check in log:** no `scroll ended: view snapped by` against the way you turned the wheel.
 - **Automate:** unit: `snappedCamera(going:wheel:)`, and notches through `CanvasView.scrollWheel`.
+
+## NAV-64 Low motion: glides, zooms and centring jump straight to where they end
+- **Type:** Feature
+- **Area:** NAV
+- **Commits:** unreleased (4 Nov)
+- **Setup:** Settings › Moving around › Glides and zooms: Jump (or Match macOS, with Reduce Motion on). Windows spread out on the canvas.
+- **Steps:**
+  1. Hop with ⌃ + an arrow key, and click a window zoomed out.
+  2. Zoom out (⌥`), and go back (Esc).
+  3. Press 0, 1, - and = zoomed out, ⌃⌥C at 100%, and scroll until the view snaps.
+  4. Scroll and pinch.
+- **Expected:** Steps 1 to 3 go straight to where they'd have ended, in one frame, with the windows' pictures in place, and all that follows a move still happens: the window you went to gets the keyboard, and the real windows are where they should be. Step 4 still follows your fingers, since you're the one moving it. A change to the setting counts from the next move, without a restart.
+- **Check in log:** `low motion: the view jumps` at each move; a glide's `glide timing:` line says `1 frames`.
+- **Automate:** unit: `animate(to:)` and `advanceAnimation()`; end-to-end: a glide, zooming out and back, then the setting changed.
+
+## NAV-65 Low motion follows macOS's Reduce Motion unless Settings says otherwise
+- **Type:** Feature
+- **Area:** NAV
+- **Commits:** unreleased (4 Nov)
+- **Setup:** Settings › Moving around › Glides and zooms, left at Match macOS (where it starts). Reduce Motion in System Settings.
+- **Steps:**
+  1. Turn Reduce Motion on, and hop. Turn it off, and hop.
+  2. Set Glides and zooms to Animate with Reduce Motion on, then to Jump with it off.
+  3. With low motion on, open the walkthrough (menu bar icon › the **?** button).
+- **Expected:** Match macOS jumps with Reduce Motion on and animates with it off. Animate and Jump win over Reduce Motion. In low motion the walkthrough's canvas holds still, zoomed out (on a window, on the page about hopping), and its text doesn't slide in.
+- **Automate:** unit: `lowMotion(setting:reduceMotion:)` and the `reduceMotion` seam.
+

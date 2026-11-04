@@ -116,7 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let c = controller
         BugReport.copy(settings: [
             "Canvas: \(c.windows.count) windows, \(c.isPaused ? "paused" : "running"), auto-centre \(c.autoCentre ? "on" : "off"), hot corner \(c.hotCorner.corner.title)",
-            "Desktop picture background \(Wallpaper.enabled ? "on" : "off"), window names \(CanvasView.showsNames ? "shown" : "hidden"), detailed logging \(LogFile.shared.isEnabled ? "on" : "off")",
+            "Desktop picture background \(Wallpaper.enabled ? "on" : "off"), window names \(CanvasView.showsNames ? "shown" : "hidden"), detailed logging \(LogFile.shared.isEnabled ? "on" : "off"), low motion \(CanvasController.lowMotion ? "on" : "off")",
         ])
     }
 

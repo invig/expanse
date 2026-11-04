@@ -339,7 +339,7 @@ struct OnboardingView: View {
                     default: ReadyPage(corner: model.corner)
                     }
                 }
-                .environment(\.staggerIn, animateIn)
+                .environment(\.staggerIn, animateIn && !CanvasController.lowMotion)
                 .transition(.opacity)
                 .id(page)
                 Spacer(minLength: 20)
@@ -820,28 +820,30 @@ private struct CanvasIllustration: View {
 
     /// Where the camera looks (a canvas point), how far it's zoomed (1 = 100%) and which window
     /// has focus, at time `t`.
-    private func camera(_ t: Double) -> (look: CGPoint, scale: Double, focused: Int, phase: Double) {
+    private func camera(_ t: Double, still: Bool) -> (look: CGPoint, scale: Double, focused: Int, phase: Double) {
         if page == 4 {
             // Glide to the next window, rest, glide on.
             let hop = 1.5
             let k = Int(t / hop)
             let from = Self.windows[hops[(k + hops.count - 1) % hops.count]].frame
             let to = Self.windows[hops[k % hops.count]].frame
-            let f = min((t / hop - Double(k)) / 0.4, 1)
+            let f = still ? 1 : min((t / hop - Double(k)) / 0.4, 1)
             let e = f * f * (3 - 2 * f)
             let look = CGPoint(x: from.midX + (to.midX - from.midX) * e, y: from.midY + (to.midY - from.midY) * e)
             return (look, 0.85, hops[k % hops.count], 1)
         }
         // 0 = zoomed out, 1 = 100%.
-        let phase = (sin(t * (page == 0 ? 0.9 : 0.6)) + 1) / 2
+        let phase = still ? 0 : (sin(t * (page == 0 ? 0.9 : 0.6)) + 1) / 2
         return (CGPoint(x: -6, y: -40), 0.46 + 0.54 * phase, 1, phase)
     }
 
     var body: some View {
+        // Low motion: the canvas holds still, zoomed out or, on the page about hopping, on a window.
+        let still = CanvasController.lowMotion
         // 60 fps is plenty for this, even on a 120 Hz screen.
-        TimelineView(.animation(minimumInterval: 1.0 / 60)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let cam = camera(t)
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: still)) { timeline in
+            let t = still ? 0 : timeline.date.timeIntervalSinceReferenceDate
+            let cam = camera(t, still: still)
             GeometryReader { geo in
                 let middle = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2 - 50)
                 ZStack {

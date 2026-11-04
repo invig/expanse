@@ -100,7 +100,11 @@ A short walkthrough gets you set up in about a minute:
 
 **The menu bar icon** opens a panel with the rest: a live minimap that opens the canvas, Pause,
 Centre and Tidy Up, which corner to use, earlier layouts to go back to, the walkthrough again,
-Troubleshooting (logs for a bug report), and Settings (updates, opening at login).
+Troubleshooting (logs for a bug report), and Settings (updates, opening at login, the gap between
+windows).
+
+**Prefer less movement?** Settings › Moving around makes glides and zooms jump straight to where
+they end. If macOS's Reduce Motion is on, Expanse does this by itself.
 
 ## See it work
 

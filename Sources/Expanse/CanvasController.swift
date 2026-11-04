@@ -4553,8 +4553,28 @@ final class CanvasController: NSObject {
     /// `defaults write com.invignation.expanse animationSlowdown -float 2`; read at launch.
     private let animationSlowdown = max(1, UserDefaults.standard.double(forKey: "animationSlowdown"))
 
+    /// How the view moves (Settings): "glide", "jump", or unset ("follow"), which jumps when
+    /// macOS's Reduce Motion is on.
+    static let motionKey = "motion"
+    /// macOS's Reduce Motion, unless a test gives its own.
+    static var reduceMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    /// Camera moves go straight to where they end. Read at each move, so a change to either
+    /// setting counts from the next one.
+    static var lowMotion: Bool { lowMotion(setting: UserDefaults.standard.string(forKey: motionKey), reduceMotion: reduceMotion()) }
+    static func lowMotion(setting: String?, reduceMotion: Bool) -> Bool {
+        switch setting {
+        case "jump": true
+        case "glide": false
+        default: reduceMotion
+        }
+    }
+
     func animate(to target: Camera, duration: CFTimeInterval = 0.22, handsBack: Bool = false, completion: (() -> Void)? = nil) {
-        animation = CameraAnimation(from: camera, to: target, start: CACurrentMediaTime(), duration: duration * animationSlowdown,
+        // Low motion: over at the first frame, so what follows a move (a glide's hand-back, say)
+        // still runs, and in the same order.
+        let jump = Self.lowMotion
+        if jump { logger.info("low motion: the view jumps") }
+        animation = CameraAnimation(from: camera, to: target, start: CACurrentMediaTime(), duration: jump ? 0 : duration * animationSlowdown,
                                     completion: completion, handsBack: handsBack)
         // Moving on (a hop during the last one's hand-back, say): nothing's being handed back to.
         handingBackTo = nil
@@ -4582,14 +4602,16 @@ final class CanvasController: NSObject {
         displayLink = nil
     }
 
-    @objc private func tick(_ link: CADisplayLink) {
+    @objc private func tick(_ link: CADisplayLink) { advanceAnimation() }
+
+    private func advanceAnimation() {
         guard var a = animation else { stopDisplayLink(); return }
         let now = CACurrentMediaTime()
         if a.frames == 0 { a.firstFrame = now } else { a.maxGap = max(a.maxGap, now - a.lastFrame) }
         a.frames += 1
         a.lastFrame = now
         animation = a
-        let t = min(1, (CACurrentMediaTime() - a.start) / a.duration)
+        let t = a.duration > 0 ? min(1, (CACurrentMediaTime() - a.start) / a.duration) : 1
         let e = 1 - pow(1 - t, 3) // ease-out cubic
         let s = exp(lerp(log(a.from.scale), log(a.to.scale), e))
         let c0 = a.from.center(in: viewSize), c1 = a.to.center(in: viewSize)

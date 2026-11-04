@@ -489,7 +489,12 @@ import AppKit
             try await t.navReady()
             let old = expanseDefault("autoCentre")
             setExpanseDefault("autoCentre", true)
-            defer { setExpanseDefault("autoCentre", old) }
+            // Animated, whatever Reduce Motion says: in low motion each hop's over before the next.
+            setExpanseDefault("motion", "glide")
+            defer {
+                setExpanseDefault("autoCentre", old)
+                setExpanseDefault("motion", nil)
+            }
             // Wider together than the screen.
             let size = CGSize(width: max(600, (t.screen.width / 3).rounded()), height: 400)
             let spot = try await t.navEmptySpot()
@@ -986,6 +991,9 @@ import AppKit
         },
 
         Case("NAV-46", "animationSlowdown makes camera moves slower") { t in
+            // Animated, whatever Reduce Motion says: low motion has nothing to slow down.
+            setExpanseDefault("motion", "glide")
+            defer { setExpanseDefault("motion", nil) }
             try t.needsInput()
             if let on = navMacArrowShortcuts([.right]) { throw Skip("macOS takes ⌃→ itself (\(on)): turn it off in System Settings › Keyboard › Keyboard Shortcuts › Mission Control") }
             try await t.navReady()
@@ -1367,6 +1375,37 @@ import AppKit
             try await t.look("Hovering B: a soft accent outline around both B and C, a little outside them?")
             Input.glide(to: s.screenPoint(CGPoint(x: fa.midX, y: fa.midY)))
             try await t.look("Hovering A, on its own: only A's own outline, no group outline?")
+        },
+        Case("NAV-64", "Low motion: hops, zooming out and going back jump to where they end") { t in
+            setExpanseDefault("motion", "jump")
+            defer { setExpanseDefault("motion", nil) }
+            // Too far apart to be a group, so going from one to the other moves the view.
+            let ws = try await t.row(["NAV-64 A", "NAV-64 B"], gap: 900)
+            let (a, b) = (ws[0], ws[1])
+            try await t.pause(0.5)
+            var mark = t.log.mark()
+            let there = try await t.navGlide(to: b.id)
+            try t.expect(navCentred(there, b.id), "the view should be on B")
+            try await t.expectLog("low motion: the view jumps", since: mark)
+            let timing = try await t.expectLog("glide timing:", since: mark, timeout: 6)
+            try t.expect(timing.contains(" 1 frames"), "a jump should take one frame: \(timing)")
+            // Over, and handed back: B has the keyboard's app in front, not the canvas.
+            try await t.until("the canvas gone after the jump") { !(try await t.settle().active) }
+            mark = t.log.mark()
+            t.link("enter")
+            try await t.until("zoomed out") { try await t.settle().active }
+            try await t.expectLog("low motion: the view jumps", since: mark)
+            mark = t.log.mark()
+            t.link("exit")
+            try await t.until("back at 100%") { !(try await t.settle().active) }
+            try await t.expectLog("low motion: the view jumps", since: mark)
+            // A change counts from the next move, without a restart.
+            setExpanseDefault("motion", "glide")
+            try await t.pause(0.5)
+            mark = t.log.mark()
+            let back = try await t.navGlide(to: a.id)
+            try t.expect(navCentred(back, a.id), "the view should be on A")
+            try await t.noLog("low motion: the view jumps", since: mark, within: 0.5)
         },
     ]
 }
