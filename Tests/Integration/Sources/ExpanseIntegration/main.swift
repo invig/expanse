@@ -16,6 +16,7 @@ import os
 //   --timeout SECS    for each automatic case (default 90)
 //   --repeat N        run the chosen cases N times over (to tell a flaky case from a broken one)
 //   --keep-logs       keep Expanse's log for every case, not only the failed ones
+//   --shots [a,b]     take the README's screenshots instead of running cases (see Screenshots.swift)
 //   --forget-own-windows  take this app's closed windows out of Expanse's saved layout, then quit
 //                     (with Expanse not running; scripts/vm-integration.sh does it before each run)
 //
@@ -129,6 +130,13 @@ app.run()
             return 2
         }
         closeBackgroundItemNotices()
+        if args.contains("--shots") {
+            NSApp.setActivationPolicy(.accessory)
+            let only = option("--shots").flatMap { $0.hasPrefix("--") ? nil : Set($0.split(separator: ",").map(String.init)) }
+            let worked = await Shots(t: t, out: out, say: { [weak self] in self?.progress($0) }).run(only: only)
+            log.stop()
+            return worked ? 0 : 1
+        }
         progress("Expanse Tests: \(cases.count) cases; Accessibility for input: \(Input.allowed ? "yes" : "no")")
         let timeout = Double(option("--timeout") ?? "90") ?? 90
         for c in cases {

@@ -26,7 +26,8 @@ in Copy Logs for a Bug Report).
      neighbours, the gap and screen halves; a right-click size menu; evening up a selection.
      Still to do: the same snapping when you resize a real window at 100%.
 2. **Demo videos for the README.** Recorded in a clean macOS VM, so nothing personal is filmed.
-   In progress.
+   In progress. Screenshots of each feature went in first (asked 4 Nov): the README's See it work
+   section, which `scripts/screenshots.sh` retakes.
 3. **Minimap and Spaces polish**, left over from the UI hill climb:
    - the viewport keeps one accent ring at every zoom level, instead of turning into a grey box;
    - windows in view are drawn stronger than off-screen ones;

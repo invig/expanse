@@ -119,11 +119,21 @@ device"). `df -h /` in the VM shows what's left.
 picture of its screen: `sudo launchctl asuser 501 sudo -u admin screencapture -x /tmp/shot.png`.
 `/usr/bin/log show --start` needs whole seconds: with fractions it prints nothing.
 
+**The README's screenshots** (docs/screenshots) are taken in the VM too, with stock apps:
+```bash
+caffeinate -i -s scripts/screenshots.sh
+```
+It takes about five minutes and uses the same run, so everything above applies. Expanse Tests lays
+out the windows and drives each feature (Tests/Integration, `Screenshots.swift`); `overview,tidy`
+as an argument takes only those. Look at every picture afterwards: a window that won't shrink, or
+one that happens to touch another, changes what a shot shows.
+
 **One-time setup:** this Mac's SSH key in the VM (`ssh-copy-id admin@<VM address>`, the
 image's password is admin); Expanse Tests switched on in the VM's System Settings › Privacy &
 Security › Device Control and Data Access (Accessibility before macOS 27; `ExpanseTests.app
 --args --ask-access` adds it to the list); and Expanse allowed to record the screen when macOS
-asks. Builds signed with the same certificate keep these. In the VM, links opened over SSH don't
+asks. Builds signed with the same certificate keep these. Tips' notification stays on screen and
+gets in the way, so it's off (`launchctl disable gui/501/com.apple.tipsd` in the VM). In the VM, links opened over SSH don't
 reach Expanse; the runner opens them from inside the VM's login session.
 
 ## Each case

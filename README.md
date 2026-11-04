@@ -11,6 +11,7 @@
   <a href="https://github.com/invig/expanse/releases/latest"><strong>Download</strong></a> ·
   <a href="#install">Install</a> ·
   <a href="#the-basics">How to use it</a> ·
+  <a href="#see-it-work">See it work</a> ·
   <a href="#questions">Questions</a>
 </p>
 
@@ -100,6 +101,52 @@ A short walkthrough gets you set up in about a minute:
 **The menu bar icon** opens a panel with the rest: a live minimap that opens the canvas, Pause,
 Centre and Tidy Up, which corner to use, earlier layouts to go back to, the walkthrough again,
 Troubleshooting (logs for a bug report), and Settings (updates, opening at login).
+
+## See it work
+
+<img src="docs/screenshots/overview.jpg" alt="Expanse zoomed out: ten windows arranged on one canvas over the desktop picture, with a minimap in the corner">
+
+**Zoom out to see everything.** Every window, live, laid out the way you arranged it. Rest the
+pointer in a screen corner, or press <kbd>⌥</kbd> <kbd>`</kbd>.
+
+<table>
+<tr>
+<td width="50%" valign="top"><img src="docs/screenshots/glide.jpg" alt="The view partway through zooming in on the Calendar window, its neighbours sliding off the edges of the screen"><br><strong>Click a window</strong> and the view glides to it, ready to use.</td>
+<td width="50%" valign="top"><img src="docs/screenshots/hop.jpg" alt="The view at 100% partway through moving from Maps to Calendar"><br><strong><kbd>⌃</kbd> + arrow keys</strong> hop to the next window in that direction. The view moves; the windows stay where they are.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screenshots/zoom.jpg" alt="The canvas at 60%, with windows running off the edges and the minimap outlining the part in view"><br><strong>Pinch, or scroll with two fingers,</strong> to zoom and move around. The minimap shows where you are.</td>
+<td width="50%" valign="top"><img src="docs/screenshots/snap.jpg" alt="Chess being dragged next to Clock on the zoomed-out canvas, its top snapped level with Clock's"><br><strong>Drag a window while zoomed out</strong> and it snaps into neat, even gaps. Hold <kbd>⌘</kbd> to move it freely.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screenshots/group-hover.jpg" alt="The pointer over Safari, with an outline around both Safari and Maps beside it"><br><strong>Windows side by side that fit the screen are one place.</strong> Hover one and the group is outlined.</td>
+<td width="50%" valign="top"><img src="docs/screenshots/group-screen.jpg" alt="Safari and Maps side by side, filling the screen at 100%"><br><strong>Hops, clicks and centring show the whole group</strong> at 100%.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screenshots/tile-drop.jpg" alt="Notes being dragged onto the right side of Calendar, with the right half of a screen highlighted"><br><strong>Drop a window on another's side or corner</strong> to tile them. The highlight shows where it will go.</td>
+<td width="50%" valign="top"><img src="docs/screenshots/tile-screen.jpg" alt="Calendar and Notes as two halves filling the screen at 100%"><br><strong>They become a screen:</strong> halves or quarters of your display, ready to use.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screenshots/select-box.jpg" alt="A selection box dragged across Notes, TextEdit and Clock, all three outlined"><br><strong>Drag on empty canvas to select windows,</strong> then drag any of them to move them together.</td>
+<td width="50%" valign="top"><img src="docs/screenshots/select-layouts.jpg" alt="Three selected windows with a menu offering One left, two right and Two left, one right"><br><strong>Press <kbd>S</kbd> with a few selected</strong> to choose how they fill a screen.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screenshots/resize.jpg" alt="Calendar being widened by its right edge on the canvas, with its size in points showing below"><br><strong>Resize a window by its edges,</strong> right there on the canvas. Its size shows as you drag.</td>
+<td width="50%" valign="top"><img src="docs/screenshots/sizes.jpg" alt="A right-click menu on Clock: Fill screen, Half screen, Quarter screen, Same size as, Back to its own size"><br><strong>Right-click a window</strong> for Fill, Half or Quarter screen, the size of another window, or its own size again.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screenshots/tidy-before.jpg" alt="The canvas with pairs of windows out of line and unevenly spaced"><br><strong>Before Tidy Up:</strong> windows out of line, with uneven gaps.</td>
+<td width="50%" valign="top"><img src="docs/screenshots/tidy-after.jpg" alt="The same windows lined up and evenly spaced"><br><strong>After pressing <kbd>T</kbd>:</strong> each group lined up and evenly spaced.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screenshots/spaces.jpg" alt="The zoomed-out canvas with a Spaces panel beside the minimap, showing Expanse and a full-screen TextEdit"><br><strong>Full-screen apps keep their own Spaces.</strong> Jump to them, and back, from the Spaces panel next to the minimap.</td>
+<td width="50%" valign="top"><img src="docs/screenshots/menu.jpg" alt="The menu bar panel: a live minimap, Centre window, Tidy up, the hot corner, and earlier layouts"><br><strong>The menu bar icon</strong> opens the rest: a live minimap, Pause, Centre and Tidy Up, which corner to use, and earlier layouts.</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="docs/screenshots/paused.jpg" alt="Windows piled up in the middle of the screen, as macOS had them, with Expanse paused"><br><strong>Pause or quit</strong> and every window goes straight back to where macOS had it.</td>
+<td width="50%" valign="top"><img src="docs/screenshots/welcome.jpg" alt="The Expanse welcome window: Your Mac, on an infinite canvas, with four quick steps"><br><strong>A short walkthrough</strong> gets you set up in about a minute.</td>
+</tr>
+</table>
 
 ## Questions
 
