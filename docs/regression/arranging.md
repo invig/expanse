@@ -271,7 +271,7 @@
 - **Type:** Feature
 - **Area:** EDIT
 - **Commits:** 49c6c06 (0.1.20)
-- **Setup:** One group: window B to the right of A, 50pt gap, B's top 40pt lower than A's. Window C below A, left edge 30pt to the right of A's, 80pt gap. A separate pair where one top is 100pt below the other.
+- **Setup:** One group: window B to the right of A, 50pt gap, B's top 40pt lower than A's. Window C below A, left edge 30pt to the right of A's, 60pt gap. A separate pair where one top is 100pt below the other.
 - **Steps:**
   1. Zoom out and press T.
 - **Expected:** B's top lines up with A's and the gap closes to 20pt; C's left edge lines up with A's and the gap closes to 20pt. In the separate pair (100pt apart, more than 60pt), the tops are not lined up. A line-up is skipped if it would bring a window closer than 20pt to another.
@@ -281,10 +281,10 @@
 - **Type:** Feature
 - **Area:** EDIT
 - **Commits:** 49c6c06 (0.1.20)
-- **Setup:** Group A: two windows side by side, the right one overlapping the left by about 150pt. Group B: two windows about 260pt to the right of A.
+- **Setup:** Group A: two windows side by side, the right one overlapping the left by about 150pt. Group B: two windows about 100pt to the right of A.
 - **Steps:**
   1. Zoom out and press T.
-- **Expected:** A is tidied; since it grew to within 240pt of B, B moves right (or down) as a whole, its windows keeping their arrangement, and the groups stay at least 240pt apart.
+- **Expected:** A is tidied; since it grew to within 80pt of B, B moves right (or down) as a whole, its windows keeping their arrangement, and the groups stay at least 80pt apart.
 - **Automate:** unit: CanvasController.separateGroups(_:groups:reach:).
 
 ## EDIT-26 Tidy Up right after a drag keeps what you dragged
@@ -398,3 +398,15 @@
 - **Expected:** The first ⌘Z undoes the resize, real window too; the second puts the screen's windows back where and how big they were (the dropped one where you dragged it from), and windows moved out of the way too; the third beeps. Plain moves aren't undone.
 - **Check in log:** `undo: resize`, `undo: screen of 2`.
 - **Automate:** unit: undo steps.
+
+## EDIT-35 Windows 80pt or more apart stay separate zones through Tidy Up
+- **Type:** Bug fix
+- **Area:** EDIT
+- **Commits:** unreleased (4 Nov)
+- **Before:** Windows within 240pt counted as one group, chaining through neighbours, so Tidy Up pulled zones you'd kept apart on purpose back together.
+- **Setup:** Two zones, 100pt apart. Inside each: two windows with a 50pt gap, the second's top 30pt lower.
+- **Steps:**
+  1. Zoom out and press T.
+- **Expected:** Each zone is tidied where it is: a 20pt gap and its tops lined up. The first window of each zone doesn't move. Windows 79pt apart count as one group; 80pt apart, as two. Being close along one axis only doesn't make a group. Dragging a window to centre it on a row or column keeps its own 240pt reach (EDIT-16).
+- **Check in log:** `tidy moved <App>[<id>] by <dx>, <dy>` for each zone's second window only.
+- **Automate:** unit: CanvasController.tidyUp(_:). End-to-end: EDIT-35.

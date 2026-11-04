@@ -4,7 +4,8 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- Tidy Up leaves zones alone (asked 4 Nov): windows now count as one group only when they're less
+  than 80pt apart, down from 240pt, so zones you keep apart stay apart. EDIT-35.
 
 ## Bugs
 
@@ -40,7 +41,7 @@ in Copy Logs for a Bug Report).
    - an open-hand cursor over the minimap, and at 100% a click goes to that spot.
 4. **Multiple monitor support** (asked again 28 Oct). Today Expanse uses the main display only.
 5. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 552 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 240
+   has a test. 556 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 241
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
    - End-to-end, 2 Nov: a complete run of 0.1.36 in the VM passed all 145 automatic cases, in one

@@ -2608,10 +2608,13 @@ final class CanvasController: NSObject {
     }
     static let gapKey = "windowGap"
     /// Windows closer than this to a neighbour count as one group (cluster). Tidy Up tidies each
-    /// group where it is, and keeps groups at least this far apart.
-    static let clusterReach: CGFloat = 240
+    /// group where it is, and keeps groups at least this far apart. Small, so zones you keep apart
+    /// on purpose stay zones.
+    static let clusterReach: CGFloat = 80
     /// Edges closer than this to lining up get lined up by Tidy Up.
     static let alignReach: CGFloat = 60
+    /// How far away a row or column can be and still be one a dragged window centres on.
+    static let rowSnapReach: CGFloat = 240
 
     /// Fit the layout to this screen without rebuilding it:
     /// 1. every window takes the size you chose, capped at the screen (shrinks on a laptop,
@@ -4713,7 +4716,7 @@ final class CanvasController: NSObject {
         consider(f.midY, mid.y, line: mid.y, span: CGRect(x: f.minX, y: mid.y, width: f.width, height: 0), into: &bestY)
 
         // Centre on a whole neighbouring row (above / below) or column (left / right).
-        let reach = Self.clusterReach
+        let reach = Self.rowSnapReach
         let wide = f.insetBy(dx: -reach, dy: 0), tall = f.insetBy(dx: 0, dy: -reach)
         let below = others.filter { $0.minY >= f.maxY - 1 && $0.minY - f.maxY <= reach && $0.intersects(wide.insetBy(dx: 0, dy: -reach)) }
         let above = others.filter { $0.maxY <= f.minY + 1 && f.minY - $0.maxY <= reach && $0.intersects(wide.insetBy(dx: 0, dy: -reach)) }

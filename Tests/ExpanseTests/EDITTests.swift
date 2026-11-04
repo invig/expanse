@@ -443,6 +443,9 @@ import Carbon.HIToolbox
         #expect(below.midX == 410)
         #expect(belowLines.first.map { $0.0 == CGPoint(x: 410, y: 500) && $0.1 == CGPoint(x: 410, y: 1200) } == true,
                 "a guide spanning the row and the window")
+        // 200pt below it still counts: dragging has its own reach, not Tidy Up's.
+        let (farBelow, _) = c2.snap(Self.r(258, 1000, 300, 300), excluding: [9])
+        #expect(farBelow.midX == 410)
     }
 
     @Test("EDIT-16 The same for a column to the left or right") func edit16b() {
@@ -470,8 +473,7 @@ import Carbon.HIToolbox
         #expect(b == groupB, "group B doesn't move")
     }
 
-    @Test("EDIT-17 Groups more than 240pt apart aren't pulled together") func edit17b() {
-        // Two groups 300pt apart: closer than they'd be after a whole-canvas tidy, further than 240.
+    @Test("EDIT-17 Groups apart aren't pulled together") func edit17b() {
         let frames0 = [Self.r(0, 0, 400, 300), Self.r(430, 0, 400, 300),
                        Self.r(1130, 40, 400, 300), Self.r(1580, 40, 400, 300)]
         var frames = frames0
@@ -479,6 +481,42 @@ import Carbon.HIToolbox
         #expect(frames[1].minX == 420)
         #expect(frames[2] == frames0[2], "B's first window stays put")
         #expect(frames[3].minX == 1550 && frames[3].minY == 40, "B is tidied where it is")
+    }
+
+    // MARK: EDIT-35 Windows 80pt or more apart stay separate zones through Tidy Up
+
+    @Test("EDIT-35 Two zones 100pt apart are each tidied where they are") func edit35() {
+        let frames0 = [Self.r(0, 0, 400, 300), Self.r(450, 30, 400, 300),
+                       Self.r(950, 0, 400, 300), Self.r(1400, 30, 400, 300)]
+        var frames = frames0
+        CanvasController.tidyUp(&frames)
+        #expect(frames[1] == Self.r(420, 0, 400, 300), "the first zone is tidied")
+        #expect(frames[2] == frames0[2], "the second zone stays where it is")
+        #expect(frames[3] == Self.r(1370, 0, 400, 300), "and is tidied there")
+    }
+
+    @Test("EDIT-35 The same for zones one above the other") func edit35b() {
+        let frames0 = [Self.r(0, 0, 400, 300), Self.r(0, 400, 400, 300)]
+        var frames = frames0
+        CanvasController.tidyUp(&frames)
+        #expect(frames == frames0)
+    }
+
+    @Test("EDIT-35 The range is 80pt: 79 apart is one group, 80 apart is two") func edit35c() {
+        #expect(CanvasController.clusterReach == 80)
+        var near = [Self.r(0, 0, 400, 300), Self.r(479, 0, 400, 300)]
+        CanvasController.tidyUp(&near)
+        #expect(near[1].minX == 420, "pulled in")
+        var apart = [Self.r(0, 0, 400, 300), Self.r(480, 0, 400, 300)]
+        CanvasController.tidyUp(&apart)
+        #expect(apart[1].minX == 480, "left alone")
+    }
+
+    @Test("EDIT-35 Being close on one axis alone doesn't make a group") func edit35d() {
+        let frames0 = [Self.r(0, 0, 400, 300), Self.r(430, 500, 400, 300)]
+        var frames = frames0
+        CanvasController.tidyUp(&frames)
+        #expect(frames == frames0)
     }
 
     // MARK: EDIT-18 The close button only closes when it's showing
@@ -626,7 +664,7 @@ import Carbon.HIToolbox
     @Test("EDIT-24 Tidy Up lines up near edges and closes gaps to 20pt") func edit24() {
         let a = Self.r(0, 0, 400, 300)
         let b = Self.r(450, 40, 400, 300)    // right of A: 50pt gap, top 40pt lower
-        let c = Self.r(30, 380, 400, 300)    // below A: left edge 30pt in, 80pt gap
+        let c = Self.r(30, 360, 400, 300)    // below A: left edge 30pt in, 60pt gap
         let p1 = Self.r(3000, 0, 400, 300), p2 = Self.r(3450, 100, 400, 300)   // tops 100pt apart
         var frames = [a, b, c, p1, p2]
         CanvasController.tidyUp(&frames)
@@ -655,9 +693,9 @@ import Carbon.HIToolbox
 
     // MARK: EDIT-25 A group moves as a whole only when another grows into its space
 
-    @Test("EDIT-25 A group another grows into moves as a whole, 240pt clear") func edit25() {
+    @Test("EDIT-25 A group another grows into moves as a whole, 80pt clear") func edit25() {
         let groupA = [Self.r(0, 0, 400, 300), Self.r(250, 0, 400, 300)]   // overlapping by 150
-        let groupB = [Self.r(910, 0, 400, 300), Self.r(1330, 0, 400, 300)] // 260 right of A
+        let groupB = [Self.r(750, 0, 400, 300), Self.r(1170, 0, 400, 300)] // 100 right of A
         var frames = groupA + groupB
         CanvasController.tidyUp(&frames)
         #expect(Self.gapX(frames[0], frames[1]) == 20, "A is tidied")
@@ -665,16 +703,16 @@ import Carbon.HIToolbox
         #expect(shift > 0)
         #expect(frames[2] == groupB[0].offsetBy(dx: shift, dy: 0) && frames[3] == groupB[1].offsetBy(dx: shift, dy: 0),
                 "B moves right as a whole")
-        #expect(frames[2].minX - frames[1].maxX == 240, "the groups stay 240pt apart")
+        #expect(frames[2].minX - frames[1].maxX == 80, "the groups stay 80pt apart")
     }
 
     @Test("EDIT-25 separateGroups leaves groups that are clear alone") func edit25b() {
-        var frames = [Self.r(0, 0, 400, 300), Self.r(700, 0, 400, 300), Self.r(820, 0, 400, 300)]
-        CanvasController.separateGroups(&frames, groups: [[0], [1, 2]], reach: 240)
-        #expect(frames[1].minX == 700, "300pt clear: stays")
-        var close = [Self.r(0, 0, 400, 300), Self.r(500, 50, 400, 300), Self.r(920, 50, 400, 300)]
-        CanvasController.separateGroups(&close, groups: [[0], [1, 2]], reach: 240)
-        #expect(close[1] == Self.r(640, 50, 400, 300) && close[2] == Self.r(1060, 50, 400, 300))
+        var frames = [Self.r(0, 0, 400, 300), Self.r(500, 0, 400, 300), Self.r(920, 0, 400, 300)]
+        CanvasController.separateGroups(&frames, groups: [[0], [1, 2]], reach: 80)
+        #expect(frames[1].minX == 500, "100pt clear: stays")
+        var close = [Self.r(0, 0, 400, 300), Self.r(450, 50, 400, 300), Self.r(870, 50, 400, 300)]
+        CanvasController.separateGroups(&close, groups: [[0], [1, 2]], reach: 80)
+        #expect(close[1] == Self.r(480, 50, 400, 300) && close[2] == Self.r(900, 50, 400, 300))
     }
 
     // MARK: EDIT-26 Tidy Up right after a drag keeps what you dragged

@@ -396,6 +396,32 @@ import AppKit
             try t.expectNear(now[0].origin, dropped, within: 21, "A, the group's left end, where it was dropped")
             try editExpectRow(t, now, ["A", "B", "C"])
         },
+
+        Case("EDIT-35", "Windows 80pt or more apart stay separate zones through Tidy Up") { t in
+            let spot = editClearSpot(try await t.state())
+            // Two untidy zones 100pt apart: inside each, a gap of 50 and a top 30pt lower.
+            let offsets = [CGPoint(x: 0, y: 0), CGPoint(x: 450, y: 30), CGPoint(x: 950, y: 0), CGPoint(x: 1400, y: 30)]
+            let names = ["A", "B", "C", "D"]
+            var ws: [TestWindow] = []
+            for (i, off) in offsets.enumerated() {
+                let w = try await t.window("EDIT-35 \(names[i])",
+                                           CGRect(x: 120 + 30 * CGFloat(i), y: 140 + 30 * CGFloat(i), width: 400, height: 260))
+                t.place(w, at: CGPoint(x: spot.x + off.x, y: spot.y + off.y))
+                ws.append(w)
+            }
+            _ = try await t.settle()
+            let mark = t.log.mark()
+            t.link("tidy")
+            try await t.until("the canvas to open", timeout: 8) { try await t.state().active }
+            try await t.expectLog("layout fitted:", since: mark, timeout: 8)
+            let s = try await t.settle()
+            let fr = try ws.map { try s.editFrame($0) }
+            try editExpectRow(t, Array(fr[0...1]), ["A", "B"])
+            try editExpectRow(t, Array(fr[2...3]), ["C", "D"])
+            try t.expectNear(fr[0].origin, spot, within: 1, "A, the first zone's left end, shouldn't move")
+            try t.expectNear(fr[2].origin, CGPoint(x: spot.x + 950, y: spot.y), within: 1,
+                             "C shouldn't move: its zone is more than 80pt from the first")
+        },
     ]
 }
 

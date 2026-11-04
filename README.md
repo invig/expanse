@@ -173,8 +173,9 @@ the settings yourself:
 Menu bar icon › **Earlier layouts**: click one to put your windows back the way they were then.
 Expanse keeps your last three, taken 15 minutes apart as you work (or when you press **Take
 snapshot**), and a restore can be undone too: the layout you had becomes the newest earlier one.
-**Tidy Up** neatens things where they are. As a last resort, **Restore all windows** (beside Take
-snapshot) brings every window that's out of view back on screen, cascaded from the top middle.
+**Tidy Up** neatens things where they are: windows 80pt or more apart count as separate groups, so
+zones you keep apart stay apart. As a last resort, **Restore all windows** (beside Take snapshot)
+brings every window that's out of view back on screen, cascaded from the top middle.
 
 </details>
 
