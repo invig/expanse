@@ -328,7 +328,7 @@
 ## SPACES-27 Over a full-screen app the canvas keeps the desktop picture, and covers the app's top edge
 - **Type:** Bug fix
 - **Area:** SPACES
-- **Commits:** unreleased (6 Nov)
+- **Commits:** 43d0748 (0.1.43)
 - **Before:** Opening the canvas over a full-screen app took a fresh picture of "the desktop", but what macOS draws on that Space is a black backdrop. The canvas and the Expanse tile turned black. The canvas's window stops at the menu bar, which macOS hides there, so the app's top edge (Brave's tabs) stayed showing above the canvas and took clicks.
 - **Setup:** Desktop picture background on. Brave or Safari in full screen, showing.
 - **Steps:**
@@ -342,7 +342,7 @@
 ## SPACES-28 The desktop picture is only taken of a desktop at rest
 - **Type:** Bug fix
 - **Area:** SPACES
-- **Commits:** unreleased (6 Nov)
+- **Commits:** 43d0748 (0.1.43)
 - **Before:** The picture was asked for the moment the Space changed, while macOS was still sliding the desktop's windows across the screen (one Mac reported Finder's at x = −554, then −2034), and a window of the screen's size counted wherever it was. The canvas could show that picture until it next opened.
 - **Setup:** Desktop picture background on. A full-screen app on another Space.
 - **Steps:**

@@ -4,10 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- The canvas over a full-screen app keeps the desktop picture instead of turning black, runs right
-  up to the top of the screen so the app's tabs don't show above it, and takes no picture there, so
-  protected video in that app isn't made to blink. The desktop picture waits for a Space change to
-  finish and is only taken of a desktop at rest.
+Nothing yet.
 
 ## Bugs
 
@@ -96,6 +93,10 @@ Not decided yet.
 
 ## Done
 
+- 0.1.43: The canvas over a full-screen app keeps the desktop picture instead of turning black, runs
+  right up to the top of the screen so the app's tabs don't show above it, and takes no picture
+  there, so protected video in that app isn't made to blink. The desktop picture waits for a Space
+  change to finish and is only taken of a desktop at rest.
 - 0.1.42: Tidy Up leaves zones alone: windows count as one group only when they're less than 80pt
   apart, down from 240pt, so zones you keep apart stay apart.
 - 0.1.41: Settings is now a page of the menu bar panel, opened with the gear, instead of a window
