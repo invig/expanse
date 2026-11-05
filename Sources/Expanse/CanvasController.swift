@@ -16,7 +16,9 @@ import os
 final class CanvasController: NSObject {
     private(set) var windows: [ManagedWindow] = [] // back to front
     var camera = Camera()
-    private(set) var isActive = false
+    private(set) var isActive = false {
+        didSet { if isActive != oldValue { updateMenuBarStrip() } }
+    }
     /// Paused: windows are back in their original macOS layout and Expanse leaves them alone.
     private(set) var isPaused = false
 
@@ -166,6 +168,21 @@ final class CanvasController: NSObject {
     private var shownAgainAt: [pid_t: CFTimeInterval] = [:]
     private var restoredAt: [CGWindowID: CFTimeInterval] = [:]
     private var lastWallpaperRefresh: CFTimeInterval = 0
+    /// The newest ask for a picture of the desktop: an older one's answer, or its next try, is dropped.
+    private var wallpaperRequest = 0
+    /// When the Space last changed. macOS is still sliding the desktop across for a moment after it
+    /// says so (see takeWallpaper).
+    private var spaceChangedAt: CFTimeInterval = 0
+    static let spaceSettleTime: CFTimeInterval = 0.7
+    /// How many times to ask for a picture of a desktop that's still moving, and how far apart.
+    static let wallpaperTries = 10
+    static let wallpaperRetryDelay: CFTimeInterval = 0.2
+    /// Asks for a picture of the desktop (a seam for the tests).
+    var takeDesktopPicture: (NSScreen, @escaping (Wallpaper.Result) -> Void) -> Void = { screen, done in
+        Wallpaper.capture(screen: screen, completion: done)
+    }
+    /// See menuBarStripFrame.
+    private var menuBarStrip: MenuBarStrip?
 
     private struct CameraAnimation {
         var from: Camera
@@ -602,7 +619,9 @@ final class CanvasController: NSObject {
         // macOS protects blink.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
+            self?.spaceChangedAt = CACurrentMediaTime()
             self?.refreshWallpaper()
+            self?.updateMenuBarStrip()
             self?.refreshSpaces()
             self?.fullScreenChanging()
             self?.canvasFollowsSpace()
@@ -625,11 +644,77 @@ final class CanvasController: NSObject {
         guard !isPaused else { return }
         lastWallpaperRefresh = CACurrentMediaTime()
         guard !WindowCapture.closing else { return }
-        guard Wallpaper.enabled, CGPreflightScreenCaptureAccess() else { view.setWallpaper(nil); return }
-        Wallpaper.capture(screen: screen) { [weak self] image in
-            guard Wallpaper.enabled else { return }
-            self?.view.setWallpaper(image)
+        wallpaperRequest &+= 1
+        guard Wallpaper.enabled, CGPreflightScreenCaptureAccess() else { setDesktopPicture(nil); return }
+        takeWallpaper(request: wallpaperRequest, tries: Self.wallpaperTries)
+    }
+
+    /// Takes a picture of the desktop once there's a desktop at rest to take. A full-screen app's
+    /// Space has none, only macOS's black backdrop, so the canvas keeps its last picture there (and
+    /// protected video in that app isn't made to blink). Back on a desktop, it waits for the slide.
+    private func takeWallpaper(request: Int, tries: Int) {
+        guard request == wallpaperRequest, !isPaused, Wallpaper.enabled, !WindowCapture.closing else { return }
+        if Spaces.inFullScreenSpace {
+            logger.info("desktop picture: keeping the last one on a full-screen app's Space")
+            if !view.hasWallpaper { setDesktopPicture(Wallpaper.fromFile(screen: screen)) }
+            return
         }
+        let settling = spaceChangedAt + Self.spaceSettleTime - CACurrentMediaTime()
+        if settling > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + settling) { [weak self] in
+                self?.takeWallpaper(request: request, tries: tries)
+            }
+            return
+        }
+        takeDesktopPicture(screen) { [weak self] result in
+            guard let self, request == self.wallpaperRequest, Wallpaper.enabled else { return }
+            switch result {
+            case .picture(let image):
+                // Off to a full-screen app's Space while it was being taken.
+                guard !Spaces.inFullScreenSpace else { return }
+                self.setDesktopPicture(image)
+            case .notSettled:
+                guard tries > 1, WindowCapture.canAsk else {
+                    logger.info("desktop picture: the desktop's still moving, keeping the last one")
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.wallpaperRetryDelay) { [weak self] in
+                    self?.takeWallpaper(request: request, tries: tries - 1)
+                }
+            }
+        }
+    }
+
+    private func setDesktopPicture(_ image: CGImage?) {
+        view.setWallpaper(image)
+        updateMenuBarStrip()
+    }
+
+    /// Where the strip across the top of the screen goes, in AppKit's coordinates: only with the
+    /// canvas up on a full-screen app's Space, where macOS hides the menu bar (see MenuBarStrip).
+    var menuBarStripFrame: NSRect? {
+        let vp = viewport
+        guard isActive, vp.minY > 0, Spaces.inFullScreenSpace else { return nil }
+        let f = screenFrame
+        return NSRect(x: f.minX, y: f.maxY - vp.minY, width: vp.width, height: vp.minY)
+    }
+
+    private func updateMenuBarStrip() {
+        // The overlay's always ordered in once Expanse has started: not so in the unit tests, which
+        // put no windows on the screen.
+        guard let frame = menuBarStripFrame, overlay.isVisible else {
+            if let strip = menuBarStrip {
+                overlay.removeChildWindow(strip)
+                strip.orderOut(nil)
+            }
+            return
+        }
+        let strip = menuBarStrip ?? MenuBarStrip()
+        menuBarStrip = strip
+        strip.update(frame: frame, screenHeight: viewport.maxY, image: view.desktopPicture, background: view.canvasBackground)
+        // Attached to the canvas's window, which it follows on and off the screen: ordered in by
+        // itself on a full-screen app's Space, macOS can leave it undrawn (see canvasFollowsSpace).
+        if strip.parent == nil { overlay.addChildWindow(strip, ordered: .above) }
     }
 
     /// ⌘-Tab / Dock to an app whose window is parked: jump the canvas to that window.
@@ -2554,6 +2639,7 @@ final class CanvasController: NSObject {
                 // Back at 100% meanwhile: the overlay is the desktop now, under everything.
                 guard self.overlay.level != OverlayWindow.backdropLevel else { return }
                 let level = dialog.map { NSWindow.Level(rawValue: $0 - 1) } ?? OverlayWindow.canvasLevel
+                self.menuBarStrip?.level = level
                 guard level != self.overlay.level else { return }
                 logger.info("canvas level \(self.overlay.level.rawValue) -> \(level.rawValue)\(level == OverlayWindow.canvasLevel ? "" : " (under a dialog)", privacy: .public)")
                 self.overlay.level = level

@@ -5,6 +5,7 @@ import ScreenCaptureKit
 @_private(sourceFile: "CanvasView.swift") @testable import Expanse
 @_private(sourceFile: "SpacesBar.swift") @testable import Expanse
 @_private(sourceFile: "SpaceSwipe.swift") @testable import Expanse
+@_private(sourceFile: "Wallpaper.swift") @testable import Expanse
 
 /// docs/regression/spaces-and-full-screen.md. The window server's Spaces are stood in for by
 /// Spaces.displaysOverride, swipes are caught (SpaceSwipe.post) rather than posted, and nothing
@@ -612,5 +613,225 @@ struct SPACESTests {
         // Nothing on a desktop (every window full screen, or none): no tile to point at.
         #expect(CanvasController.canvasDesktop(front: [9], desktops: [3, 5], spacesOf: of) == nil)
         #expect(CanvasController.canvasDesktop(front: [], desktops: [3, 5], spacesOf: of) == nil)
+    }
+
+    // MARK: SPACES-27 and SPACES-28
+
+    private static func picture() -> CGImage {
+        CGContext(data: nil, width: 4, height: 4, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
+    }
+
+    /// A canvas with the desktop picture on, and a picture already on it.
+    private static func pictureCanvas(_ first: CGImage) -> CanvasController {
+        let c = TestCanvas.make()
+        c.view.setWallpaper(first)
+        return c
+    }
+
+    @Test("SPACES-27 Over a full-screen app the canvas keeps its desktop picture and asks for no other")
+    func spaces27a() {
+        Env.withDefaults([Wallpaper.defaultsKey: nil]) {
+            Self.withSpaces(Self.usual(current: 5)) {
+                let first = Self.picture()
+                let c = Self.pictureCanvas(first)
+                defer { Self.finish(c) }
+                var asked = 0
+                c.takeDesktopPicture = { _, _ in asked += 1 }
+                c.takeWallpaper(request: c.wallpaperRequest, tries: 1)
+                #expect(asked == 0, "what's on that Space is macOS's black backdrop, not the desktop")
+                #expect(c.view.desktopPicture === first)
+
+                // With none to keep (Expanse opened on that Space), the picture's file, still not a capture.
+                c.view.setWallpaper(nil)
+                c.takeWallpaper(request: c.wallpaperRequest, tries: 1)
+                #expect(asked == 0)
+                #expect(c.view.hasWallpaper == (Wallpaper.fromFile(screen: c.screen) != nil))
+            }
+        }
+    }
+
+    @Test("SPACES-27 A picture that lands after moving to a full-screen app's Space is dropped")
+    func spaces27b() {
+        Env.withDefaults([Wallpaper.defaultsKey: nil]) {
+            Self.withSpaces(Self.usual(current: 1)) {
+                let first = Self.picture()
+                let c = Self.pictureCanvas(first)
+                defer { Self.finish(c) }
+                var answer: ((Wallpaper.Result) -> Void)?
+                c.takeDesktopPicture = { _, done in answer = done }
+                c.takeWallpaper(request: c.wallpaperRequest, tries: 1)
+                Self.withSpaces(Self.usual(current: 5)) { answer?(.picture(Self.picture())) }
+                #expect(c.view.desktopPicture === first)
+            }
+        }
+    }
+
+    @Test("SPACES-27 The strip goes over the app's top edge only with the canvas up on its Space")
+    func spaces27c() {
+        let c = TestCanvas.make()
+        defer { Self.finish(c) }
+        Self.withSpaces(Self.usual(current: 5)) {
+            #expect(c.menuBarStripFrame == nil, "at 100% the app has the screen")
+            c.isActive = true
+            let display = TestDisplay.laptop
+            #expect(c.menuBarStripFrame == NSRect(x: display.frame.minX, y: display.frame.maxY - display.menuBar,
+                                                  width: display.frame.width, height: display.menuBar))
+            #expect(c.menuBarStrip == nil, "the tests put no windows on the screen")
+        }
+        Self.withSpaces(Self.usual(current: 1)) {
+            #expect(c.menuBarStripFrame == nil, "macOS's menu bar is there on a desktop")
+        }
+        Self.withSpaces(Self.usual(current: 5)) {
+            // A display with no menu bar in the way has no gap to cover.
+            c.displayOverride = (TestDisplay.laptop.frame, TestDisplay.laptop.frame)
+            #expect(c.menuBarStripFrame == nil)
+            c.isActive = false
+        }
+    }
+
+    @Test("SPACES-27 The strip takes clicks, not the keyboard, and shows the canvas's desktop")
+    func spaces27d() {
+        let strip = MenuBarStrip()
+        #expect(strip.level == OverlayWindow.canvasLevel)
+        #expect(!strip.ignoresMouseEvents, "a click there mustn't reach the app under it")
+        #expect(!strip.canBecomeKey, "the canvas keeps the keyboard")
+        #expect(strip.collectionBehavior.contains(.fullScreenAuxiliary))
+        #expect(strip.collectionBehavior.contains(.canJoinAllSpaces))
+        let image = Self.picture()
+        strip.update(frame: NSRect(x: 0, y: 870, width: 1440, height: 30), screenHeight: 900, image: image,
+                     background: NSColor.gray.cgColor)
+        #expect(strip.picture.contents as! CGImage === image)
+        // As the canvas draws it, its top along the screen's top: the strip shows that part.
+        #expect(strip.picture.frame == CGRect(x: 0, y: -870, width: 1440, height: 900))
+        #expect(strip.isVisible == false)
+        // macOS would otherwise move it down below the menu bar, behind the canvas.
+        let top = NSRect(x: 0, y: 870, width: 1440, height: 30)
+        #expect(strip.constrainFrameRect(top, to: NSScreen.main) == top)
+    }
+
+    private static let wallpaperLevels = (-2147483625)...(-2147483623)
+
+    private static func desktop(x: CGFloat, y: CGFloat = 0, width: CGFloat = 2048, height: CGFloat = 1152, layer: Int,
+                                _ title: String? = nil) -> Wallpaper.DesktopWindow {
+        Wallpaper.DesktopWindow(frame: CGRect(x: x, y: y, width: width, height: height), layer: layer, title: title)
+    }
+
+    @Test("SPACES-28 Only a desktop at rest is a desktop to take a picture of")
+    func spaces28a() {
+        let screen = CGRect(x: 0, y: 0, width: 2048, height: 1152)
+        func state(_ windows: [Wallpaper.DesktopWindow], display: CGRect = screen) -> Wallpaper.DesktopState {
+            Wallpaper.desktopState(windows, display: display, levels: Self.wallpaperLevels)
+        }
+        // These frames are what a Mac reported on 6 Nov (2048 × 1152), Finder's and the wallpaper's.
+        let backstop = Self.desktop(x: 0, layer: -2147483626, "Display 3 Backstop")
+        func scene(at x: CGFloat) -> [Wallpaper.DesktopWindow] {
+            [backstop,
+             Self.desktop(x: x, layer: -2147483624, "Wallpaper"),
+             Self.desktop(x: x, layer: -2147483603),
+             Self.desktop(x: x, height: 97, layer: -2147483602, "underbelly")]
+        }
+        #expect(state(scene(at: 0)) == .atRest)
+        // Sliding off to a full-screen app's Space, with its backdrop coming in.
+        #expect(state(scene(at: -554) + [Self.desktop(x: 1558, layer: -2147483622, "Fullscreen Backdrop")]) == .moving)
+        #expect(state(scene(at: -2034) + [Self.desktop(x: 78, layer: -2147483622, "Fullscreen Backdrop")]) == .moving)
+        // Just a little way off.
+        #expect(state(scene(at: 1)) == .moving)
+        // Arrived there: black, in place.
+        #expect(state([backstop, Self.desktop(x: 0, layer: -2147483624, "Wallpaper"),
+                       Self.desktop(x: 0, layer: -2147483622, "Fullscreen Backdrop")]) == .moving)
+        // Off this display altogether, for a moment.
+        #expect(state([Self.desktop(x: -2048, layer: -2147483624, "Wallpaper")]) == .moving)
+
+        // A window that isn't as wide as the screen (a widget, say) doesn't say anything.
+        #expect(state(scene(at: 0) + [Self.desktop(x: 300, y: 300, width: 200, height: 200, layer: -2147483603)]) == .atRest)
+        // No wallpaper window (an older macOS): the picture's file, as before.
+        #expect(state([backstop]) == .absent)
+        #expect(state([Self.desktop(x: 0, width: 1920, height: 1080, layer: -2147483624, "Wallpaper")]) == .absent)
+
+        // Another display the same size has a wallpaper of its own, and can show a full-screen app.
+        let other: [Wallpaper.DesktopWindow] = [Self.desktop(x: 2048, layer: -2147483624, "Wallpaper"),
+                                                Self.desktop(x: 2048, layer: -2147483622, "Fullscreen Backdrop")]
+        #expect(state(scene(at: 0) + other) == .atRest)
+        // On a display that isn't at the origin.
+        #expect(state(scene(at: 2048), display: screen.offsetBy(dx: 2048, dy: 0)) == .atRest)
+    }
+
+    @Test("SPACES-28 A desktop still moving is asked again, and a picture of it comes through")
+    func spaces28b() async throws {
+        let displays = Self.usual(current: 1)
+        let old = Spaces.displaysOverride
+        Spaces.displaysOverride = displays
+        defer { Spaces.displaysOverride = old }
+        let first = Self.picture(), second = Self.picture()
+        let c = Self.pictureCanvas(first)
+        defer { Self.finish(c) }
+        var asked = 0
+        c.takeDesktopPicture = { _, done in
+            asked += 1
+            done(asked == 1 ? .notSettled : .picture(second))
+        }
+        c.takeWallpaper(request: c.wallpaperRequest, tries: 3)
+        #expect(asked == 1)
+        #expect(c.view.desktopPicture === first, "the last one stays till then")
+        try await Task.sleep(for: .seconds(CanvasController.wallpaperRetryDelay + 0.15))
+        #expect(asked == 2)
+        #expect(c.view.desktopPicture === second)
+    }
+
+    @Test("SPACES-28 A desktop that never settles keeps the last picture, and stops asking")
+    func spaces28c() async throws {
+        let old = Spaces.displaysOverride
+        Spaces.displaysOverride = Self.usual(current: 1)
+        defer { Spaces.displaysOverride = old }
+        let first = Self.picture()
+        let c = Self.pictureCanvas(first)
+        defer { Self.finish(c) }
+        var asked = 0
+        c.takeDesktopPicture = { _, done in asked += 1; done(.notSettled) }
+        c.takeWallpaper(request: c.wallpaperRequest, tries: 2)
+        try await Task.sleep(for: .seconds(CanvasController.wallpaperRetryDelay * 3))
+        #expect(asked == 2)
+        #expect(c.view.desktopPicture === first)
+    }
+
+    @Test("SPACES-28 Just after the Space changes, the picture waits for the slide to finish")
+    func spaces28d() async throws {
+        let old = Spaces.displaysOverride
+        Spaces.displaysOverride = Self.usual(current: 1)
+        defer { Spaces.displaysOverride = old }
+        let c = Self.pictureCanvas(Self.picture())
+        defer { Self.finish(c) }
+        var asked = 0
+        c.takeDesktopPicture = { _, _ in asked += 1 }
+        c.spaceChangedAt = CACurrentMediaTime()
+        c.takeWallpaper(request: c.wallpaperRequest, tries: 1)
+        #expect(asked == 0)
+        try await Task.sleep(for: .seconds(CanvasController.spaceSettleTime + 0.2))
+        #expect(asked == 1)
+    }
+
+    @Test("SPACES-28 A newer ask replaces an older one, its answer and its next try")
+    func spaces28e() async throws {
+        let old = Spaces.displaysOverride
+        Spaces.displaysOverride = Self.usual(current: 1)
+        defer { Spaces.displaysOverride = old }
+        let first = Self.picture()
+        let c = Self.pictureCanvas(first)
+        defer { Self.finish(c) }
+        var asked = 0
+        var answers: [(Wallpaper.Result) -> Void] = []
+        c.takeDesktopPicture = { _, done in asked += 1; answers.append(done) }
+        c.wallpaperRequest = 1
+        c.takeWallpaper(request: 1, tries: 3)
+        c.wallpaperRequest = 2
+        answers[0](.picture(Self.picture()))
+        #expect(c.view.desktopPicture === first)
+        answers[0](.notSettled)
+        try await Task.sleep(for: .seconds(CanvasController.wallpaperRetryDelay + 0.15))
+        #expect(asked == 1, "no second try for the old ask")
+        // And a try already on its way stops by itself.
+        c.takeWallpaper(request: 1, tries: 3)
+        #expect(asked == 1)
     }
 }

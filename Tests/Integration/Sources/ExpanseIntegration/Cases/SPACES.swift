@@ -19,6 +19,34 @@ import AppKit
                 try await t.look("Over the full-screen window: the canvas with its windows, the minimap, and the Spaces panel with the “\(name)” tile ringed as the current Space?")
             }
         },
+        Case("SPACES-27", "Over a full-screen app the canvas keeps the desktop picture, and covers the app's top edge") { t in
+            try t.needsInput()
+            try await spacesScene(t, "Spaces27", showing: true) { sc in
+                try await Task.sleep(for: .seconds(2.2))   // a picture's only asked for if the last was over 2s ago
+                let mark = t.log.mark()
+                t.link("toggle")
+                try await t.until("the canvas open, zoomed out", timeout: 6) { let s = try await t.settle(); return s.active && s.scale < 1 }
+                try t.expect(SpacesNow().current == sc.fsSpace, "opening the canvas left the full-screen window's Space")
+                try await t.spacesLine("desktop picture: keeping the last one", since: mark)
+                try t.expect(spacesStrip(t) != nil, "nothing of Expanse's over the full-screen window's top edge")
+                // A click there doesn't reach the app under it, or close the canvas.
+                let clicked = t.log.mark()
+                Input.click(at: CGPoint(x: t.screen.width / 2, y: 10))
+                try await Task.sleep(for: .seconds(0.6))
+                try t.expect(t.spacesLines("tests: key window [\(sc.fs.id)]", since: clicked).isEmpty, "a click on the strip reached the full-screen window")
+                let afterClick = try await t.state()
+                try t.expect(afterClick.active, "a click on the strip closed the canvas")
+                t.link("exit")
+                try await t.until("the strip to go with the canvas", timeout: 8) { spacesStrip(t) == nil }
+                // And again: macOS can leave a window it's shown before undrawn on this Space.
+                try await t.settle()
+                t.link("toggle")
+                try await t.until("the canvas open again", timeout: 6) { let s = try await t.settle(); return s.active && s.scale < 1 }
+                try t.expect(spacesStrip(t) != nil, "the second time, nothing of Expanse's over the full-screen window's top edge")
+                t.link("exit")
+                try await t.until("the strip to go with the canvas again", timeout: 8) { spacesStrip(t) == nil }
+            }
+        },
         Case("SPACES-06", "Clicking a full-screen app's tile actually switches to it") { t in
             try t.needsInput()
             try await spacesScene(t, "Spaces06", showing: false) { sc in
@@ -626,6 +654,17 @@ private func spacesFrontWindow() -> (id: CGWindowID, pid: pid_t)? {
               let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b) else { return false }
         return r.width >= t.screen.width - 1
     }
+}
+
+/// Expanse's window along the top of the screen, over a full-screen app (MenuBarStrip).
+@MainActor private func spacesStrip(_ t: Ctx) -> CGRect? {
+    guard let pid = t.expanse?.processIdentifier else { return nil }
+    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    for w in info where (w[kCGWindowOwnerPID as String] as? pid_t) == pid && (w[kCGWindowLayer as String] as? Int ?? 0) > 0 {
+        guard let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b) else { continue }
+        if r.minY == 0, r.height < 60, r.width >= t.screen.width - 1 { return r }
+    }
+    return nil
 }
 
 /// A text field filling `w`, ready for typing: what's typed while `w` has the keyboard lands in it.

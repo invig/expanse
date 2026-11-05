@@ -324,3 +324,31 @@
   2. Look at the Spaces panel; then press Esc.
 - **Expected:** Step 2: the "Expanse" tile is the desktop, and the full-screen window has a tile of its own with its app's name. Esc goes back to the full-screen app (SPACES-15).
 - **Automate:** unit: `canvasDesktop(front:desktops:spacesOf:)` skips windows whose Space isn't a desktop.
+
+## SPACES-27 Over a full-screen app the canvas keeps the desktop picture, and covers the app's top edge
+- **Type:** Bug fix
+- **Area:** SPACES
+- **Commits:** unreleased (6 Nov)
+- **Before:** Opening the canvas over a full-screen app took a fresh picture of "the desktop", but what macOS draws on that Space is a black backdrop. The canvas and the Expanse tile turned black. The canvas's window stops at the menu bar, which macOS hides there, so the app's top edge (Brave's tabs) stayed showing above the canvas and took clicks.
+- **Setup:** Desktop picture background on. Brave or Safari in full screen, showing.
+- **Steps:**
+  1. Press ⌥`.
+  2. Click along the top of the screen.
+  3. Move the pointer to the top edge and wait.
+  4. Press Esc.
+- **Expected:** Step 1: the canvas shows the desktop picture, right up to the top of the screen, and so does the Expanse tile. The app's top edge doesn't show. Step 2: nothing happens. Step 3: macOS's menu bar comes down over the strip. Step 4: back in the full-screen app, with its top edge showing again.
+- **Automate:** unit: `takeWallpaper` asks for no capture on that Space and keeps the picture; `menuBarStripFrame`; `MenuBarStrip`. End-to-end: the strip comes and goes with the canvas, opened twice (a window macOS has shown once can stay undrawn on that Space).
+
+## SPACES-28 The desktop picture is only taken of a desktop at rest
+- **Type:** Bug fix
+- **Area:** SPACES
+- **Commits:** unreleased (6 Nov)
+- **Before:** The picture was asked for the moment the Space changed, while macOS was still sliding the desktop's windows across the screen (one Mac reported Finder's at x = −554, then −2034), and a window of the screen's size counted wherever it was. The canvas could show that picture until it next opened.
+- **Setup:** Desktop picture background on. A full-screen app on another Space.
+- **Steps:**
+  1. Swipe from the full-screen app to the desktop, and press ⌥` straight away.
+  2. Open the canvas over the full-screen app, click the desktop's tile, and look at the picture a second later.
+- **Expected:** The canvas's desktop is where the real one is, icons whole, at both steps.
+- **Automate:** unit: `Wallpaper.desktopState` with frames recorded from a real slide; `takeWallpaper` waits out `spaceSettleTime`, asks again while the desktop moves, gives up keeping the last picture, and drops older asks.
+- **Note:** Icons cut off along the right edge of the canvas's picture were seen once on a Mac on 6 Nov, with the icons in their right place, which a mid-slide picture wouldn't explain on its own. Not reproduced, in a VM or on that Mac. This may not be the whole cause: if it comes back, note whether closing and reopening the canvas clears it.
+

@@ -4,7 +4,10 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- The canvas over a full-screen app keeps the desktop picture instead of turning black, runs right
+  up to the top of the screen so the app's tabs don't show above it, and takes no picture there, so
+  protected video in that app isn't made to blink. The desktop picture waits for a Space change to
+  finish and is only taken of a desktop at rest.
 
 ## Bugs
 
@@ -15,6 +18,11 @@ To check (4 Nov): with the screenshots' stock apps still open in the VM, EDIT-14
 with low motion on or off: Tidy Up moves a group's left end by 288pt, and the log says
 `derived=true`. They pass with those apps closed. It may only be the scene asking Chess for a size
 it won't take, which would make the layout look shrunk for a smaller screen.
+
+To check (6 Nov): desktop icons cut off along the right edge of the canvas's picture, seen once on
+the Mac with an empty desktop and Brave full screen. Icons stopped about 33pt in and labels about
+20pt in, in their right places. Not reproduced there or in the VM. SPACES-28 may not be the whole
+cause; if it comes back, see whether reopening the canvas clears it.
 
 If a new window doesn't make it onto the canvas, the log says why (look for "not on the canvas"
 in Copy Logs for a Bug Report).
@@ -40,7 +48,7 @@ in Copy Logs for a Bug Report).
    - an open-hand cursor over the minimap, and at 100% a click goes to that spot.
 4. **Multiple monitor support** (asked again 28 Oct). Today Expanse uses the main display only.
 5. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 556 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 241
+   has a test. 565 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 242
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
    - End-to-end, 2 Nov: a complete run of 0.1.36 in the VM passed all 145 automatic cases, in one

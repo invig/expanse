@@ -171,7 +171,7 @@ final class CanvasView: NSView {
     func updateSpaces(_ spaces: [Spaces.Space], active: UInt64?) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        spacesBar.update(spaces: spaces, active: active, wallpaper: wallpaper.contents.map { $0 as! CGImage })
+        spacesBar.update(spaces: spaces, active: active, wallpaper: desktopPicture)
         placeSpacesBar()
         CATransaction.commit()
     }
@@ -198,10 +198,11 @@ final class CanvasView: NSView {
         applyAppearance()
     }
 
-    private var hasWallpaper: Bool { wallpaper.contents != nil }
+    var hasWallpaper: Bool { wallpaper.contents != nil }
+    var desktopPicture: CGImage? { wallpaper.contents.map { $0 as! CGImage } }
 
     /// The canvas's own background, behind its copy of the desktop picture (or instead of it).
-    private var canvasBackground = NSColor(white: 0.85, alpha: 1).cgColor
+    private(set) var canvasBackground = NSColor(white: 0.85, alpha: 1).cgColor
 
     private func applyAppearance() {
         canvasBackground = (isDark ? NSColor(white: 0.13, alpha: 1) : NSColor(white: 0.85, alpha: 1)).cgColor

@@ -1,6 +1,6 @@
 # Regression tests
 
-Every feature Expanse has, and every bug it has fixed, as a test case: 477 cases, from all 174
+Every feature Expanse has, and every bug it has fixed, as a test case: 479 cases, from all 174
 commits from 0.1.0 to 0.1.34 (26–30 Oct 2026) and the changes since. A bug fix's case says what
 went wrong **before** the fix and what must happen **now**, so a later change can't quietly bring
 it back. Every case has a test: unit tests for the logic, and end-to-end cases that drive the real
@@ -15,7 +15,7 @@ app (see Running them).
 | [SIZE](sizes.md) | Window sizes | 20 | 9 |
 | [PERSIST](layouts-and-restarts.md) | Layouts, restarts and snapshots | 43 | 22 |
 | [DISPLAY](displays-lock-sleep.md) | Displays, lock and sleep | 29 | 22 |
-| [SPACES](spaces-and-full-screen.md) | Full-screen apps and Spaces | 26 | 16 |
+| [SPACES](spaces-and-full-screen.md) | Full-screen apps and Spaces | 28 | 18 |
 | [CAPTURE](capture-and-performance.md) | Capture and performance | 40 | 29 |
 | [UI](panels-and-look.md) | Menu bar panel, minimap, Settings and the backdrop | 42 | 9 |
 | [SETUP](first-launch.md) | First launch and permissions | 27 | 7 |
@@ -23,7 +23,7 @@ app (see Running them).
 | [UPDATE](updates-and-install.md) | Updates, release builds and install | 19 | 2 |
 | [URL](url-scripting.md) | expanse:// scripting | 28 | 1 |
 | [SEC](security.md) | Security hardening | 30 | 25 |
-| | **Total** | **477** | **203** |
+| | **Total** | **479** | **205** |
 
 [Coverage](coverage.md) lists every commit with the cases that test it, or why none does (docs
 only, a reverted experiment, an empty merge, a release commit).
@@ -34,21 +34,21 @@ Every case has a test (`scripts/test-coverage.sh` checks it): a unit test for ea
 **unit**, and an end-to-end case, a unit test of its logic, or both, for each case marked
 **manual**. A test's name starts with its case's ID.
 
-**Unit tests** (Tests/ExpanseTests, 556 of them, about a minute and a half). Run them before every commit:
+**Unit tests** (Tests/ExpanseTests, 565 of them, about a minute and a half). Run them before every commit:
 ```bash
 scripts/test.sh
 ```
 `scripts/test.sh --filter NAV` runs one area. They never touch real windows, your layout, logs
 or the Keychain: windows are stand-ins, the display is pretend, and files go to temp folders.
 
-**End-to-end cases** (Tests/Integration, 241). An app, Expanse Tests, drives a running
+**End-to-end cases** (Tests/Integration, 242). An app, Expanse Tests, drives a running
 development build of Expanse with links, its own windows, other apps and real key and pointer
 events, and reads back what Expanse did from its log. They move real windows, so run them in the
 VM (see [Using the VM](#using-the-vm)), not on your desktop:
 ```bash
 scripts/vm-integration.sh
 ```
-That builds both apps, copies them into the VM, runs the 156 cases that need nobody, and copies
+That builds both apps, copies them into the VM, runs the 157 cases that need nobody, and copies
 the report back to build/integration-vm/, with Expanse's log for each failed case beside it
 (`NAV-17.log`: the VM keeps its detailed log only for minutes). `--all` adds the 54 guided cases
 (it asks you to do something, such as lock the Mac or unplug a display, in a panel at the top of
