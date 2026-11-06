@@ -269,6 +269,14 @@ final class CanvasController: NSObject {
         return p.x >= corner.x && p.y >= corner.y
     }
 
+    /// Whether `w` at `p` is parked, not moved. macOS won't set a window taller than the screen down
+    /// in the corner: it keeps the window's top below the menu bar, at the same right edge (Tart's
+    /// 1600x1028 on a 1512x982 screen, parked at {1511, 981}, goes to {1511, 33}). Only one Expanse
+    /// parked: dragged nearly off that edge, a window you're moving is still followed.
+    private func stillParked(_ w: ManagedWindow, at p: CGPoint) -> Bool {
+        inParkingCorner(p) || (w.parked && w.canvasFrame.height > viewport.height && p.x >= parkingCorner.x)
+    }
+
     /// Top-left of the parking corner. macOS nudges a parked window back until a strip of it is
     /// inside the usable screen area (30-50pt up), and a Dock that's always shown shrinks that
     /// area: so the corner is measured from the usable area's edges, not the screen's.
@@ -1033,7 +1041,7 @@ final class CanvasController: NSObject {
         return moves.filter { move in
             guard let p = at[move.window.id] else { return false }
             if let to = move.to { return p.distance(to: to) > 2 }
-            return !inParkingCorner(p)
+            return !stillParked(move.window, at: p)
         }
     }
 
@@ -1257,7 +1265,7 @@ final class CanvasController: NSObject {
         if !isActive, !suspendTracking || yourDrag, animation == nil, let pos {
             if let last = w.lastPlaced, last.distance(to: pos) < 2 {
                 // Our own placement.
-            } else if inParkingCorner(pos) {
+            } else if stillParked(w, at: pos) {
                 w.parked = true
                 w.lastPlaced = pos
             } else if selfResized {
@@ -2194,7 +2202,7 @@ final class CanvasController: NSObject {
                 let selfResized = live && resizedItself(w, to: f.size)
                 w.scWindow = sc
                 if let title = sc.title { w.title = title }
-                if live && inParkingCorner(f.origin) {
+                if live && stillParked(w, at: f.origin) {
                     w.parked = true
                     w.lastPlaced = f.origin
                 } else if live {
@@ -4313,7 +4321,7 @@ final class CanvasController: NSObject {
     /// exactly on the park point and would otherwise be re-parked on every move).
     private func alreadyAt(_ w: ManagedWindow, _ target: CGPoint, parked: Bool) -> Bool {
         guard let last = w.lastPlaced else { return false }
-        return last.distance(to: target) < 0.5 || (parked && w.parked && inParkingCorner(last))
+        return last.distance(to: target) < 0.5 || (parked && w.parked && stillParked(w, at: last))
     }
 
     /// Like commit(), but the Accessibility calls run off the main thread: a slow app (Chromium

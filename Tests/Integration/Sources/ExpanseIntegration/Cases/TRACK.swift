@@ -684,6 +684,30 @@ import AppKit
             try await t.ask("Unplug the external display and wait for the windows to settle, then plug it back in and wait again. Click Done once it's back.")
             try await trackCameBackQuietly(t, [a.id, b.id], before, since: mark, "after the display came back")
         },
+        Case("TRACK-45", "A window too tall for the screen keeps its spot when it's out of view") { t in
+            let near = try await t.window("Track45 Near")
+            let tall = try await t.window("Track45 Tall", CGRect(x: 100, y: 100, width: 800, height: 500))
+            // Like a VM's window: it can't be shrunk to fit.
+            let height = t.screen.height + 60
+            tall.window.minSize = NSSize(width: 800, height: height)
+            tall.setFrame(CGRect(x: 100, y: 40, width: 800, height: height))
+            try await t.until("Expanse to see it taller than the screen", timeout: 10) { try await t.canvasFrame(tall).height == height }
+            try await t.trackPlace([(near.id, trackAt(0, 0)), (tall.id, trackAt(7000, 3000))])
+            let spot = try await t.canvasFrame(tall).origin
+            let mark = t.log.mark()
+            try await t.trackShow(near.id)
+            try await t.until("it out of view (parked)", timeout: 8) { try await t.state().window(tall.id)?.parked == true }
+            // What the bug needs: macOS keeps it out of the parking corner, at the screen's right edge.
+            guard let real = realFrame(tall.id) else { throw Failure("its real window has gone") }
+            try t.expect(real.minX >= t.screen.width - 40 && real.minY < t.screen.height - 80, "macOS let it into the corner, at \(real): this no longer shows the bug")
+            // Window scans come every few seconds, and each took it as moved.
+            try await t.noLog("follow Expanse Tests[\(tall.id)]", since: mark, within: 7)
+            let s = try await t.state()
+            try t.expectNear(s.window(tall.id)?.canvas.origin ?? .zero, spot, "its spot on the canvas")
+            try t.expect(s.window(tall.id)?.parked == true, "it should still be out of view")
+            // It doesn't hold up hopping away from it, either.
+            try await t.noLog("gave up on windows landing", since: mark, within: 0)
+        },
         Case("TRACK-39", "An app you quit and open again opens beside your work") { t in
             // Saved spots are for windows coming back in Expanse's first 3 minutes; this needs it running longer.
             if let launched = t.expanse?.launchDate {

@@ -4,7 +4,12 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- A full-screen app's tile in the Spaces panel shows a picture of its Space instead of the app's
+  icon (asked 6 Nov), split view's two windows side by side. It's taken as the canvas opens and
+  kept, so nothing's captured at 100% and protected video doesn't blink. The icon shows until the
+  first picture.
+- A window too tall for the screen that can't shrink (a Tart VM's, on a laptop's screen) stays where
+  you put it on the canvas, and no longer holds up every hop by a quarter of a second.
 
 ## Bugs
 
@@ -20,6 +25,10 @@ To check (6 Nov): desktop icons cut off along the right edge of the canvas's pic
 the Mac with an empty desktop and Brave full screen. Icons stopped about 33pt in and labels about
 20pt in, in their right places. Not reproduced there or in the VM. SPACES-28 may not be the whole
 cause; if it comes back, see whether reopening the canvas clears it.
+
+To check (6 Nov): TRACK-35 fails on 0.1.43 in the VM, three times out of three, untouched main
+included: after a window closes, going to Finder and back to the app doesn't glide to its other
+window. UI-34 fails on main too, and has a session of its own.
 
 If a new window doesn't make it onto the canvas, the log says why (look for "not on the canvas"
 in Copy Logs for a Bug Report).
@@ -45,7 +54,7 @@ in Copy Logs for a Bug Report).
    - an open-hand cursor over the minimap, and at 100% a click goes to that spot.
 4. **Multiple monitor support** (asked again 28 Oct). Today Expanse uses the main display only.
 5. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 565 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 242
+   has a test. 576 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 244
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
    - End-to-end, 2 Nov: a complete run of 0.1.36 in the VM passed all 145 automatic cases, in one

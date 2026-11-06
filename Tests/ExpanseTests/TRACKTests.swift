@@ -1017,4 +1017,60 @@ private final class QuitApp: NSRunningApplication {
         #expect(w.lastPlaced == nil)
         #expect(w.cameBackAt == 0)
     }
+
+    // MARK: TRACK-45
+
+    /// Tart's window (1600x1028) on the laptop's screen: Expanse parks it at the parking point, and
+    /// macOS sets it down at the same right edge, with its top below the menu bar.
+    private static let tooTall = CGRect(x: 5000, y: 3000, width: 1600, height: 1028)
+    private static let setDown = CGPoint(x: 1511, y: 33)
+
+    @Test("TRACK-45 A window too tall for the screen keeps its spot where macOS sets it down when parked: a scan")
+    func track45a() {
+        let w = Self.parked(4501, canvas: Self.tooTall)
+        let c = Self.canvas([w])
+        defer { Self.finish(c) }
+        Self.scan(c, [Fake.scWindow(id: w.id, frame: CGRect(origin: Self.setDown, size: Self.tooTall.size))])
+        #expect(w.canvasFrame.origin == Self.tooTall.origin, "it was taken as moved, to the screen's edge")
+        #expect(w.parked)
+        #expect(w.lastPlaced == Self.setDown)
+        #expect(w.followedFrom == nil)
+        // Nothing to do at the next commit: parking it again every time held up every hop.
+        #expect(c.alreadyAt(w, c.parkPoint, parked: true))
+    }
+
+    @Test("TRACK-45 A window too tall for the screen keeps its spot where macOS sets it down when parked: its move")
+    func track45b() {
+        let w = Self.parked(4502, canvas: Self.tooTall)
+        let c = Self.canvas([w])
+        defer { Self.finish(c) }
+        w.lastPlacedAt = CACurrentMediaTime() - 20
+        c.realWindowChanged(w, AXUIElementCreateApplication(w.pid), userDragging: false, size: Self.tooTall.size, position: Self.setDown,
+                            inFullScreenSpace: false)
+        #expect(w.canvasFrame.origin == Self.tooTall.origin)
+        #expect(w.parked)
+        #expect(w.lastPlaced == Self.setDown)
+    }
+
+    @Test("TRACK-45 Anything else there is followed: one that fits, one you moved there, one gone from that edge")
+    func track45c() {
+        // One that fits the screen: macOS would have let it park, so something moved it.
+        let fits = Self.parked(4503, canvas: CGRect(x: 5000, y: 3000, width: 600, height: 400))
+        // Too tall and on screen, dragged nearly off the edge.
+        let onScreen = Fake.window(id: 4504, canvas: CGRect(x: 100, y: 0, width: 1600, height: 1028),
+                                   real: CGRect(x: 100, y: 33, width: 1600, height: 1028))
+        onScreen.lastPlaced = CGPoint(x: 100, y: 33)
+        // Too tall and parked, but no longer at that edge.
+        let away = Self.parked(4505, canvas: Self.tooTall)
+        let c = Self.canvas([fits, onScreen, away])
+        defer { Self.finish(c) }
+        Self.scan(c, [Fake.scWindow(id: fits.id, frame: CGRect(origin: Self.setDown, size: fits.canvasFrame.size)),
+                      Fake.scWindow(id: onScreen.id, frame: CGRect(origin: CGPoint(x: 1490, y: 33), size: Self.tooTall.size)),
+                      Fake.scWindow(id: away.id, frame: CGRect(origin: CGPoint(x: 300, y: 33), size: Self.tooTall.size))])
+        for w in [fits, onScreen, away] {
+            #expect(!w.parked, "[\(w.id)]")
+            #expect(w.canvasFrame.origin != Self.tooTall.origin, "[\(w.id)]")
+        }
+        #expect(c.canvasPoint(forGlobal: CGPoint(x: 1490, y: 33)) == onScreen.canvasFrame.origin)
+    }
 }

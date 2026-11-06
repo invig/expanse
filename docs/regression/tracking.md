@@ -547,3 +547,18 @@
   2. Esc back to 100%.
 - **Expected:** Step 1: the canvas shows them cascaded in the view you'll go back to. Step 2: they're on screen there, as TRACK-09 puts them at 100%.
 - **Automate:** unit: `restoreAll()` zoomed out gives the windows spots in `leavingCamera()`'s view and leaves the real windows for leaving to move.
+
+## TRACK-45 A window too tall for the screen keeps its spot when it's out of view
+- **Type:** Bug fix
+- **Area:** TRACK
+- **Commits:** unreleased (6 Nov)
+- **Before:** A window taller than the screen that can't shrink (Tart's 1600x1028 VM window on a 1512x982 laptop screen) can't be parked in the corner: macOS sets it down at the same right edge with its top below the menu bar. Each window scan took that as the window having moved, so its spot on the canvas jumped to the edge of whatever you were looking at. It wouldn't stay where you put it, and every hop waited a quarter of a second for it to land.
+- **Setup:** On a laptop's screen, a Tart VM running with a display bigger than the screen. Another window elsewhere on the canvas.
+- **Steps:**
+  1. Put the Tart window somewhere on the canvas.
+  2. Go to the other window, far enough away that Tart's is out of view.
+  3. Wait a few seconds, then zoom out.
+  4. Drag Tart's window at 100%, nearly off the right edge of the screen.
+- **Expected:** Step 3: Tart's window is where you put it, and the log has no "follow Tart" line and no "gave up on windows landing (Tart)" line. Step 4: its new spot is kept: a drag is still a move.
+- **Automate:** unit: `stillParked` through a window scan and through the window's move event, with `alreadyAt` so it isn't parked again; followed if it fits, isn't parked, or has left that edge. End-to-end: a window that won't shrink, taller than the screen, out of view.
+
