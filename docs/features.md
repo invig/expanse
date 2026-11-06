@@ -4,12 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- A full-screen app's tile in the Spaces panel shows a picture of its Space instead of the app's
-  icon (asked 6 Nov), split view's two windows side by side. It's taken as the canvas opens and
-  kept, so nothing's captured at 100% and protected video doesn't blink. The icon shows until the
-  first picture.
-- A window too tall for the screen that can't shrink (a Tart VM's, on a laptop's screen) stays where
-  you put it on the canvas, and no longer holds up every hop by a quarter of a second.
+Nothing yet.
 
 ## Bugs
 
@@ -102,6 +97,11 @@ Not decided yet.
 
 ## Done
 
+- 0.1.44: A full-screen app's tile in the Spaces panel shows a picture of its Space instead of the
+  app's icon, split view's two windows side by side. It's taken as the canvas opens and kept, so
+  nothing's captured at 100% and protected video doesn't blink. A window too tall for the screen
+  that can't shrink (a Tart VM's, on a laptop's screen) stays where you put it on the canvas, and no
+  longer holds up every hop by a quarter of a second.
 - 0.1.43: The canvas over a full-screen app keeps the desktop picture instead of turning black, runs
   right up to the top of the screen so the app's tabs don't show above it, and takes no picture
   there, so protected video in that app isn't made to blink. The desktop picture waits for a Space

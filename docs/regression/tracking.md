@@ -551,7 +551,7 @@
 ## TRACK-45 A window too tall for the screen keeps its spot when it's out of view
 - **Type:** Bug fix
 - **Area:** TRACK
-- **Commits:** unreleased (6 Nov)
+- **Commits:** 9ea7ca8 (0.1.44)
 - **Before:** A window taller than the screen that can't shrink (Tart's 1600x1028 VM window on a 1512x982 laptop screen) can't be parked in the corner: macOS sets it down at the same right edge with its top below the menu bar. Each window scan took that as the window having moved, so its spot on the canvas jumped to the edge of whatever you were looking at. It wouldn't stay where you put it, and every hop waited a quarter of a second for it to land.
 - **Setup:** On a laptop's screen, a Tart VM running with a display bigger than the screen. Another window elsewhere on the canvas.
 - **Steps:**

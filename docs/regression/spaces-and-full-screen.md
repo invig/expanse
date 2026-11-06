@@ -355,7 +355,7 @@
 ## SPACES-29 A full-screen app's tile shows a picture of its Space
 - **Type:** Feature
 - **Area:** SPACES
-- **Commits:** unreleased (6 Nov)
+- **Commits:** dad8ae8 (0.1.44)
 - **Setup:** Two apps in full screen, one of them in split view with a second app. Expanse just started, on the canvas's desktop.
 - **Steps:**
   1. Before opening the canvas, look at the Spaces panel at 100%.
