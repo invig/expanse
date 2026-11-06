@@ -4,8 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- A full-screen app's tile shows the whole Space, a browser's tabs and toolbar included, with no
-  empty strip down the side of the Space you're on.
+Nothing yet.
 
 ## Bugs
 
@@ -98,6 +97,8 @@ Not decided yet.
 
 ## Done
 
+- 0.1.45: A full-screen app's tile shows the whole Space, a browser's tabs and toolbar included, with
+  no empty strip down the side of the Space you're on.
 - 0.1.44: A full-screen app's tile in the Spaces panel shows a picture of its Space instead of the
   app's icon, split view's two windows side by side. It's taken as the canvas opens and kept, so
   nothing's captured at 100% and protected video doesn't blink. A window too tall for the screen

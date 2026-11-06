@@ -369,7 +369,7 @@
 ## SPACES-30 A tile's picture is the whole Space, with no empty strip
 - **Type:** Bug fix
 - **Area:** SPACES
-- **Commits:** unreleased (6 Nov)
+- **Commits:** 7198661 (0.1.45)
 - **Before:** A tile's picture was of the one window macOS says the Space belongs to. In full screen Brave's page is that window (1512x868 of a 1512x949 Space) and its tabs and toolbar are another, so the tile left them out. On the Space showing, ScreenCaptureKit fitted that window to the wrong shape, leaving a clear strip 18 pixels wide of 219 down the right of the picture. On a Space not showing, the window server's picture filled the tile, so the strip appeared on switching to that Space.
 - **Setup:** Two Brave windows in full screen, each on its own Space.
 - **Steps:**
