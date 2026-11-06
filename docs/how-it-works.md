@@ -54,9 +54,11 @@ Expanse runs on a stock Mac with System Integrity Protection on. Everything belo
   - **Opened over a full-screen app,** the canvas switches back to its desktop as you pick a window.
     Leaving without picking one goes back to the app.
   - **Each tile is a picture of its Space,** taken as the canvas opens and kept, so nothing's
-    captured at rest. ScreenCaptureKit refuses a window on another Space (macOS 27), so those come
-    from the window server's own call, the private one AltTab has used. Without it, the tile is the
-    app's icon.
+    captured at rest. It's every window of the app there, drawn together: in full screen a browser's
+    tabs and toolbar are windows of their own, over the page. They come from the window server's own
+    call, the private one AltTab has used: on macOS 27 ScreenCaptureKit refuses a window on another
+    Space, and leaves a clear strip beside a window whose frame isn't the size it captures. Without
+    that call, ScreenCaptureKit does what it can, and a tile with no picture is the app's icon.
 - **Display changes.** While macOS reshuffles windows after a display change, Expanse ignores
   their moves. Then it restores sizes and fits the layout to the new screen from the *home*
   layout, the full-size layout. Windows restored from the saved layout, at launch or after the

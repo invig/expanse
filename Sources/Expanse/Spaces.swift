@@ -17,7 +17,8 @@ enum Spaces {
         let window: CGWindowID?
         /// "Desktop", "Desktop 2", or the full-screen app's name ("Safari & Notes" for split view).
         let name: String
-        /// Every window showing on a full-screen app's Space (two for split view).
+        /// The windows macOS says a full-screen app's Space belongs to (two for split view). Not all
+        /// that's showing there: see SpacePicture.windows.
         var windows: [CGWindowID] = []
         var isDesktop: Bool { pid == nil }
     }
@@ -131,11 +132,10 @@ enum Spaces {
         return true
     }
 
-    /// A picture of `window`, whichever Space it's on, at its size in points (what ScreenCaptureKit
-    /// won't give for a window on another Space). The same private call AltTab has used; looked up at
-    /// run time, so a macOS without it just returns nil. It waits for replayd, so never on the main
-    /// thread, or on the queue ScreenCaptureKit calls back on, which is replayd's: there it waits for
-    /// itself, and every capture with it.
+    /// A picture of `window`, whichever Space it's on, at its size in points. The same private call
+    /// AltTab has used; looked up at run time, so a macOS without it just returns nil. It waits for
+    /// replayd, so never on the main thread, or on the queue ScreenCaptureKit calls back on, which is
+    /// replayd's: there it waits for itself, and every capture with it.
     static func picture(of window: CGWindowID) -> CGImage? {
         guard let capture = WindowServer.captureWindows else { return nil }
         var id = window

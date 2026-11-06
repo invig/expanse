@@ -365,3 +365,17 @@
 - **Expected:** Step 1: each full-screen tile shows the app's icon: nothing has been captured. Step 2: within a moment, each shows a picture of what's on its Space, filling the tile, split view's two windows side by side. Desktop tiles still show the desktop picture. Step 3: the pictures stay, and nothing new is captured at 100%, so protected video doesn't blink. Step 4: that tile shows the change.
 - **Automate:** unit: `Spaces.list` gives a Space's windows; `SpacePicture.layout` and `compose`; `SpacesBar` shows the picture, or the icon without one; `refreshSpacePictures` asks only with the canvas up, every 2s at most, and keeps the last picture when there's none; `captureNext` takes one Space at a time and stops on quitting, and asks the window server when ScreenCaptureKit refuses, off replayd's queue. End-to-end: a picture from the desktop and from over the app, and none at 100%. Split view and protected video are by hand: the VM's tests don't set either up.
 - **Note:** On macOS 27 ScreenCaptureKit refuses a window on another Space ("Failed to start stream due to audio/video capture failure", seen in the VM on 6 Nov), so from the desktop the picture comes from the window server's private call, `SLSHWCaptureWindowList`. That call goes through replayd, so made on the queue ScreenCaptureKit calls back on it deadlocks that queue, and with it every capture, for about 30s.
+
+## SPACES-30 A tile's picture is the whole Space, with no empty strip
+- **Type:** Bug fix
+- **Area:** SPACES
+- **Commits:** unreleased (6 Nov)
+- **Before:** A tile's picture was of the one window macOS says the Space belongs to. In full screen Brave's page is that window (1512x868 of a 1512x949 Space) and its tabs and toolbar are another, so the tile left them out. On the Space showing, ScreenCaptureKit fitted that window to the wrong shape, leaving a clear strip 18 pixels wide of 219 down the right of the picture. On a Space not showing, the window server's picture filled the tile, so the strip appeared on switching to that Space.
+- **Setup:** Two Brave windows in full screen, each on its own Space.
+- **Steps:**
+  1. From the desktop, press ⌥`.
+  2. Click one of the Brave tiles, then press ⌥` over it.
+  3. Look at that tile, ringed as the current Space.
+- **Expected:** Steps 1 and 3: each tile shows the whole Space, tabs and toolbar over the page, filling the tile, with nothing empty down the side or along the bottom.
+- **Automate:** unit: `SpacePicture.windows` takes the app's other windows on that Space, back to front, leaving out those above the ordinary level, off the screen or on another Space; `compose` draws them over one another; the window server is asked first and ScreenCaptureKit only for what it doesn't give. End-to-end: SPACES-29 for the pictures; by hand with Safari in the VM and Brave on a Mac: the numbers above are from measuring both routes on Brave (6 Nov).
+

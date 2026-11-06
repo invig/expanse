@@ -4,7 +4,8 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- A full-screen app's tile shows the whole Space, a browser's tabs and toolbar included, with no
+  empty strip down the side of the Space you're on.
 
 ## Bugs
 
@@ -49,7 +50,7 @@ in Copy Logs for a Bug Report).
    - an open-hand cursor over the minimap, and at 100% a click goes to that spot.
 4. **Multiple monitor support** (asked again 28 Oct). Today Expanse uses the main display only.
 5. **Regression tests** (asked 29 Oct). Built: every case in [regression/](regression/README.md)
-   has a test. 576 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 244
+   has a test. 579 unit tests (`scripts/test.sh`, about a minute and a half, all passing), and 244
    end-to-end cases that drive the real app in the expanse-demo VM (`scripts/vm-integration.sh`;
    `--all` adds the 85 that need you). A new fix adds its case and its test.
    - End-to-end, 2 Nov: a complete run of 0.1.36 in the VM passed all 145 automatic cases, in one

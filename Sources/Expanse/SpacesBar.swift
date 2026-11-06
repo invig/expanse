@@ -171,26 +171,43 @@ final class SpacesBar: CALayer {
     }
 }
 
-/// What's on a full-screen app's Space, as a picture for its tile: from ScreenCaptureKit, or from the
-/// window server when it's another Space (see picture). Split view's two windows are put together as
-/// they sit.
+/// What's on a full-screen app's Space, as a picture for its tile: every window of its app there,
+/// drawn together as they sit (a browser's tabs and toolbar are windows of their own, over the page,
+/// and split view is two apps side by side).
 enum SpacePicture {
-    /// The picture of a tile: what's needed to fill it, and where each window goes in it (from its
-    /// bottom left, as drawing goes), all in pixels. Pictures are captured at the size they're drawn.
+    /// The picture of a tile: what's needed to fill it, in whole pixels, and where each window goes in
+    /// it (from its bottom left, as drawing goes). Pictures are captured at the size they're drawn.
     /// `frames` are the windows', from the top left of the screen.
     static func layout(_ frames: [CGRect], tile: CGSize, scale: CGFloat) -> (size: CGSize, rects: [CGRect]) {
         let whole = frames.reduce(CGRect.null) { $0.union($1) }
         guard !whole.isNull, whole.width > 0, whole.height > 0 else { return (.zero, []) }
         let factor = max(tile.width / whole.width, tile.height / whole.height) * scale
+        let size = CGSize(width: (whole.width * factor).rounded(), height: (whole.height * factor).rounded())
+        // To those whole pixels exactly, or the last row and column are part see-through.
+        let x = size.width / whole.width, y = size.height / whole.height
         let rects = frames.map {
-            CGRect(x: ($0.minX - whole.minX) * factor, y: (whole.maxY - $0.maxY) * factor,
-                   width: $0.width * factor, height: $0.height * factor)
+            CGRect(x: ($0.minX - whole.minX) * x, y: (whole.maxY - $0.maxY) * y, width: $0.width * x, height: $0.height * y)
         }
-        return (CGSize(width: whole.width * factor, height: whole.height * factor), rects)
+        return (size, rects)
     }
 
-    /// One window's picture at the size asked for is the Space's as it is. Anything else (split
-    /// view's two, or one that came at its full size) is drawn to that size. Nil with none.
+    /// The windows to draw for `space`, back to front (ScreenCaptureKit lists them front to back): its
+    /// own, and its app's others on that Space and that screen. Not above the ordinary window level,
+    /// where a popover or a tooltip that isn't showing would be. `display`: the screen, global.
+    static func windows(on space: Spaces.Space, in all: [SCWindow], display: CGRect,
+                        spacesOf: (CGWindowID) -> [UInt64] = Spaces.spaces(of:)) -> [SCWindow] {
+        let own = all.filter { space.windows.contains($0.windowID) }
+        let apps = Set(own.compactMap { $0.owningApplication?.processID })
+        return all.filter { w in
+            if space.windows.contains(w.windowID) { return true }
+            guard w.windowLayer == 0, let app = w.owningApplication?.processID, apps.contains(app),
+                  w.frame.intersects(display) else { return false }
+            return spacesOf(w.windowID).contains(space.id)
+        }.reversed()
+    }
+
+    /// One picture at the size asked for is the Space's as it is. Anything else (several windows,
+    /// or one that came at its full size) is drawn to that size, in order. Nil with none.
     static func compose(_ pieces: [(image: CGImage, rect: CGRect)], size: CGSize) -> CGImage? {
         let width = Int(size.width.rounded()), height = Int(size.height.rounded())
         guard let first = pieces.first else { return nil }
@@ -212,50 +229,52 @@ enum SpacePicture {
         WindowCapture.requestSent()
         // Not only those on screen: that's just the Space showing.
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false) { content, _ in
-            let windows = Dictionary((content?.windows ?? []).map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
+            let windows = content?.windows ?? []
             DispatchQueue.main.async { captureNext(spaces[...], windows: windows, scale: scale, answer: answer) }
         }
     }
 
     /// One Space at a time, so a canvas opening doesn't send replayd a burst of requests.
-    private static func captureNext(_ spaces: ArraySlice<Spaces.Space>, windows: [CGWindowID: SCWindow], scale: CGFloat,
+    private static func captureNext(_ spaces: ArraySlice<Spaces.Space>, windows: [SCWindow], scale: CGFloat,
                                     answer: @escaping (Spaces.Space, CGImage?) -> Void) {
         guard let space = spaces.first, !WindowCapture.closing else {
             WindowCapture.requestAnswered()
             return
         }
-        picture(of: space.windows.compactMap { windows[$0] }, scale: scale) { image in
+        let here = self.windows(on: space, in: windows, display: CGDisplayBounds(CGMainDisplayID()))
+        picture(of: here, scale: scale) { image in
             answer(space, image)
             captureNext(spaces.dropFirst(), windows: windows, scale: scale, answer: answer)
         }
     }
 
+    /// The window server's picture of each window, which is the window as it is on any Space. It's
+    /// off the queue ScreenCaptureKit calls back on (see Spaces.picture). ScreenCaptureKit is for when
+    /// a macOS doesn't have that call: on macOS 27 it refuses a window on another Space ("Failed to
+    /// start stream due to audio/video capture failure"), and leaves a clear strip down the side of
+    /// a window whose frame isn't the size it captures (Brave's page in full screen).
     private static func picture(of windows: [SCWindow], scale: CGFloat, done: @escaping (CGImage?) -> Void) {
         let (size, rects) = layout(windows.map(\.frame), tile: SpacesBar.tile, scale: scale)
-        var pieces: [(image: CGImage, rect: CGRect)] = []
-        let group = DispatchGroup()
-        for (window, rect) in zip(windows, rects) {
-            group.enter()
-            shot(window, WindowCapture.configuration(pixelSize: rect.size, fps: 1)) { image, error in
-                // ScreenCaptureKit refuses a window on another Space (macOS 27: "Failed to start stream
-                // due to audio/video capture failure"), so that's the window server's to give. Off this
-                // queue, which is replayd's: that call goes through replayd too, and would wait for itself.
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let picture = image ?? windowServerShot(window.windowID)
-                    if picture == nil, let error {
-                        logger.info("picture of \(window.windowID) failed: \(error.localizedDescription, privacy: .public)")
-                    }
-                    DispatchQueue.main.async {
-                        if let picture { pieces.append((picture, rect)) }
-                        group.leave()
+        DispatchQueue.global(qos: .userInitiated).async {
+            var images = windows.map { windowServerShot($0.windowID) }
+            DispatchQueue.main.async {
+                let group = DispatchGroup()
+                for i in windows.indices where images[i] == nil {
+                    group.enter()
+                    shot(windows[i], WindowCapture.configuration(pixelSize: rects[i].size, fps: 1)) { image, error in
+                        if let error { logger.info("picture of \(windows[i].windowID) failed: \(error.localizedDescription, privacy: .public)") }
+                        DispatchQueue.main.async {
+                            images[i] = image
+                            group.leave()
+                        }
                     }
                 }
+                // Off the main thread, with the canvas zooming out: full-size pictures take a moment to shrink.
+                group.notify(queue: .global(qos: .userInitiated)) {
+                    let image = compose(zip(images, rects).compactMap { image, rect in image.map { ($0, rect) } }, size: size)
+                    DispatchQueue.main.async { done(image) }
+                }
             }
-        }
-        // Off the main thread, with the canvas zooming out: a full-size picture takes a moment to shrink.
-        group.notify(queue: .global(qos: .userInitiated)) {
-            let image = compose(pieces, size: size)
-            DispatchQueue.main.async { done(image) }
         }
     }
 
