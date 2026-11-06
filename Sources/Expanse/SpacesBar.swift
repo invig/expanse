@@ -1,11 +1,12 @@
 import AppKit
+import ScreenCaptureKit
 
 /// Beside the minimap: one tile per Space on the main display. Full-screen apps live in Spaces of
 /// their own, off the canvas; this is how you see them and get to them (and back). Only shown
 /// when there's more than one Space. Drawn on glass (see GlassPanel), in the colours
 /// applyAppearance gives it.
 final class SpacesBar: CALayer {
-    private static let tile = CGSize(width: 100, height: 63)   // the screen's shape, roughly
+    fileprivate static let tile = CGSize(width: 100, height: 63)   // the screen's shape, roughly
     /// Between tiles, as at the panel's edges, so the current Space's ring has the same air all round.
     private static let gap: CGFloat = 14
     /// From the panel's edges to the tiles and heading.
@@ -14,6 +15,8 @@ final class SpacesBar: CALayer {
     private(set) var spaces: [Spaces.Space] = []
     private var active: UInt64?
     private var wallpaper: CGImage?
+    /// What's on each full-screen app's Space, as far as Expanse has seen (see SpacePicture).
+    private var pictures: [UInt64: CGImage] = [:]
     private var tiles: [CALayer] = []
     /// Around each tile, shown for the current Space (and the one under the pointer).
     private var rings: [CALayer] = []
@@ -53,11 +56,13 @@ final class SpacesBar: CALayer {
     }
 
     /// Rebuilt only when something changed. Hidden with a single Space: nothing to switch to.
-    func update(spaces: [Spaces.Space], active: UInt64?, wallpaper: CGImage?) {
-        guard spaces != self.spaces || active != self.active || wallpaper !== self.wallpaper else { return }
+    func update(spaces: [Spaces.Space], active: UInt64?, wallpaper: CGImage?, pictures: [UInt64: CGImage] = [:]) {
+        let samePictures = pictures.count == self.pictures.count && pictures.allSatisfy { self.pictures[$0.key] === $0.value }
+        guard spaces != self.spaces || active != self.active || wallpaper !== self.wallpaper || !samePictures else { return }
         self.spaces = spaces
         self.active = active
         self.wallpaper = wallpaper
+        self.pictures = pictures
         isHidden = spaces.count < 2
         (tiles + rings + labels).forEach { $0.removeFromSuperlayer() }
         tiles = spaces.enumerated().map { makeTile($1, at: $0) }
@@ -92,8 +97,12 @@ final class SpacesBar: CALayer {
             tile.backgroundColor = NSColor(white: 0.3, alpha: 1).cgColor
             tile.contents = wallpaper
             tile.contentsGravity = .resizeAspectFill
+        } else if let picture = pictures[space.id] {
+            // A full-screen app: what's on its Space.
+            tile.contents = picture
+            tile.contentsGravity = .resizeAspectFill
         } else if let pid = space.pid, let icon = NSRunningApplication(processIdentifier: pid)?.icon {
-            // A full-screen app: its icon (on a colour that suits the glass; see styleTiles).
+            // No picture yet: its icon (on a colour that suits the glass; see styleTiles).
             let image = CALayer()
             // At the size it's drawn, in pixels (the default is a small, blurry version).
             var rect = CGRect(x: 0, y: 0, width: 36 * scale, height: 36 * scale)
@@ -160,4 +169,102 @@ final class SpacesBar: CALayer {
         }
         CATransaction.commit()
     }
+}
+
+/// What's on a full-screen app's Space, as a picture for its tile: from ScreenCaptureKit, or from the
+/// window server when it's another Space (see picture). Split view's two windows are put together as
+/// they sit.
+enum SpacePicture {
+    /// The picture of a tile: what's needed to fill it, and where each window goes in it (from its
+    /// bottom left, as drawing goes), all in pixels. Pictures are captured at the size they're drawn.
+    /// `frames` are the windows', from the top left of the screen.
+    static func layout(_ frames: [CGRect], tile: CGSize, scale: CGFloat) -> (size: CGSize, rects: [CGRect]) {
+        let whole = frames.reduce(CGRect.null) { $0.union($1) }
+        guard !whole.isNull, whole.width > 0, whole.height > 0 else { return (.zero, []) }
+        let factor = max(tile.width / whole.width, tile.height / whole.height) * scale
+        let rects = frames.map {
+            CGRect(x: ($0.minX - whole.minX) * factor, y: (whole.maxY - $0.maxY) * factor,
+                   width: $0.width * factor, height: $0.height * factor)
+        }
+        return (CGSize(width: whole.width * factor, height: whole.height * factor), rects)
+    }
+
+    /// One window's picture at the size asked for is the Space's as it is. Anything else (split
+    /// view's two, or one that came at its full size) is drawn to that size. Nil with none.
+    static func compose(_ pieces: [(image: CGImage, rect: CGRect)], size: CGSize) -> CGImage? {
+        let width = Int(size.width.rounded()), height = Int(size.height.rounded())
+        guard let first = pieces.first else { return nil }
+        if pieces.count == 1, first.image.width == width, first.image.height == height { return first.image }
+        guard let space = first.image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return nil }
+        context.interpolationQuality = .high
+        for piece in pieces { context.draw(piece.image, in: piece.rect) }
+        return context.makeImage()
+    }
+
+    /// Each Space's picture in turn (`answer` runs on the main thread, with nil if there's none to
+    /// be had). Only with the canvas up: see CanvasController.refreshSpacePictures.
+    static func capture(_ spaces: [Spaces.Space], scale: CGFloat, answer: @escaping (Spaces.Space, CGImage?) -> Void) {
+        guard CGPreflightScreenCaptureAccess() else { return }
+        // A request to replayd, which quitting waits for (see WindowCapture.unanswered).
+        WindowCapture.requestSent()
+        // Not only those on screen: that's just the Space showing.
+        SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: false) { content, _ in
+            let windows = Dictionary((content?.windows ?? []).map { ($0.windowID, $0) }, uniquingKeysWith: { a, _ in a })
+            DispatchQueue.main.async { captureNext(spaces[...], windows: windows, scale: scale, answer: answer) }
+        }
+    }
+
+    /// One Space at a time, so a canvas opening doesn't send replayd a burst of requests.
+    private static func captureNext(_ spaces: ArraySlice<Spaces.Space>, windows: [CGWindowID: SCWindow], scale: CGFloat,
+                                    answer: @escaping (Spaces.Space, CGImage?) -> Void) {
+        guard let space = spaces.first, !WindowCapture.closing else {
+            WindowCapture.requestAnswered()
+            return
+        }
+        picture(of: space.windows.compactMap { windows[$0] }, scale: scale) { image in
+            answer(space, image)
+            captureNext(spaces.dropFirst(), windows: windows, scale: scale, answer: answer)
+        }
+    }
+
+    private static func picture(of windows: [SCWindow], scale: CGFloat, done: @escaping (CGImage?) -> Void) {
+        let (size, rects) = layout(windows.map(\.frame), tile: SpacesBar.tile, scale: scale)
+        var pieces: [(image: CGImage, rect: CGRect)] = []
+        let group = DispatchGroup()
+        for (window, rect) in zip(windows, rects) {
+            group.enter()
+            shot(window, WindowCapture.configuration(pixelSize: rect.size, fps: 1)) { image, error in
+                // ScreenCaptureKit refuses a window on another Space (macOS 27: "Failed to start stream
+                // due to audio/video capture failure"), so that's the window server's to give. Off this
+                // queue, which is replayd's: that call goes through replayd too, and would wait for itself.
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let picture = image ?? windowServerShot(window.windowID)
+                    if picture == nil, let error {
+                        logger.info("picture of \(window.windowID) failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                    DispatchQueue.main.async {
+                        if let picture { pieces.append((picture, rect)) }
+                        group.leave()
+                    }
+                }
+            }
+        }
+        // Off the main thread, with the canvas zooming out: a full-size picture takes a moment to shrink.
+        group.notify(queue: .global(qos: .userInitiated)) {
+            let image = compose(pieces, size: size)
+            DispatchQueue.main.async { done(image) }
+        }
+    }
+
+    /// ScreenCaptureKit's one-off picture call. Tests put a stand-in here, so nothing is captured.
+    static var shot: (SCWindow, SCStreamConfiguration, @escaping (CGImage?, Error?) -> Void) -> Void = { window, config, done in
+        SCScreenshotManager.captureImage(contentFilter: SCContentFilter(desktopIndependentWindow: window),
+                                         configuration: config, completionHandler: done)
+    }
+
+    /// A window's picture, on any Space (see Spaces.picture). Tests put a stand-in here too.
+    static var windowServerShot: (CGWindowID) -> CGImage? = Spaces.picture(of:)
 }

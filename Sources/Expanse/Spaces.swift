@@ -17,6 +17,8 @@ enum Spaces {
         let window: CGWindowID?
         /// "Desktop", "Desktop 2", or the full-screen app's name ("Safari & Notes" for split view).
         let name: String
+        /// Every window showing on a full-screen app's Space (two for split view).
+        var windows: [CGWindowID] = []
         var isDesktop: Bool { pid == nil }
     }
 
@@ -42,7 +44,9 @@ enum Spaces {
                 let names = tiles.compactMap { $0["appName"] as? String }
                 let name = names.isEmpty ? NSRunningApplication(processIdentifier: pid)?.localizedName ?? "Full Screen"
                     : names.joined(separator: " & ")
-                return Space(id: id, pid: pid, window: window, name: name)
+                let tileWindows = tiles.compactMap { ($0["TileWindowID"] as? NSNumber)?.uint32Value }
+                return Space(id: id, pid: pid, window: window, name: name,
+                             windows: tileWindows.isEmpty ? window.map { [$0] } ?? [] : tileWindows)
             default:
                 return nil
             }
@@ -127,12 +131,27 @@ enum Spaces {
         return true
     }
 
+    /// A picture of `window`, whichever Space it's on, at its size in points (what ScreenCaptureKit
+    /// won't give for a window on another Space). The same private call AltTab has used; looked up at
+    /// run time, so a macOS without it just returns nil. It waits for replayd, so never on the main
+    /// thread, or on the queue ScreenCaptureKit calls back on, which is replayd's: there it waits for
+    /// itself, and every capture with it.
+    static func picture(of window: CGWindowID) -> CGImage? {
+        guard let capture = WindowServer.captureWindows else { return nil }
+        var id = window
+        let ignoreClipShape: UInt32 = 1 << 11, nominalResolution: UInt32 = 1 << 9
+        let images = capture(CGSMainConnectionID(), &id, 1, ignoreClipShape | nominalResolution)?.takeRetainedValue()
+        return (images as? [CGImage])?.first
+    }
+
     private enum WindowServer {
         typealias SetFront = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, UInt32, UInt32) -> Int32
         typealias PostEventRecord = @convention(c) (UnsafeMutablePointer<ProcessSerialNumber>, UnsafeMutablePointer<UInt8>) -> Int32
+        typealias CaptureWindows = @convention(c) (Int32, UnsafeMutablePointer<CGWindowID>, UInt32, UInt32) -> Unmanaged<CFArray>?
         static let skyLight = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY)
         static let setFront = dlsym(skyLight, "_SLPSSetFrontProcessWithOptions").map { unsafeBitCast($0, to: SetFront.self) }
         static let postEventRecord = dlsym(skyLight, "SLPSPostEventRecordTo").map { unsafeBitCast($0, to: PostEventRecord.self) }
+        static let captureWindows = dlsym(skyLight, "SLSHWCaptureWindowList").map { unsafeBitCast($0, to: CaptureWindows.self) }
     }
 
     /// Whether the Space showing on the main display is a full-screen app's. Asked at every

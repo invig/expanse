@@ -272,7 +272,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         notifyStopped()
     }
 
-    private static func configuration(pixelSize: CGSize, fps: Int) -> SCStreamConfiguration {
+    static func configuration(pixelSize: CGSize, fps: Int) -> SCStreamConfiguration {
         let c = SCStreamConfiguration()
         // Within what a picture can be (the largest texture there is): a window's size comes from
         // its app, and converting NaN, infinity or a huge number to whole pixels traps.

@@ -168,10 +168,10 @@ final class CanvasView: NSView {
     private var isDark: Bool { effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
 
     /// The Spaces beside the minimap (see SpacesBar).
-    func updateSpaces(_ spaces: [Spaces.Space], active: UInt64?) {
+    func updateSpaces(_ spaces: [Spaces.Space], active: UInt64?, pictures: [UInt64: CGImage] = [:]) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        spacesBar.update(spaces: spaces, active: active, wallpaper: desktopPicture)
+        spacesBar.update(spaces: spaces, active: active, wallpaper: desktopPicture, pictures: pictures)
         placeSpacesBar()
         CATransaction.commit()
     }

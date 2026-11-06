@@ -183,6 +183,11 @@ final class CanvasController: NSObject {
     }
     /// See menuBarStripFrame.
     private var menuBarStrip: MenuBarStrip?
+    /// What's on each full-screen app's Space, for its tile (see refreshSpacePictures).
+    private var spacePictures: [UInt64: CGImage] = [:]
+    private var lastSpacePictures: CFTimeInterval = 0
+    /// Asks for those pictures (a seam for the tests).
+    var takeSpacePictures: ([Spaces.Space], CGFloat, @escaping (Spaces.Space, CGImage?) -> Void) -> Void = SpacePicture.capture
 
     private struct CameraAnimation {
         var from: Camera
@@ -3995,6 +4000,7 @@ final class CanvasController: NSObject {
         // The desktop as it is now (its icons, any dimming): the last one shows until it comes.
         if CACurrentMediaTime() - lastWallpaperRefresh > 2, WindowCapture.canAsk { refreshWallpaper() }
         refreshSpaces()
+        refreshSpacePictures()
         NSApp.activate(ignoringOtherApps: true)
         overlay.level = canvasLevel
         overlay.makeKeyAndOrderFront(nil)
@@ -4016,7 +4022,30 @@ final class CanvasController: NSObject {
         // The desktop the canvas lives on is Expanse, as far as you're concerned.
         let canvas = canvasDesktop
         view.updateSpaces(spaces.map { $0.id == canvas ? Spaces.Space(id: $0.id, pid: nil, window: nil, name: "Expanse") : $0 },
-                          active: active)
+                          active: active, pictures: spacePictures)
+    }
+
+    /// Fresh pictures for the full-screen apps' tiles, the last ones showing until they come. Only
+    /// with the canvas up, which covers the app you were in. The panel shows at 100% too, with the
+    /// last ones, or the app's icon before there are any: at rest every capture would make video
+    /// that macOS protects blink (see updateStreaming).
+    private func refreshSpacePictures() {
+        guard isActive, !isPaused, WindowCapture.canAsk, CACurrentMediaTime() - lastSpacePictures > 2 else { return }
+        let fullScreen = Spaces.list().spaces.filter { !$0.isDesktop }
+        // The Spaces that have gone.
+        spacePictures = spacePictures.filter { id, _ in fullScreen.contains { $0.id == id } }
+        guard !fullScreen.isEmpty else { return }
+        lastSpacePictures = CACurrentMediaTime()
+        takeSpacePictures(fullScreen, screen.backingScaleFactor) { [weak self] space, picture in
+            guard let self else { return }
+            guard let picture else {
+                logger.info("space picture: none for \(space.name, privacy: .public) (\(space.id)), windows \(space.windows.description, privacy: .public)")
+                return
+            }
+            logger.info("space picture: \(space.name, privacy: .public) (\(space.id)), \(picture.width)x\(picture.height)")
+            self.spacePictures[space.id] = picture
+            self.refreshSpaces()
+        }
     }
 
     /// A tile in the Spaces bar (or expanse://space): go to that Space, from the canvas or at 100%.

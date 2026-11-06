@@ -107,6 +107,8 @@ enum TestCanvas {
             _ = folder
         }
         let c = CanvasController()
+        // Whatever this Mac's full-screen apps are showing stays out of the tests.
+        c.takeSpacePictures = { _, _, _ in }
         c.displayOverride = (display.frame, display.usable)
         c.updateOverlayFrame()
         c.windows = windows

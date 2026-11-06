@@ -23,7 +23,7 @@
 - **Steps:**
   1. Press ⌥` to zoom out.
   2. Hover over each tile.
-- **Expected:** To the left of the minimap, a panel headed "Spaces" has one tile per Space on the main display, in Mission Control's order. The canvas's own desktop is labelled "Expanse". The other desktop is "Desktop 2", showing the desktop picture (a plain grey tile when the Desktop picture background switch is off). The full-screen app shows its icon and name ("Safari", or e.g. "Safari & Notes" for split view). The current Space is ringed in the accent colour and named in bold, and a hovered tile gets a quiet ring.
+- **Expected:** To the left of the minimap, a panel headed "Spaces" has one tile per Space on the main display, in Mission Control's order. The canvas's own desktop is labelled "Expanse". The other desktop is "Desktop 2", showing the desktop picture (a plain grey tile when the Desktop picture background switch is off). The full-screen app shows a picture of its Space (SPACES-29) and its name ("Safari", or e.g. "Safari & Notes" for split view). The current Space is ringed in the accent colour and named in bold, and a hovered tile gets a quiet ring.
 - **Automate:** unit: Spaces.list() parsing a CGSCopyManagedDisplaySpaces dictionary. Type 0 is a desktop, numbered when there's more than one; type 4 is named from TileSpaces' appName values joined by " & ".
 - **Note:** The canvas's desktop tile was labelled "Desktop" here, "Canvas" from 24b54b1, and "Expanse" since e9a6f65.
 
@@ -352,3 +352,16 @@
 - **Automate:** unit: `Wallpaper.desktopState` with frames recorded from a real slide; `takeWallpaper` waits out `spaceSettleTime`, asks again while the desktop moves, gives up keeping the last picture, and drops older asks.
 - **Note:** Icons cut off along the right edge of the canvas's picture were seen once on a Mac on 6 Nov, with the icons in their right place, which a mid-slide picture wouldn't explain on its own. Not reproduced, in a VM or on that Mac. This may not be the whole cause: if it comes back, note whether closing and reopening the canvas clears it.
 
+## SPACES-29 A full-screen app's tile shows a picture of its Space
+- **Type:** Feature
+- **Area:** SPACES
+- **Commits:** unreleased (6 Nov)
+- **Setup:** Two apps in full screen, one of them in split view with a second app. Expanse just started, on the canvas's desktop.
+- **Steps:**
+  1. Before opening the canvas, look at the Spaces panel at 100%.
+  2. Press ⌥`.
+  3. Press Esc, and look at the panel at 100%.
+  4. Go to one of the full-screen apps, change what's showing, press ⌥`.
+- **Expected:** Step 1: each full-screen tile shows the app's icon: nothing has been captured. Step 2: within a moment, each shows a picture of what's on its Space, filling the tile, split view's two windows side by side. Desktop tiles still show the desktop picture. Step 3: the pictures stay, and nothing new is captured at 100%, so protected video doesn't blink. Step 4: that tile shows the change.
+- **Automate:** unit: `Spaces.list` gives a Space's windows; `SpacePicture.layout` and `compose`; `SpacesBar` shows the picture, or the icon without one; `refreshSpacePictures` asks only with the canvas up, every 2s at most, and keeps the last picture when there's none; `captureNext` takes one Space at a time and stops on quitting, and asks the window server when ScreenCaptureKit refuses, off replayd's queue. End-to-end: a picture from the desktop and from over the app, and none at 100%. Split view and protected video are by hand: the VM's tests don't set either up.
+- **Note:** On macOS 27 ScreenCaptureKit refuses a window on another Space ("Failed to start stream due to audio/video capture failure", seen in the VM on 6 Nov), so from the desktop the picture comes from the window server's private call, `SLSHWCaptureWindowList`. That call goes through replayd, so made on the queue ScreenCaptureKit calls back on it deadlocks that queue, and with it every capture, for about 30s.

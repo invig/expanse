@@ -47,6 +47,34 @@ import AppKit
                 try await t.until("the strip to go with the canvas again", timeout: 8) { spacesStrip(t) == nil }
             }
         },
+        Case("SPACES-29", "A full-screen app's tile shows a picture of its Space") { t in
+            try await spacesScene(t, "Spaces29", showing: false) { sc in
+                try await Task.sleep(for: .seconds(2.2))   // pictures are only asked for every 2s
+                // From the canvas's desktop, where the full-screen window isn't on screen.
+                var mark = t.log.mark()
+                t.link("toggle")
+                try await t.until("the canvas open, zoomed out", timeout: 6) { let s = try await t.settle(); return s.active && s.scale < 1 }
+                let fromDesktop = try await t.expectLog("space picture: ", since: mark)
+                try t.expect(!fromDesktop.contains("none for"), "no picture from the canvas's desktop: \(fromDesktop)")
+                t.link("exit")
+                try await t.until("back at 100%", timeout: 8) { try await !t.state().active }
+
+                // At 100% nothing's captured, on going to that Space or anywhere else.
+                mark = t.log.mark()
+                try await spacesGo(t, to: sc.fsSpace, "on the full-screen window's Space", by: { sc.fs.focus() })
+                try await t.noLog("space picture: ", since: mark, within: 1.5)
+
+                // Opened over the app itself.
+                try await Task.sleep(for: .seconds(2.2))
+                mark = t.log.mark()
+                t.link("toggle")
+                try await t.until("the canvas open over the app", timeout: 6) { let s = try await t.settle(); return s.active && s.scale < 1 }
+                let overIt = try await t.expectLog("space picture: ", since: mark)
+                try t.expect(!overIt.contains("none for"), "no picture from over the app: \(overIt)")
+                t.link("exit")
+                try await t.until("back at 100% in the app", timeout: 8) { try await !t.state().active }
+            }
+        },
         Case("SPACES-06", "Clicking a full-screen app's tile actually switches to it") { t in
             try t.needsInput()
             try await spacesScene(t, "Spaces06", showing: false) { sc in

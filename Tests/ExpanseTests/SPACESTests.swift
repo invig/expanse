@@ -1,6 +1,7 @@
 import Testing
 import AppKit
 import ScreenCaptureKit
+import os
 @_private(sourceFile: "CanvasController.swift") @testable import Expanse
 @_private(sourceFile: "CanvasView.swift") @testable import Expanse
 @_private(sourceFile: "SpacesBar.swift") @testable import Expanse
@@ -833,5 +834,288 @@ struct SPACESTests {
         // And a try already on its way stops by itself.
         c.takeWallpaper(request: 1, tries: 3)
         #expect(asked == 1)
+    }
+
+    // MARK: SPACES-29
+
+    /// A picture of one colour.
+    private static func solid(_ color: CGColor, width: Int = 4, height: Int = 4) -> CGImage {
+        let c = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        c.setFillColor(color)
+        c.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return c.makeImage()!
+    }
+
+    private static let red = CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)
+    private static let blue = CGColor(srgbRed: 0, green: 0, blue: 1, alpha: 1)
+
+    /// The red and blue of the pixel at `x`, half way up.
+    private static func redBlue(_ image: CGImage, x: Int) -> (red: UInt8, blue: UInt8) {
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let c = CGContext(data: &pixels, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                          space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        c.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let at = (image.height / 2 * image.width + x) * 4
+        return (pixels[at], pixels[at + 2])
+    }
+
+    @Test("SPACES-29 Spaces.list gives each full-screen Space's windows: both in split view")
+    func spaces29a() {
+        let onlyItsOwn: [String: Any] = ["id64": NSNumber(value: 9), "type": NSNumber(value: 4),
+                                         "pid": NSNumber(value: 90_504), "fs_wid": NSNumber(value: 111)]
+        let displays = [Self.display([Self.desktop(1),
+                                      Self.fullScreen(5, pid: 90_501, window: 77, apps: ["Safari"]),
+                                      Self.fullScreen(6, pid: 90_502, window: 88, apps: ["Safari", "Notes"]),
+                                      Self.fullScreen(8, pid: 90_503, window: 99, apps: ["Mail"], topLevel: false),
+                                      onlyItsOwn], current: 1)]
+        Self.withSpaces(displays) {
+            #expect(Spaces.list().spaces.map(\.windows) == [[], [77], [88, 89], [99], [111]])
+        }
+    }
+
+    @Test("SPACES-29 A tile's picture is the size that fills it, with each window where it sits")
+    func spaces29b() {
+        let tile = CGSize(width: 100, height: 63)
+        // Wider than the tile: it's the height that has to fill it.
+        let one = SpacePicture.layout([CGRect(x: 0, y: 0, width: 2048, height: 1152)], tile: tile, scale: 2)
+        #expect(one.size == CGSize(width: 224, height: 126))
+        #expect(one.rects == [CGRect(x: 0, y: 0, width: 224, height: 126)])
+        // Taller than the tile: the width.
+        let tall = SpacePicture.layout([CGRect(x: 0, y: 0, width: 1000, height: 1000)], tile: tile, scale: 1)
+        #expect(tall.size == CGSize(width: 100, height: 100))
+        // Split view, side by side.
+        let split = SpacePicture.layout([CGRect(x: 0, y: 0, width: 1024, height: 1152),
+                                         CGRect(x: 1024, y: 0, width: 1024, height: 1152)], tile: tile, scale: 2)
+        #expect(split.size == CGSize(width: 224, height: 126))
+        #expect(split.rects == [CGRect(x: 0, y: 0, width: 112, height: 126), CGRect(x: 112, y: 0, width: 112, height: 126)])
+        // One over the other: the upper window's at the top of the picture, whose origin is at the bottom.
+        let stacked = SpacePicture.layout([CGRect(x: 0, y: 0, width: 1000, height: 500),
+                                           CGRect(x: 0, y: 500, width: 1000, height: 500)], tile: tile, scale: 1)
+        #expect(stacked.rects == [CGRect(x: 0, y: 50, width: 100, height: 50), CGRect(x: 0, y: 0, width: 100, height: 50)])
+        // Part way through a Space's slide the frames are off the screen: it's the windows that count.
+        let moving = SpacePicture.layout([CGRect(x: -554, y: 0, width: 2048, height: 1152)], tile: tile, scale: 2)
+        #expect(moving.rects == one.rects)
+        // Nothing to draw.
+        #expect(SpacePicture.layout([], tile: tile, scale: 2).rects.isEmpty)
+        #expect(SpacePicture.layout([CGRect(x: 0, y: 0, width: 0, height: 0)], tile: tile, scale: 2).rects.isEmpty)
+    }
+
+    @Test("SPACES-29 A picture of the right size is used as it is; others are drawn to it, split view's two together")
+    func spaces29c() throws {
+        let red = Self.solid(Self.red), blue = Self.solid(Self.blue)
+        #expect(SpacePicture.compose([], size: .zero) == nil)
+        #expect(SpacePicture.compose([(red, CGRect(x: 0, y: 0, width: 4, height: 4))], size: CGSize(width: 4, height: 4)) === red)
+        let both = try #require(SpacePicture.compose([(red, CGRect(x: 0, y: 0, width: 4, height: 4)),
+                                                      (blue, CGRect(x: 4, y: 0, width: 4, height: 4))],
+                                                     size: CGSize(width: 8, height: 4)))
+        #expect(both.width == 8 && both.height == 4)
+        let left = Self.redBlue(both, x: 1), right = Self.redBlue(both, x: 6)
+        #expect(left.red > 200 && left.blue < 50, "\(left)")
+        #expect(right.blue > 200 && right.red < 50, "\(right)")
+        // The window server's come at the window's full size.
+        let full = Self.solid(Self.red, width: 1600, height: 1000)
+        let small = try #require(SpacePicture.compose([(full, CGRect(x: 0, y: 0, width: 202, height: 126))], size: CGSize(width: 201.6, height: 126)))
+        #expect(small.width == 202 && small.height == 126)
+        #expect(Self.redBlue(small, x: 100).red > 200)
+    }
+
+    @Test("SPACES-29 A full-screen app's tile shows its picture, and its icon before there is one")
+    func spaces29d() {
+        let own = ProcessInfo.processInfo.processIdentifier
+        let spaces = [Spaces.Space(id: 1, pid: nil, window: nil, name: "Expanse"),
+                      Spaces.Space(id: 5, pid: own, window: 77, name: "Safari", windows: [77])]
+        let wallpaper = Self.picture(), first = Self.picture(), second = Self.picture()
+        let bar = SpacesBar()
+        bar.update(spaces: spaces, active: 1, wallpaper: wallpaper)
+        #expect(bar.tiles[1].contents == nil, "no picture to show yet")
+        if NSRunningApplication(processIdentifier: own)?.icon != nil {
+            #expect(bar.tiles[1].sublayers?.count == 1, "the app's icon")
+        }
+
+        bar.update(spaces: spaces, active: 1, wallpaper: wallpaper, pictures: [5: first])
+        #expect(bar.tiles[1].contents as! CGImage === first)
+        #expect(bar.tiles[1].contentsGravity == .resizeAspectFill)
+        #expect(bar.tiles[1].sublayers == nil, "the picture instead of the icon")
+        #expect(bar.tiles[0].contents as! CGImage === wallpaper, "a desktop's tile is still its picture")
+
+        // The same picture rebuilds nothing; a new one is shown.
+        let tile = bar.tiles[1]
+        bar.update(spaces: spaces, active: 1, wallpaper: wallpaper, pictures: [5: first])
+        #expect(bar.tiles[1] === tile)
+        bar.update(spaces: spaces, active: 1, wallpaper: wallpaper, pictures: [5: second])
+        #expect(bar.tiles[1].contents as! CGImage === second)
+    }
+
+    @Test("SPACES-29 Pictures are only asked for with the canvas up, every 2s at most, and kept")
+    func spaces29e() {
+        Self.withSpaces(Self.usual(current: 1)) {
+            let c = TestCanvas.make()
+            defer { Self.finish(c) }
+            var asked: [[Spaces.Space]] = []
+            var answers: [(Spaces.Space, CGImage?) -> Void] = []
+            c.takeSpacePictures = { spaces, _, answer in asked.append(spaces); answers.append(answer) }
+
+            // At 100%: the panel shows there, but every capture would make protected video blink.
+            c.isActive = false
+            c.refreshSpacePictures()
+            #expect(asked.isEmpty)
+
+            c.isActive = true
+            c.refreshSpacePictures()
+            #expect(asked.count == 1)
+            #expect(asked[0].map(\.id) == [5], "the full-screen app's Space, not the desktops")
+            #expect(asked[0][0].windows == [77])
+            let first = Self.picture()
+            answers[0](asked[0][0], first)
+            #expect(c.spacePictures[5] === first)
+            #expect(c.view.spacesBar.pictures[5] === first, "on its tile straight away")
+
+            // Open again straight away: the one it has will do.
+            c.refreshSpacePictures()
+            #expect(asked.count == 1)
+
+            // Later: a fresh one. None to be had keeps the last.
+            c.lastSpacePictures = 0
+            c.refreshSpacePictures()
+            #expect(asked.count == 2)
+            answers[1](asked[1][0], nil)
+            #expect(c.spacePictures[5] === first)
+            let second = Self.picture()
+            answers[1](asked[1][0], second)
+            #expect(c.view.spacesBar.pictures[5] === second)
+
+            // Not while paused, or while replayd isn't answering.
+            c.lastSpacePictures = 0
+            c.isPaused = true
+            c.refreshSpacePictures()
+            c.isPaused = false
+            WindowCapture.replaydStuck = true
+            c.refreshSpacePictures()
+            WindowCapture.replaydStuck = false
+            #expect(asked.count == 2)
+        }
+    }
+
+    @Test("SPACES-29 A Space that's gone takes its picture with it; with no full-screen app nothing's asked")
+    func spaces29f() {
+        let c = TestCanvas.make()
+        defer { Self.finish(c) }
+        var asked = 0
+        c.takeSpacePictures = { _, _, _ in asked += 1 }
+        c.isActive = true
+        c.spacePictures = [5: Self.picture(), 6: Self.picture()]
+        Self.withSpaces(Self.usual(current: 1)) { c.refreshSpacePictures() }
+        #expect(asked == 1)
+        #expect(Array(c.spacePictures.keys) == [5])
+        c.lastSpacePictures = 0
+        Self.withSpaces([Self.display([Self.desktop(1), Self.desktop(3)], current: 1)]) { c.refreshSpacePictures() }
+        #expect(asked == 1)
+        #expect(c.spacePictures.isEmpty)
+    }
+
+    /// ScreenCaptureKit's and the window server's picture calls stood in for, for `body`.
+    private static func withShots(_ windowServer: @escaping (CGWindowID) -> CGImage? = { _ in nil },
+                                  _ body: (_ shots: () -> [(window: SCWindow, width: Int, height: Int, done: (CGImage?, Error?) -> Void)]) async throws -> Void) async rethrows {
+        let oldShot = SpacePicture.shot, oldWindowServer = SpacePicture.windowServerShot
+        defer { SpacePicture.shot = oldShot; SpacePicture.windowServerShot = oldWindowServer }
+        var shots: [(window: SCWindow, width: Int, height: Int, done: (CGImage?, Error?) -> Void)] = []
+        SpacePicture.shot = { window, config, done in shots.append((window, config.width, config.height, done)) }
+        SpacePicture.windowServerShot = windowServer
+        try await body({ shots })
+    }
+
+    @Test("SPACES-29 Spaces are captured one at a time, at the tile's size, and quitting stops them")
+    func spaces29g() async throws {
+        try await Self.withShots { shots in
+            let windows: [CGWindowID: SCWindow] = [
+                77: Fake.scWindow(id: 77, frame: CGRect(x: 0, y: 0, width: 2048, height: 1152)),
+                88: Fake.scWindow(id: 88, frame: CGRect(x: 0, y: 0, width: 1024, height: 1152)),
+                89: Fake.scWindow(id: 89, frame: CGRect(x: 1024, y: 0, width: 1024, height: 1152)),
+            ]
+            let spaces = [Spaces.Space(id: 5, pid: 90_501, window: 77, name: "Safari", windows: [77]),
+                          Spaces.Space(id: 6, pid: 90_502, window: 88, name: "Safari & Notes", windows: [88, 89]),
+                          Spaces.Space(id: 7, pid: 90_503, window: 66, name: "Gone", windows: [66]),
+                          Spaces.Space(id: 8, pid: 90_504, window: 77, name: "Not reached", windows: [77])]
+            var answered: [(UInt64, CGImage?)] = []
+            let before = WindowCapture.unanswered
+            WindowCapture.requestSent()
+            SpacePicture.captureNext(spaces[...], windows: windows, scale: 2) { answered.append(($0.id, $1)) }
+            #expect(shots().map(\.window.windowID) == [77], "the second Space waits for the first")
+            #expect(shots()[0].width == 224 && shots()[0].height == 126)
+
+            let one = Self.solid(Self.red, width: 224, height: 126)
+            shots()[0].done(one, nil)
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(answered.map(\.0) == [5])
+            #expect(answered[0].1 === one, "ScreenCaptureKit's picture, at the size asked for, as it is")
+            #expect(shots().map(\.window.windowID) == [77, 88, 89], "split view's two windows")
+            #expect(shots()[1].width == 112 && shots()[1].height == 126)
+
+            // Quitting while they're on their way stops there: nothing new for replayd.
+            WindowCapture.closing = true
+            defer { WindowCapture.closing = false }
+            shots()[1].done(Self.solid(Self.red, width: 112, height: 126), nil)
+            shots()[2].done(Self.solid(Self.blue, width: 112, height: 126), nil)
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(answered.map(\.0) == [5, 6])
+            #expect(answered[1].1?.width == 224, "both windows, in one picture")
+            #expect(shots().count == 3)
+            #expect(WindowCapture.unanswered == before, "nothing left for quitting to wait for")
+
+            // A window ScreenCaptureKit doesn't list, or a picture nobody gives: none, and on to the next.
+            WindowCapture.closing = false
+            answered = []
+            WindowCapture.requestSent()
+            SpacePicture.captureNext(spaces[2...], windows: windows, scale: 2) { answered.append(($0.id, $1)) }
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(answered.map(\.0) == [7])
+            #expect(answered[0].1 == nil)
+            #expect(shots().count == 4)
+            shots()[3].done(nil, CocoaError(.fileNoSuchFile))
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(answered.map(\.0) == [7, 8])
+            #expect(answered[1].1 == nil)
+            #expect(WindowCapture.unanswered == before)
+        }
+    }
+
+    @Test("SPACES-29 A window ScreenCaptureKit refuses comes from the window server, off replayd's queue, at the tile's size")
+    func spaces29h() async throws {
+        let onMainThread = OSAllocatedUnfairLock(initialState: [Bool]())
+        let asked = OSAllocatedUnfairLock(initialState: [CGWindowID]())
+        let full = Self.solid(Self.blue, width: 1600, height: 1000)
+        try await Self.withShots({ id in
+            asked.withLock { $0.append(id) }
+            onMainThread.withLock { $0.append(Thread.isMainThread) }
+            return full
+        }) { shots in
+            let windows: [CGWindowID: SCWindow] = [77: Fake.scWindow(id: 77, frame: CGRect(x: 0, y: 0, width: 1600, height: 1000))]
+            let space = Spaces.Space(id: 5, pid: 90_501, window: 77, name: "Safari", windows: [77])
+            var answered: [CGImage?] = []
+            WindowCapture.requestSent()
+            SpacePicture.captureNext([space][...], windows: windows, scale: 2) { answered.append($1) }
+            #expect(shots().count == 1)
+            #expect(asked.withLock { $0.isEmpty }, "ScreenCaptureKit's asked first")
+            let refused = CocoaError(.fileNoSuchFile)
+            // On a queue of its own, as ScreenCaptureKit calls back: the call mustn't run on it.
+            let callback = DispatchQueue(label: "stands in for replayd's")
+            let done = shots()[0].done
+            callback.async { done(nil, refused) }
+            try await Task.sleep(for: .milliseconds(150))
+            #expect(asked.withLock { $0 } == [77])
+            #expect(onMainThread.withLock { $0 } == [false])
+            let picture = try #require(answered.first ?? nil)
+            #expect(picture.width == 202 && picture.height == 126, "not the 1600x1000 it came at")
+            #expect(Self.redBlue(picture, x: 100).blue > 200)
+
+            // ScreenCaptureKit's answer stands when there is one.
+            asked.withLock { $0 = [] }
+            WindowCapture.requestSent()
+            SpacePicture.captureNext([space][...], windows: windows, scale: 2) { answered.append($1) }
+            shots()[1].done(Self.solid(Self.red, width: 202, height: 126), nil)
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(asked.withLock { $0.isEmpty })
+        }
     }
 }
