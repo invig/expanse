@@ -4,12 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- An app that restarts itself (an update) gets its windows back at their spots on the canvas, however
-  long it keeps them out of view. Claude, restarting while the Mac was locked (11 Nov), showed its
-  window hours later, and it came back as a new window beside whatever you were in.
-- Each release also carries its zip as `Expanse.zip`, so
-  `https://github.com/invig/expanse/releases/latest/download/Expanse.zip` always gets the newest
-  (for the Expanse page on matthewsalmon.com).
+Nothing yet.
 
 ## Bugs
 
@@ -102,6 +97,10 @@ Not decided yet.
 
 ## Done
 
+- 0.1.46: An app that restarts itself (an update) gets its windows back at their spots on the
+  canvas, however long it keeps them out of view. Each release also carries its zip as
+  `Expanse.zip`, so `https://github.com/invig/expanse/releases/latest/download/Expanse.zip` always
+  gets the newest.
 - 0.1.45: A full-screen app's tile shows the whole Space, a browser's tabs and toolbar included, with
   no empty strip down the side of the Space you're on.
 - 0.1.44: A full-screen app's tile in the Spaces panel shows a picture of its Space instead of the

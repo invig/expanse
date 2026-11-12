@@ -566,7 +566,7 @@
 ## TRACK-46 An app that restarts itself gets its windows back at their spots
 - **Type:** Bug fix
 - **Area:** TRACK
-- **Commits:** unreleased (12 Nov)
+- **Commits:** c8bdd7b (0.1.46)
 - **Before:** Claude restarted itself for an update while the Mac was locked, and kept its new window out of view for over three hours, until it was next brought to the front. Expanse can't see a window that isn't on screen, and when it showed, Expanse took it for a new window and put it beside whatever you were in, so you had to find it and move it back. Quitting an app lets go of its windows' spots (TRACK-39), and a restart is a quit.
 - **Setup:** Expanse running more than 3 minutes. Calculator on the canvas, well away from Terminal, which you're in at 100%.
 - **Steps:**
