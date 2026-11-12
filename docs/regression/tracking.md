@@ -483,6 +483,7 @@
 - **Expected:** Calculator's window opens in a free spot beside the Safari window you're in, not at its old spot.
 - **Check in log:** "Calculator quit" (no longer "keeping N window spots for when it opens again").
 - **Automate:** manual: real app quit and relaunch.
+- **Note:** An app that starts again within 20s of quitting, with no click or key press since, restarted itself: its windows go back to their spots (TRACK-46). The end-to-end case clicks between quitting and opening it again.
 
 ## TRACK-40 Steam's window is taken onto the canvas
 - **Type:** Bug fix
@@ -562,3 +563,16 @@
 - **Expected:** Step 3: Tart's window is where you put it, and the log has no "follow Tart" line and no "gave up on windows landing (Tart)" line. Step 4: its new spot is kept: a drag is still a move.
 - **Automate:** unit: `stillParked` through a window scan and through the window's move event, with `alreadyAt` so it isn't parked again; followed if it fits, isn't parked, or has left that edge. End-to-end: a window that won't shrink, taller than the screen, out of view.
 
+## TRACK-46 An app that restarts itself gets its windows back at their spots
+- **Type:** Bug fix
+- **Area:** TRACK
+- **Commits:** unreleased (12 Nov)
+- **Before:** Claude restarted itself for an update while the Mac was locked, and kept its new window out of view for over three hours, until it was next brought to the front. Expanse can't see a window that isn't on screen, and when it showed, Expanse took it for a new window and put it beside whatever you were in, so you had to find it and move it back. Quitting an app lets go of its windows' spots (TRACK-39), and a restart is a quit.
+- **Setup:** Expanse running more than 3 minutes. Calculator on the canvas, well away from Terminal, which you're in at 100%.
+- **Steps:**
+  1. In Terminal, run `killall Calculator; sleep 2; open -j -a Calculator` (quit, then start again hidden 2s later, the way an app restarts itself), and don't click or type for 5 seconds.
+  2. Click Calculator in the Dock.
+  3. Go back to Terminal and run `killall Calculator; sleep 4; open -j -a Calculator`, typing a key while it waits. Click Calculator in the Dock again.
+- **Expected:** Step 1: Calculator's window doesn't appear. Step 2: it comes back at its old spot, at its own size, and the view goes there. Step 3: started again after a key press, it's opened again by you: its window is new and goes beside Terminal (TRACK-39). The same goes for one started more than 20s after it quit.
+- **Check in log:** notice "Calculator restarted itself 2.0s after it quit: its window's spot is kept for when it shows", then "Calculator[id] back at its spot: its app restarted itself", and no "placed new window Calculator". Step 3: "Calculator opened again … after a click or key press: its windows are new".
+- **Automate:** unit: CanvasController.appLaunched after appQuit (the 20s gap, a click or key press since it quit, another app starting) and the window taking its spot through a window scan, after scans with it out of view. End-to-end: the fixture app quits and starts again hidden with nothing clicked or typed; its window isn't taken on while hidden, and comes back at its old spot when it's shown.

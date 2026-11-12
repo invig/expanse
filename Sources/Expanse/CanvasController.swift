@@ -95,6 +95,17 @@ final class CanvasController: NSObject {
     /// save); an app you quit yourself is let go of (see appQuit).
     private var justQuit: [(at: Date, spots: [SavedLayout.Window])] = []
     private static let justQuitKept: TimeInterval = 30
+    /// Apps that restarted themselves (see appLaunched), by the new run's process ID: the spots of
+    /// the windows the app had, for its windows when they show, however long that takes. Claude,
+    /// restarting for an update while the Mac was locked, kept its new window out of view for over
+    /// three hours; when it showed, it went beside where you were, as a new window would.
+    private var restartSpots: [pid_t: [SavedLayout.Window]] = [:]
+    /// How soon after quitting an app must start again to count as restarting itself.
+    private static let restartGap: TimeInterval = 20
+    /// How long the rest of its spots wait once its first window is back.
+    private static let restartRestKept: TimeInterval = 10
+    /// Whether you clicked or typed since a time (CACurrentMediaTime); tests stand in for it.
+    private var clickedOrTyped: (CFTimeInterval) -> Bool = { CanvasController.inputSince($0) }
     /// Paused because the Mac is logging out, restarting or shutting down (see start).
     private var pausedForPowerOff = false
     private var lastSavedLayout: Data?
@@ -588,9 +599,11 @@ final class CanvasController: NSObject {
             for delay in [0.5, 1.5] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { self?.syncSoon() }
             }
-            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-               app.activationPolicy == .regular {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self?.observeApp(app.processIdentifier) }
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                self?.appLaunched(app)
+                if app.activationPolicy == .regular {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self?.observeApp(app.processIdentifier) }
+                }
             }
         }
         magnifyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .magnify) { [weak self] event in
@@ -1460,8 +1473,32 @@ final class CanvasController: NSObject {
         if !spots.isEmpty { justQuit.append((Date(), spots.map { var e = $0; e.away = true; return e })) }
         for w in open { remove(w) }
         recentlyRemoved = recentlyRemoved.filter { $0.value.pid != pid }
+        restartSpots[pid] = nil
         logger.info("\(app.localizedName ?? "?", privacy: .public) quit")
         scheduleSave()
+    }
+
+    /// An app started. One that quit moments ago, with no click or key press from you since, has
+    /// restarted itself (an update, say): you didn't open it again. Its windows' spots wait for
+    /// its windows (see restartSpots). One you open again yourself is new (see appQuit).
+    private func appLaunched(_ app: NSRunningApplication) {
+        guard !isPaused, let bundleID = app.bundleIdentifier else { return }
+        let now = Date()
+        guard let quit = justQuit.last(where: { entry in
+            now.timeIntervalSince(entry.at) < Self.restartGap && entry.spots.contains { $0.bundleID == bundleID }
+        }) else { return }
+        let gap = now.timeIntervalSince(quit.at)
+        let name = app.localizedName ?? bundleID
+        let after = String(format: "%.1fs", gap)
+        guard !clickedOrTyped(CACurrentMediaTime() - gap) else {
+            logger.info("\(name, privacy: .public) opened again \(after, privacy: .public) after it quit, after a click or key press: its windows are new")
+            return
+        }
+        let spots = quit.spots.filter { $0.bundleID == bundleID }
+        restartSpots[app.processIdentifier] = spots
+        let kept = spots.count == 1 ? "its window's spot is kept for when it shows"
+            : "its \(spots.count) windows' spots are kept for when they show"
+        logger.notice("\(name, privacy: .public) restarted itself \(after, privacy: .public) after it quit: \(kept, privacy: .public)")
     }
 
     /// The restart is over (see restartSpotsUntil): saved spots of windows that haven't come back
@@ -2336,6 +2373,36 @@ final class CanvasController: NSObject {
         scheduleSave()
     }
 
+    /// Puts a window at a saved spot: its canvas position, chosen size and home, and the canvas
+    /// size it had, when quitting put the macOS size back.
+    private func takeSpot(_ w: ManagedWindow, _ match: SavedLayout.Window, actual f: CGRect) {
+        w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
+        if let pw = match.pw, let ph = match.ph { w.preferredSize = CGSize(width: pw, height: ph) }
+        if let hx = match.hx, let hy = match.hy { w.home = CGPoint(x: hx, y: hy) }
+        if let sw = match.w, let sh = match.h, let ax = w.ax, !w.sizesItself,
+           abs(sw - f.width) > 1 || abs(sh - f.height) > 1 {
+            let actual = resizeReal(w, ax, to: CGSize(width: sw, height: sh))
+            w.canvasFrame.size = actual
+            logger.info("restore size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(f.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
+        }
+    }
+
+    /// The spot kept for `w` if its app restarted itself (see restartSpots). Once its first window
+    /// is back, the rest of the app's spots wait only a little longer: a window it opens later is new.
+    private func takeRestartSpot(for w: ManagedWindow, size: CGSize) -> SavedLayout.Window? {
+        let pid = w.appPID
+        guard var pool = restartSpots[pid],
+              let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid,
+                                                size: size, open: openWindowKeys, from: &pool) else { return nil }
+        if pool.isEmpty {
+            restartSpots[pid] = nil
+        } else {
+            restartSpots[pid] = pool
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.restartRestKept) { [weak self] in self?.restartSpots[pid] = nil }
+        }
+        return match
+    }
+
     /// Returns true if the window was put back where a saved layout had it.
     @discardableResult
     private func add(_ sc: SCWindow, live: Bool, element: AXUIElement? = nil, frame: CGRect? = nil) -> Bool {
@@ -2386,19 +2453,20 @@ final class CanvasController: NSObject {
             w.originalFrame = back.originalFrame
             w.preferredSize = back.preferredSize
             w.home = back.home
+        } else if let match = takeRestartSpot(for: w, size: f.size) {
+            // Its app restarted itself, and this is its window back, however long it took to show
+            // (see restartSpots): at its spot, with the macOS frame it had before Expanse.
+            takeSpot(w, match, actual: f)
+            if let ox = match.ox, let oy = match.oy, let ow = match.ow, let oh = match.oh {
+                w.originalFrame = CGRect(x: ox, y: oy, width: ow, height: oh)
+            }
+            returning = true
+            reopened = true
+            logger.info("\(w.appName, privacy: .public)[\(w.id)] back at its spot: its app restarted itself")
         } else if mayTakeSavedSpot, let match = LayoutStore.takeMatch(bundleID: w.bundleID, title: w.title, id: w.id, pid: w.pid,
                                                                       size: f.size, open: openWindowKeys, from: &savedPool) {
             // A saved spot: at launch, or an app opened later that had windows last time.
-            w.canvasFrame.origin = CGPoint(x: match.x, y: match.y)
-            if let pw = match.pw, let ph = match.ph { w.preferredSize = CGSize(width: pw, height: ph) }
-            if let hx = match.hx, let hy = match.hy { w.home = CGPoint(x: hx, y: hy) }
-            if let sw = match.w, let sh = match.h, let ax = w.ax, !w.sizesItself,
-               abs(sw - f.width) > 1 || abs(sh - f.height) > 1 {
-                // Quitting put the macOS size back; restore the canvas size.
-                let actual = resizeReal(w, ax, to: CGSize(width: sw, height: sh))
-                w.canvasFrame.size = actual
-                logger.info("restore size \(w.appName, privacy: .public)[\(w.id)] \(NSStringFromSize(f.size), privacy: .public) -> \(NSStringFromSize(actual), privacy: .public)")
-            }
+            takeSpot(w, match, actual: f)
             if !firstSync { returning = true; reopened = true }
             if saved?.cleanExit != true, let ox = match.ox, let oy = match.oy, let ow = match.ow, let oh = match.oh {
                 // Last run didn't put windows back; its record of the macOS layout is the real one.

@@ -144,12 +144,15 @@ func isOnScreen(_ id: CGWindowID) -> Bool {
 
     var pid: pid_t? { app?.processIdentifier }
 
-    /// Starts it with `count` windows of `size`, and waits until they're open.
-    func launch(windows count: Int, size: CGSize = CGSize(width: 640, height: 420)) async throws {
+    /// Starts it with `count` windows of `size`, and waits until they're open. `hidden`: started
+    /// hidden, its windows open but out of view until it's shown (`unhide`).
+    func launch(windows count: Int, size: CGSize = CGSize(width: 640, height: 420), hidden: Bool = false) async throws {
         let config = NSWorkspace.OpenConfiguration()
         config.createsNewApplicationInstance = true
-        config.activates = true
+        config.activates = !hidden
+        config.hides = hidden
         config.arguments = ["--fixture", name, "--windows", "\(count)", "--size", "\(Int(size.width))x\(Int(size.height))"]
+            + (hidden ? ["--hidden"] : [])
         let seen = updates
         app = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config)
         // Fifty windows in a busy VM can take a while.

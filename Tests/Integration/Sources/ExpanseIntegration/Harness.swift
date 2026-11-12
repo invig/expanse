@@ -231,10 +231,11 @@ struct Skip: Error, CustomStringConvertible {
         return f
     }
 
-    func fixture(_ name: String, windows count: Int = 1, size: CGSize = CGSize(width: 640, height: 420)) async throws -> Fixture {
+    func fixture(_ name: String, windows count: Int = 1, size: CGSize = CGSize(width: 640, height: 420),
+                 hidden: Bool = false) async throws -> Fixture {
         let f = Fixture(name: name)
         fixtures.append(f)
-        try await f.launch(windows: count, size: size)
+        try await f.launch(windows: count, size: size, hidden: hidden)
         return f
     }
 

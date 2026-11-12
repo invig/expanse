@@ -4,7 +4,9 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- An app that restarts itself (an update) gets its windows back at their spots on the canvas, however
+  long it keeps them out of view. Claude, restarting while the Mac was locked (11 Nov), showed its
+  window hours later, and it came back as a new window beside whatever you were in.
 
 ## Bugs
 

@@ -36,7 +36,8 @@ app.setActivationPolicy(.regular)
 
 let delegate: NSApplicationDelegate = MainActor.assumeIsolated {
     if let name = option("--fixture") {
-        return FixtureApp(name: name, count: Int(option("--windows") ?? "1") ?? 1, size: option("--size"))
+        return FixtureApp(name: name, count: Int(option("--windows") ?? "1") ?? 1, size: option("--size"),
+                          hidden: args.contains("--hidden"))
     }
     return Runner()
 }
@@ -241,11 +242,15 @@ app.run()
     let name: String
     let count: Int
     let size: CGSize
+    /// Started hidden: its windows open out of view, as an app restarting itself may keep its
+    /// window until it's brought to the front (see Fixture.launch).
+    let hidden: Bool
     private var windows: [TestWindow] = []
 
-    init(name: String, count: Int, size: String?) {
+    init(name: String, count: Int, size: String?, hidden: Bool = false) {
         self.name = name
         self.count = count
+        self.hidden = hidden
         let parts = (size ?? "").split(separator: "x").compactMap { Double($0) }
         self.size = parts.count == 2 ? CGSize(width: parts[0], height: parts[1]) : CGSize(width: 640, height: 420)
     }
@@ -255,8 +260,9 @@ app.run()
             let info = note.userInfo as? [String: String] ?? [:]
             MainActor.assumeIsolated { self?.handle(info) }
         }
+        if hidden { NSApp.hide(nil) }
         for _ in 0..<count { open() }
-        NSApp.activate(ignoringOtherApps: true)
+        if !hidden { NSApp.activate(ignoringOtherApps: true) }
         report()
     }
 

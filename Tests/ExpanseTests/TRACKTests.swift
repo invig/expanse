@@ -7,11 +7,14 @@ import ScreenCaptureKit
 /// process ID and name are asked for.
 private final class QuitApp: NSRunningApplication {
     private let pid: pid_t
-    init(_ pid: pid_t) {
+    private let bundle: String?
+    init(_ pid: pid_t, bundleID: String? = nil) {
         self.pid = pid
+        self.bundle = bundleID
         super.init()
     }
     override var processIdentifier: pid_t { pid }
+    override var bundleIdentifier: String? { bundle }
     override var localizedName: String? { "Quit app" }
 }
 
@@ -47,9 +50,10 @@ private final class QuitApp: NSRunningApplication {
     static func watchGlides(_ c: CanvasController) { c.gliding = true }
 
     /// A window Expanse placed at its canvas spot (laptop display): its real window is there.
-    static func placed(_ id: CGWindowID, pid: pid_t = Fake.firstPID, appName: String = "Example", canvas: CGRect) -> ManagedWindow {
+    static func placed(_ id: CGWindowID, pid: pid_t = Fake.firstPID, bundleID: String = "com.example.app", appName: String = "Example",
+                       canvas: CGRect) -> ManagedWindow {
         let real = canvas.offsetBy(dx: 0, dy: TestDisplay.laptop.menuBar)
-        let w = Fake.window(id: id, pid: pid, appName: appName, canvas: canvas, real: real)
+        let w = Fake.window(id: id, pid: pid, bundleID: bundleID, appName: appName, canvas: canvas, real: real)
         w.lastPlaced = real.origin
         return w
     }
@@ -1072,5 +1076,65 @@ private final class QuitApp: NSRunningApplication {
             #expect(w.canvasFrame.origin != Self.tooTall.origin, "[\(w.id)]")
         }
         #expect(c.canvasPoint(forGlobal: CGPoint(x: 1490, y: 33)) == onScreen.canvasFrame.origin)
+    }
+
+    // MARK: TRACK-46
+
+    static let restarting = "com.example.restarts"
+
+    @Test("TRACK-46 An app that restarts itself gets its windows back at their spots, however long they take to show")
+    func track46a() {
+        Env.withDefaults(["autoCentre": true]) {
+            let old: pid_t = 94_601, safari: pid_t = 94_602, new: pid_t = 94_603
+            let a = Self.placed(4601, pid: old, bundleID: Self.restarting, appName: "Restarts", canvas: CGRect(x: 5000, y: 200, width: 600, height: 400))
+            let b = Self.placed(4602, pid: old, bundleID: Self.restarting, appName: "Restarts", canvas: CGRect(x: 5000, y: 700, width: 600, height: 400))
+            let s = Self.placed(4603, pid: safari, appName: "Safari", canvas: CGRect(x: 300, y: 200, width: 600, height: 500))
+            let c = Self.canvas([a, b, s])
+            defer { Self.finish(c) }
+            Self.watchGlides(c)
+            c.restartSpotsUntil = .distantPast   // running for over 3 minutes
+            var asked: CFTimeInterval?
+            c.clickedOrTyped = { asked = $0; return false }
+            c.appQuit(QuitApp(old))
+            // It quit 2.5s ago (an update), and nothing was clicked or typed since.
+            c.justQuit = c.justQuit.map { (at: $0.at.addingTimeInterval(-2.5), spots: $0.spots) }
+            c.appLaunched(QuitApp(new, bundleID: Self.restarting))
+            #expect(c.restartSpots[new]?.count == 2)
+            #expect(abs(CACurrentMediaTime() - (asked ?? 0) - 2.5) < 0.5, "asked about input since it quit")
+            // Scans while its window stays out of view (Claude's, for hours) change nothing.
+            Fake.regularApp(new)
+            Self.scan(c, [s.scWindow])
+            #expect(c.restartSpots[new]?.count == 2)
+            // It shows where the app puts it, and goes back to its spot.
+            let n = Fake.scWindow(id: 4604, pid: new, bundleID: Self.restarting, appName: "Restarts", frame: CGRect(x: 40, y: 60, width: 600, height: 400))
+            Self.scan(c, [s.scWindow, n], standard: [4604])
+            #expect(Self.window(c, 4604)?.canvasFrame.origin == CGPoint(x: 5000, y: 200))
+            // The other spot waits a little longer (see restartRestKept), until the app quits.
+            #expect(c.restartSpots[new]?.count == 1)
+            c.appQuit(QuitApp(new))
+            #expect(c.restartSpots[new] == nil)
+        }
+    }
+
+    @Test("TRACK-46 Opened again by you, after more than 20s, or another app: no spots kept (TRACK-39)")
+    func track46b() {
+        let old: pid_t = 94_611, new: pid_t = 94_612
+        func quitAndRelaunch(after gap: TimeInterval, input: Bool, launching bundleID: String = Self.restarting) -> [SavedLayout.Window]? {
+            let a = Self.placed(4611, pid: old, bundleID: Self.restarting, canvas: CGRect(x: 5000, y: 200, width: 600, height: 400))
+            let c = Self.canvas([a])
+            defer { Self.finish(c) }
+            c.clickedOrTyped = { _ in input }
+            c.appQuit(QuitApp(old))
+            c.justQuit = c.justQuit.map { (at: $0.at.addingTimeInterval(-gap), spots: $0.spots) }
+            c.appLaunched(QuitApp(new, bundleID: bundleID))
+            return c.restartSpots[new]
+        }
+        #expect(quitAndRelaunch(after: 3, input: false)?.count == 1)
+        // You quit it and opened it again (Spotlight, the Dock): a click or key press in between.
+        #expect(quitAndRelaunch(after: 3, input: true) == nil)
+        // Started again long after it quit.
+        #expect(quitAndRelaunch(after: 21, input: false) == nil)
+        // Another app starting just after.
+        #expect(quitAndRelaunch(after: 3, input: false, launching: "com.example.other") == nil)
     }
 }

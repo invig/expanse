@@ -735,6 +735,9 @@ import AppKit
             let appName = first.app?.localizedName ?? "Expanse Tests"
             await first.quit()
             try await t.trackLine("\(appName) quit", since: mark, timeout: 5)
+            // You, opening it again: a click (on the Dock, say) after it quit. With nothing clicked
+            // or typed, starting again this soon is the app restarting itself (TRACK-46).
+            if let r = realFrame(work.id) { Input.click(at: CGPoint(x: r.midX, y: r.midY)) }
             try await t.pause(3)
             let since = t.log.mark()
             let again = try await t.fixture(name)
@@ -748,6 +751,42 @@ import AppKit
             try t.expect(trackBeside(spot, w), "it's at \(NSStringFromRect(spot)), not beside TRACK-39 Work at \(NSStringFromRect(w))")
             let kept = t.trackLines("keeping ", "window spots", since: mark)
             try t.expect(kept.isEmpty, "Expanse kept the quit app's spots: \(kept.first ?? "")")
+        },
+        Case("TRACK-46", "An app that restarts itself gets its window back at its spot") { t in
+            let name = "Track46-\(Int.random(in: 1000...9999))"
+            let first = try await t.fixture(name)
+            guard let x = first.windows.first else { throw Failure("the app has no window") }
+            try await t.trackOnCanvas([x], "the app's window")
+            let work = try await t.window("TRACK-46 Work")
+            // The app well away from where you're working.
+            try await t.trackPlace([(work.id, trackAt(0, 0)), (x, trackAt(9000, -4000))])
+            try await t.trackShow(work.id)
+            guard let oldSpot = try await t.state().window(x)?.canvas else { throw Failure("the app's window isn't on the canvas") }
+            work.focus()
+            try await t.pause(0.5)
+            let mark = t.log.mark()
+            let appName = first.app?.localizedName ?? "Expanse Tests"
+            await first.quit()
+            try await t.trackLine("\(appName) quit", since: mark, timeout: 5)
+            // Started again straight away with nothing clicked or typed, as an update restarts an
+            // app, and its window out of view until the app's brought to the front, as Claude's was.
+            let again = try await t.fixture(name, hidden: true)
+            try await t.trackLine("\(appName) restarted itself", since: mark, timeout: 5)
+            guard let y = again.windows.first else { throw Failure("it started again with no window") }
+            // Window scans meanwhile (every 5s) leave it alone: nothing of it is on screen.
+            try await t.pause(6)
+            let early = try await t.state().window(y)
+            try t.expect(early == nil, "its window was taken on while out of view")
+            let since = t.log.mark()
+            again.unhide()
+            try await t.pause(0.3)
+            again.activate()
+            try await t.trackOnCanvas([y], "the app's window")
+            _ = try await t.trackLine("[\(y)] back at its spot", since: since, timeout: 8)
+            let s = try await t.settle()
+            guard let spot = s.window(y)?.canvas else { throw Failure("its window left the canvas") }
+            try t.expectNear(spot.origin, oldSpot.origin, "its old spot on the canvas")
+            try await t.noLog("placed new window \(appName)", since: since, within: 0)
         },
     ]
 }
