@@ -7,6 +7,9 @@ What we might build next. New requests go in as they come up, and finished work 
 - An app that restarts itself (an update) gets its windows back at their spots on the canvas, however
   long it keeps them out of view. Claude, restarting while the Mac was locked (11 Nov), showed its
   window hours later, and it came back as a new window beside whatever you were in.
+- Each release also carries its zip as `Expanse.zip`, so
+  `https://github.com/invig/expanse/releases/latest/download/Expanse.zip` always gets the newest
+  (for the Expanse page on matthewsalmon.com).
 
 ## Bugs
 

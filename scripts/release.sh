@@ -1,6 +1,8 @@
 #!/bin/bash
 # Builds a signed, notarised, universal Expanse.app, publishes it as a GitHub release, and points
-# the Homebrew cask at it (scripts/update-cask.sh).
+# the Homebrew cask at it (scripts/update-cask.sh). The release carries the zip twice: as
+# Expanse-<version>.zip (what the app's updater and the cask fetch) and as Expanse.zip, so
+# https://github.com/invig/expanse/releases/latest/download/Expanse.zip always gets the newest.
 #
 # One-time setup:
 #   1. A "Developer ID Application" certificate in your keychain
@@ -56,13 +58,17 @@ spctl --assess --type execute --verbose=2 "$APP"
 echo "==> Packaging"
 ditto -c -k --keepParent "$APP" "$ZIP"
 shasum -a 256 "$ZIP"
+# The same file under a name that doesn't change, for download links (see the top).
+LATEST="$OUT/Expanse.zip"
+cp "$ZIP" "$LATEST"
 
 echo "==> Publishing GitHub release v$VERSION"
-gh release create "v$VERSION" "$ZIP" --title "Expanse $VERSION" --notes-file - <<NOTES
+gh release create "v$VERSION" "$ZIP" "$LATEST" --title "Expanse $VERSION" --notes-file - <<NOTES
 **Your Mac, on an infinite canvas.**
 
 Download \`Expanse-$VERSION.zip\`, unzip, and move **Expanse.app** to Applications. It's signed and
-notarised by Apple, and runs on macOS 15 or later (Apple Silicon and Intel).
+notarised by Apple, and runs on macOS 15 or later (Apple Silicon and Intel). \`Expanse.zip\` is the
+same file.
 
 On first launch a short walkthrough sets up the two permissions Expanse needs (Accessibility and
 Screen Recording) and shows the shortcuts. See the [README](https://github.com/invig/expanse#readme)

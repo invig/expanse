@@ -83,7 +83,9 @@ again after every rebuild.
 
 To publish a release (signed, notarised, universal), run `scripts/release.sh`; the script's
 header covers the one-time setup. It also points the Homebrew cask in
-[invig/homebrew-tap](https://github.com/invig/homebrew-tap) at the new release. Installed copies
+[invig/homebrew-tap](https://github.com/invig/homebrew-tap) at the new release. Each release has
+the zip twice, as `Expanse-<version>.zip` and as `Expanse.zip`, so a download link to
+`https://github.com/invig/expanse/releases/latest/download/Expanse.zip` always gets the newest. Installed copies
 pick it up from GitHub within a day; development builds are signed differently and never update.
 
 Don't run a copy with a different signature from your development build (a release, say) on the
