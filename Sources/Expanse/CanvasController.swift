@@ -123,6 +123,10 @@ final class CanvasController: NSObject {
     /// The windows in the scan being applied (see tabTakingOver).
     private var scannedIDs = Set<CGWindowID>()
 
+    /// How much taller or shorter a tab's window can be than the one it takes over from: the tab
+    /// bar's height, which macOS adds with a window's first new tab (see tabTakingOver).
+    private static let tabBarAllowance: CGFloat = 60
+
     /// The tab `w` takes over from. macOS shows each tab as a window of its own, at the tab
     /// group's frame, and only the front tab's is on screen: so a window that appears exactly where
     /// a window of the same app has just gone is that app's next tab, not a new window.
@@ -130,22 +134,43 @@ final class CanvasController: NSObject {
     private func tabTakingOver(from w: ManagedWindow, at real: CGRect) -> (id: CGWindowID, canvasFrame: CGRect, originalFrame: CGRect,
                                                                          preferredSize: CGSize, home: CGPoint?, lastPlaced: CGPoint?, parked: Bool)? {
         func near(_ a: CGPoint, _ b: CGPoint) -> Bool { abs(a.x - b.x) <= 2 && abs(a.y - b.y) <= 2 }
-        func sameSize(_ s: CGSize) -> Bool { abs(s.width - real.width) <= 2 && abs(s.height - real.height) <= 2 }
-        // Where the other tab was: on screen at its canvas spot, or parked (with the group).
-        func wasHere(canvas: CGRect, placed: CGPoint?, parked: Bool) -> Bool {
-            guard sameSize(canvas.size) else { return false }
-            if parked { return inParkingCorner(real.origin) }
-            return near(canvas.origin, w.canvasFrame.origin) || placed.map { near($0, real.origin) } == true
+        // The same size, or taller or shorter by a tab bar: one comes with a window's first new tab
+        // and goes with its last. Terminal keeps its rows, so its window grows by the bar, upwards.
+        func fits(_ s: CGSize) -> Bool {
+            abs(s.width - real.width) <= 2 && abs(s.height - real.height) <= Self.tabBarAllowance
         }
-        if let tab = windows.first(where: { $0.pid == w.pid && $0.id != w.id && !scannedIDs.contains($0.id)
-                                            && wasHere(canvas: $0.canvasFrame, placed: $0.lastPlaced, parked: $0.parked) }) {
-            return (tab.id, tab.canvasFrame, tab.originalFrame, tab.preferredSize, tab.home, tab.lastPlaced, tab.parked)
+        // Whether the other tab was here: on screen at its canvas spot, or parked (with the group).
+        // How far up its top is now: 0 if it kept its top-left, the change in height if it kept
+        // its bottom edge instead. Nil if it wasn't here.
+        func rise(canvas: CGRect, placed: CGPoint?, parked: Bool) -> CGFloat? {
+            guard fits(canvas.size) else { return nil }
+            if parked { return inParkingCorner(real.origin) ? 0 : nil }
+            for r in [0, real.height - canvas.height] {
+                if near(canvas.origin, CGPoint(x: w.canvasFrame.minX, y: w.canvasFrame.minY + r)) { return r }
+                if let placed, near(placed, CGPoint(x: real.minX, y: real.minY + r)) { return r }
+            }
+            return nil
+        }
+        // Its spot, chosen size, home and macOS frame take the window's new height (the tab bar
+        // came or went), keeping the edge the app kept: otherwise its size goes back, squashing it.
+        func taking(_ id: CGWindowID, _ canvas: CGRect, _ original: CGRect, _ preferred: CGSize, _ home: CGPoint?,
+                    _ placed: CGPoint?, _ parked: Bool, rise r: CGFloat)
+            -> (id: CGWindowID, canvasFrame: CGRect, originalFrame: CGRect, preferredSize: CGSize, home: CGPoint?, lastPlaced: CGPoint?, parked: Bool) {
+            let dh = real.height - canvas.height
+            guard abs(dh) > 2 else { return (id, canvas, original, preferred, home, placed, parked) }
+            func up(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x, y: p.y - r) }
+            return (id, CGRect(origin: up(canvas.origin), size: CGSize(width: canvas.width, height: real.height)),
+                    CGRect(origin: up(original.origin), size: CGSize(width: original.width, height: original.height + dh)),
+                    CGSize(width: preferred.width, height: preferred.height + dh), home.map(up), placed.map(up), parked)
+        }
+        for tab in windows where tab.pid == w.pid && tab.id != w.id && !scannedIDs.contains(tab.id) {
+            guard let r = rise(canvas: tab.canvasFrame, placed: tab.lastPlaced, parked: tab.parked) else { continue }
+            return taking(tab.id, tab.canvasFrame, tab.originalFrame, tab.preferredSize, tab.home, tab.lastPlaced, tab.parked, rise: r)
         }
         // Gone a moment before (the scan that saw it go came first).
-        if let (id, tab) = recentlyRemoved.first(where: { $0.key != w.id && $0.value.pid == w.pid
-                                                            && Date().timeIntervalSince($0.value.at) < 2
-                                                            && wasHere(canvas: $0.value.canvasFrame, placed: nil, parked: $0.value.parked) }) {
-            return (id, tab.canvasFrame, tab.originalFrame, tab.preferredSize, tab.home, nil, tab.parked)
+        for (id, tab) in recentlyRemoved where id != w.id && tab.pid == w.pid && Date().timeIntervalSince(tab.at) < 2 {
+            guard let r = rise(canvas: tab.canvasFrame, placed: nil, parked: tab.parked) else { continue }
+            return taking(id, tab.canvasFrame, tab.originalFrame, tab.preferredSize, tab.home, nil, tab.parked, rise: r)
         }
         return nil
     }
@@ -2437,6 +2462,8 @@ final class CanvasController: NSObject {
         if live, let tab = tabTakingOver(from: w, at: f) {
             // A new tab, or another tab brought to the front: it takes the group's spot (where
             // it already is), instead of being placed as a new window, which would move the group.
+            let before = windows.first { $0.id == tab.id }?.canvasFrame.height ?? recentlyRemoved[tab.id]?.canvasFrame.height ?? f.height
+            let bar = f.height - before
             recentlyRemoved.removeValue(forKey: w.id)
             w.canvasFrame = tab.canvasFrame
             w.originalFrame = tab.originalFrame
@@ -2445,7 +2472,7 @@ final class CanvasController: NSObject {
             w.lastPlaced = tab.lastPlaced
             w.parked = tab.parked
             returning = true
-            logger.info("tab \(w.appName, privacy: .public)[\(w.id)] takes over from [\(tab.id)]")
+            logger.info("tab \(w.appName, privacy: .public)[\(w.id)] takes over from [\(tab.id)]\(abs(bar) > 2 ? ", \(Int(bar))pt taller (the tab bar)" : "", privacy: .public)")
         } else if let back = recentlyRemoved.removeValue(forKey: w.id) {
             // Came back (minimised, hidden, another Space, briefly missing during a display
             // change): same spot, same macOS original and chosen size.

@@ -317,6 +317,61 @@ import AppKit
                 return hypot(real.minX - s.screenPoint(w.canvas.origin).x, real.minY - s.screenPoint(w.canvas.origin).y) < 3
             }
         },
+        Case("PLACE-19", "A window's first new tab keeps its spot when the tab bar makes it taller") { t in
+            try t.needsInput()
+            let wasRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == "com.apple.Terminal" }
+            let before = Set(placeTerminalWindows())
+            let folder = try placeFolders("PLACE-19", count: 1)
+            defer {
+                placeRemove(folder)
+                if !wasRunning { NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == "com.apple.Terminal" }?.terminate() }
+            }
+            // A Terminal window of its own (opening a folder in Terminal opens a new window there).
+            try t.open(folder[0].path, in: "Terminal")
+            var first: CGWindowID = 0
+            try await t.until("a new Terminal window", timeout: 10) {
+                first = placeTerminalWindows().first { !before.contains($0) } ?? 0
+                return first != 0
+            }
+            try await t.until("Expanse to take the Terminal window on", timeout: 10) { try await t.state().window(first) != nil }
+            let spot = placeClearSpot(try await t.state())
+            t.link("place", ["id": first, "x": Int(spot.x), "y": Int(spot.y), "commit": 1])
+            try await t.settle()
+            // Working in it: at 100%, Terminal in front.
+            t.link("focus", ["id": first])
+            try await t.until("Terminal in front, its window in view", timeout: 10) {
+                let s = try await t.settle()
+                return !s.active && s.window(first)?.parked == false && NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.Terminal"
+            }
+            let s0 = try await t.settle()
+            let old = try s0.placeFrame(first)
+            let mark = t.log.mark()
+            Input.key(.t, .maskCommand)
+            var takeover = ""
+            try await t.until("Expanse to take the new tab as the window's", timeout: 8) {
+                let lines = t.log.lines(since: mark)
+                if let placed = lines.first(where: { $0.hasPrefix("placed new window Terminal") }) {
+                    throw Failure("the new tab was placed as a new window, moving the tab group: \(placed)")
+                }
+                takeover = lines.first { $0.hasPrefix("tab Terminal[") && $0.contains("takes over from [\(first)]") } ?? ""
+                return !takeover.isEmpty
+            }
+            guard takeover.contains("pt taller") else {
+                throw Skip("Terminal's window kept its height with the new tab (its tab bar shows already?), so this doesn't show the bug: \(takeover)")
+            }
+            try await t.pause(1)
+            let s1 = try await t.settle()
+            guard let tab = placeTerminalWindows().first(where: { !before.contains($0) && $0 != first && s1.window($0) != nil })
+            else { throw Failure("the new tab isn't on the canvas") }
+            let f = try s1.placeFrame(tab)
+            try t.expect(abs(f.minX - old.minX) <= 2 && abs(f.width - old.width) <= 2 && (abs(f.maxY - old.maxY) <= 2 || abs(f.minY - old.minY) <= 2),
+                         "the tab group should keep its spot, its bottom (or top) edge where it was: it was at \(old), the new tab is at \(f)")
+            try t.expectNear(s1.camera, s0.camera, within: 2, "the view (it shouldn't glide anywhere)")
+            // Close both tabs.
+            Input.key(.w, .maskCommand)
+            try await t.pause(0.5)
+            Input.key(.w, .maskCommand)
+        },
     ]
 }
 
@@ -463,6 +518,17 @@ private func placeAXFrame(_ e: AXUIElement) -> CGRect? {
 private func placeAXClose(_ window: AXUIElement) {
     guard let button = placeAXElement(window, kAXCloseButtonAttribute) else { return }
     AXUIElementPerformAction(button, kAXPressAction as CFString)
+}
+
+/// Terminal's windows on screen. (It keeps invisible ones too, a screen wide and 33pt tall.)
+private func placeTerminalWindows() -> [CGWindowID] {
+    let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+    return info.compactMap { w in
+        guard w[kCGWindowOwnerName as String] as? String == "Terminal", (w[kCGWindowLayer as String] as? Int) == 0,
+              let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b),
+              r.width >= 100, r.height >= 100, let id = w[kCGWindowNumber as String] as? CGWindowID else { return nil }
+        return id
+    }
 }
 
 private func placeAXMinimise(_ window: AXUIElement, _ on: Bool) {

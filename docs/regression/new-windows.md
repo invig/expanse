@@ -232,3 +232,17 @@
 - **Expected:** Step 1: the new window follows the pointer; nothing else moves and the view stays. Step 2: it goes beside the window it came from, 20pt away and lined up, as any new window (PLACE-03; a glide if that's out of view). Step 3: nothing happens.
 - **Check in log:** `scans wait: mouse button held` while you drag; `tracking <App> [<id>]` and `placed new window <App> at … beside <App>[<its window>] …` only after you let go.
 - **Automate:** manual: end-to-end in the VM (PLACE-18, with a fixture app that tears a window off as Chrome does), the wait in a unit test (`buttonHeld`).
+
+## PLACE-19 A window's first new tab keeps its spot when the tab bar makes it taller
+- **Type:** Bug fix
+- **Area:** PLACE
+- **Commits:** unreleased (16 Nov)
+- **Before:** A window's first new tab brings the tab bar. Terminal keeps its rows, so its window grows by the bar (36pt), upwards. A tab only counted as one if it was the same size as the window it took over from, so the new tab looked like a new window: Expanse put it beside the old one and glided there, and the Terminal window jumped to a new spot.
+- **Setup:** A Terminal window with one tab, at a known spot on the canvas, with windows either side.
+- **Steps:**
+  1. At 100%, click into the Terminal window and press ⌘T.
+  2. Press ⌘T again, then close both new tabs (⌘W).
+  3. Zoom out and look.
+- **Expected:** The window keeps its spot each time: its left edge, width and bottom edge stay where they were, and it grows upwards by the tab bar when the bar appears (and shrinks back when it goes). The view doesn't move, and nothing else does either.
+- **Check in log:** `tab Terminal[<new id>] takes over from [<old id>], 36pt taller (the tab bar)`, and no `placed new window Terminal`.
+- **Automate:** unit: CanvasController.tabTakingOver (a tab up to 60pt taller or shorter, at the same width, keeping its top or its bottom edge; its spot, chosen size and macOS frame take the new height), through a window scan, parked too. End-to-end: ⌘T in a real Terminal window.

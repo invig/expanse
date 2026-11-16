@@ -417,6 +417,83 @@ import ScreenCaptureKit
         #expect(tab(real, pid: 91_003) == nil)
     }
 
+    // MARK: PLACE-19
+
+    /// A Terminal window (rows of text: its height snaps to them), neighbours either side.
+    static func terminalWithNeighbours() -> (CanvasController, ManagedWindow, [ManagedWindow]) {
+        let terminal: pid_t = 91_901
+        let t = Self.placed(1901, pid: terminal, appName: "Terminal", canvas: CGRect(x: 400, y: 300, width: 933, height: 912))
+        t.preferredSize = CGSize(width: 933, height: 912)
+        let left = Self.placed(1902, pid: 91_902, canvas: CGRect(x: 0, y: 300, width: 380, height: 400))
+        let right = Self.placed(1903, pid: 91_902, canvas: CGRect(x: 1353, y: 300, width: 400, height: 400))
+        let c = Self.canvas([left, t, right])
+        Self.watchGlides(c)
+        return (c, t, [left, right])
+    }
+
+    @Test("PLACE-19 A window's first new tab keeps its spot when the tab bar makes it taller")
+    func place19() {
+        let (c, t, neighbours) = Self.terminalWithNeighbours()
+        defer { Self.finish(c) }
+        let spot = t.canvasFrame
+        let before = neighbours.map(\.canvasFrame)
+        // ⌘T: the tab bar appears, 36pt tall. Terminal keeps its rows, so the new tab's window is
+        // 36pt taller, its bottom edge where it was.
+        let real = Self.real(spot, c)
+        let taller = CGRect(x: real.minX, y: real.minY - 36, width: real.width, height: real.height + 36)
+        let tab = Self.newWindow(1911, pid: t.pid, appName: "Terminal", at: taller)
+        Self.scan(c, neighbours.map(\.scWindow) + [tab], standard: [1911])
+        let n = try? #require(Self.window(c, 1911))
+        #expect(n?.canvasFrame == CGRect(x: spot.minX, y: spot.minY - 36, width: spot.width, height: spot.height + 36))
+        // Its chosen size has the bar in it too, so Expanse doesn't squash it back.
+        #expect(n?.preferredSize == CGSize(width: 933, height: 948))
+        #expect(neighbours.map(\.canvasFrame) == before)
+        #expect(c.glideGeneration == 0)
+    }
+
+    @Test("PLACE-19 A tab bar coming or going, at either edge, is a tab; more than that, or another width, isn't")
+    func place19b() {
+        let (c, t, _) = Self.terminalWithNeighbours()
+        defer { Self.finish(c) }
+        let real = Self.real(t.canvasFrame, c)
+        func tab(_ frame: CGRect) -> CGWindowID? {
+            let sc = Fake.scWindow(id: 1913, pid: t.pid, frame: frame)
+            let w = ManagedWindow(scWindow: sc, canvasFrame: CGRect(origin: c.canvasPoint(forGlobal: frame.origin), size: frame.size))
+            c.scannedIDs = [1913]
+            return c.tabTakingOver(from: w, at: frame)?.id
+        }
+        func resized(_ dh: CGFloat, keepingBottom: Bool) -> CGRect {
+            CGRect(x: real.minX, y: keepingBottom ? real.minY - dh : real.minY, width: real.width, height: real.height + dh)
+        }
+        #expect(tab(resized(36, keepingBottom: true)) == 1901)    // the bar appears (Terminal)
+        #expect(tab(resized(36, keepingBottom: false)) == 1901)   // the bar appears, top kept
+        #expect(tab(resized(-36, keepingBottom: true)) == 1901)   // the bar goes
+        #expect(tab(resized(61, keepingBottom: true)) == nil)     // taller than any tab bar
+        #expect(tab(CGRect(x: real.minX, y: real.minY - 36, width: real.width + 3, height: real.height + 36)) == nil)
+        // Taller, but neither edge where it was.
+        #expect(tab(CGRect(x: real.minX, y: real.minY - 18, width: real.width, height: real.height + 36)) == nil)
+    }
+
+    @Test("PLACE-19 A parked tab group's first new tab keeps its spot, at its new height")
+    func place19c() {
+        let terminal: pid_t = 91_911
+        let t = Fake.window(id: 1921, pid: terminal, appName: "Terminal", canvas: CGRect(x: 6000, y: 300, width: 933, height: 912),
+                            real: CGRect(x: 1511, y: 948, width: 933, height: 912))
+        t.parked = true
+        t.lastPlaced = CGPoint(x: 1511, y: 948)
+        let c = Self.canvas([t])
+        defer { Self.finish(c) }
+        Self.watchGlides(c)
+        // The new tab, in the corner with the group, 36pt taller.
+        let tab = Self.newWindow(1922, pid: terminal, appName: "Terminal", at: CGRect(x: 1511, y: 948, width: 933, height: 948))
+        Self.scan(c, [tab], standard: [1922])
+        let n = try? #require(Self.window(c, 1922))
+        #expect(n?.canvasFrame.origin == CGPoint(x: 6000, y: 300))
+        #expect(n?.canvasFrame.height == 948)
+        #expect(n?.parked == true)
+        #expect(c.glideGeneration == 0)
+    }
+
     // MARK: PLACE-11
 
     @Test("PLACE-11 Switching tabs keeps the window's spot")

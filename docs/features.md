@@ -4,7 +4,8 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- A window's first new tab keeps its spot when the tab bar makes it taller: a new tab in Terminal no
+  longer sends the window to a new spot (16 Nov).
 
 ## Bugs
 
