@@ -4,8 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- A window's first new tab keeps its spot when the tab bar makes it taller: a new tab in Terminal no
-  longer sends the window to a new spot (16 Nov).
+Nothing yet.
 
 ## Bugs
 
@@ -98,6 +97,8 @@ Not decided yet.
 
 ## Done
 
+- 0.1.47: A window's first new tab keeps its spot when the tab bar makes it taller: a new tab in
+  Terminal no longer sends the window to a new spot.
 - 0.1.46: An app that restarts itself (an update) gets its windows back at their spots on the
   canvas, however long it keeps them out of view. Each release also carries its zip as
   `Expanse.zip`, so `https://github.com/invig/expanse/releases/latest/download/Expanse.zip` always

@@ -236,7 +236,7 @@
 ## PLACE-19 A window's first new tab keeps its spot when the tab bar makes it taller
 - **Type:** Bug fix
 - **Area:** PLACE
-- **Commits:** unreleased (16 Nov)
+- **Commits:** 146fe9d (0.1.47)
 - **Before:** A window's first new tab brings the tab bar. Terminal keeps its rows, so its window grows by the bar (36pt), upwards. A tab only counted as one if it was the same size as the window it took over from, so the new tab looked like a new window: Expanse put it beside the old one and glided there, and the Terminal window jumped to a new spot.
 - **Setup:** A Terminal window with one tab, at a known spot on the canvas, with windows either side.
 - **Steps:**
