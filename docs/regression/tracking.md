@@ -583,7 +583,7 @@
 ## TRACK-47 Closing the window you're in goes back to the window you were in before
 - **Type:** Feature
 - **Area:** TRACK
-- **Commits:** unreleased (16 Nov)
+- **Commits:** 588d472 (0.1.48)
 - **Setup:** At 100%, auto-centre on. A Safari window S, and far from it two Finder windows, F1 and F2, F2 far from both.
 - **Steps:**
   1. Click S, then go to F1 (⌃ + arrow keys, or ⌘-Tab).

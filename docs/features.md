@@ -4,9 +4,7 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-- Closing the window you're in at 100% goes back to the window you were in before it, any app's:
-  it gets the keyboard, and the view glides to it if it isn't on screen (TRACK-47). Before, the
-  view stayed put and macOS's pick, often a window out of view, had the keyboard.
+Nothing yet.
 
 ## Bugs
 
@@ -98,6 +96,9 @@ Not decided yet.
 
 ## Done
 
+- 0.1.48: Closing the window you're in at 100% goes back to the window you were in before it, any
+  app's: it gets the keyboard, and the view glides to it if it isn't on screen. Before, the view
+  stayed put and macOS's pick, often a window out of view, had the keyboard.
 - 0.1.47: A window's first new tab keeps its spot when the tab bar makes it taller: a new tab in
   Terminal no longer sends the window to a new spot.
 - 0.1.46: An app that restarts itself (an update) gets its windows back at their spots on the
