@@ -4,7 +4,9 @@ What we might build next. New requests go in as they come up, and finished work 
 
 ## Not released yet
 
-Nothing yet.
+- Closing the window you're in at 100% goes back to the window you were in before it, any app's:
+  it gets the keyboard, and the view glides to it if it isn't on screen (TRACK-47). Before, the
+  view stayed put and macOS's pick, often a window out of view, had the keyboard.
 
 ## Bugs
 
@@ -21,9 +23,8 @@ the Mac with an empty desktop and Brave full screen. Icons stopped about 33pt in
 20pt in, in their right places. Not reproduced there or in the VM. SPACES-28 may not be the whole
 cause; if it comes back, see whether reopening the canvas clears it.
 
-To check (6 Nov): TRACK-35 fails on 0.1.43 in the VM, three times out of three, untouched main
-included: after a window closes, going to Finder and back to the app doesn't glide to its other
-window. UI-34 fails on main too, and has a session of its own.
+To check (6 Nov): UI-34 fails on main in the VM, and has a session of its own. (TRACK-35 failed
+there too; it was rewritten for TRACK-47 and passes.)
 
 If a new window doesn't make it onto the canvas, the log says why (look for "not on the canvas"
 in Copy Logs for a Bug Report).

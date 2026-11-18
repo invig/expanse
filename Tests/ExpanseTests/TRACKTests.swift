@@ -796,18 +796,28 @@ private final class QuitApp: NSRunningApplication {
 
     // MARK: TRACK-35 (manual)
 
-    @Test("TRACK-35 Closing a window keeps the view where it is (logic)")
+    @Test("TRACK-35 Closing a window doesn't glide to the app's other window (logic)")
     func track35() {
         Env.withDefaults(["autoCentre": true]) {
             let f2 = Self.parked(3502, pid: 93_501, canvas: CGRect(x: 6000, y: 200, width: 600, height: 400))
             let c = Self.canvas([f2])
             defer { Self.finish(c) }
             Self.watchGlides(c)
-            // F1 just closed; macOS gives F2 focus.
-            c.lastClose = (pid: 93_501, at: CACurrentMediaTime())
+            c.clickedOrTyped = { _ in false }
+            // F1, the only window you'd been in, just closed; macOS gives F2 focus.
+            c.focusHistory = [3501]
+            c.lastClose = (pid: 93_501, id: 3501, at: CACurrentMediaTime())
             c.focusSettled(on: f2.id)
             #expect(c.glideTarget == nil)
-            // Without a close just before, focus going to it is followed.
+            #expect(c.lastFocusRequest == nil)
+            // A click or key press of yours since the close: followed.
+            c.clickedOrTyped = { _ in true }
+            c.focusSettled(on: f2.id)
+            #expect(c.glideTarget === f2)
+            // So is focus going to it without a close just before.
+            c.cancelAnimation()
+            c.glideTarget = nil
+            c.clickedOrTyped = { _ in false }
             c.lastClose = nil
             c.focusSettled(on: f2.id)
             #expect(c.glideTarget === f2)
@@ -1136,5 +1146,121 @@ private final class QuitApp: NSRunningApplication {
         #expect(quitAndRelaunch(after: 21, input: false) == nil)
         // Another app starting just after.
         #expect(quitAndRelaunch(after: 3, input: false, launching: "com.example.other") == nil)
+    }
+
+    // MARK: TRACK-47
+
+    /// You were in S (another app's window), then F1; F1 closes and macOS gives focus to F2, the
+    /// app's other window, parked far off. `s` is S's canvas spot.
+    static func closeAfter(_ s: CGRect, autoCentre: Bool = true, _ check: (CanvasController, ManagedWindow, ManagedWindow) -> Void) {
+        Env.withDefaults(["autoCentre": autoCentre]) {
+            let finder: pid_t = 94_701
+            let back = Self.placed(4701, pid: 94_702, appName: "Safari", canvas: s)
+            let f1 = Self.placed(4702, pid: finder, appName: "Finder", canvas: CGRect(x: 700, y: 300, width: 500, height: 400))
+            let f2 = Self.parked(4703, pid: finder, canvas: CGRect(x: 6000, y: 3000, width: 500, height: 400))
+            let c = Self.canvas([back, f1, f2])
+            defer { Self.finish(c) }
+            Self.watchGlides(c)
+            c.clickedOrTyped = { _ in false }
+            c.focusHistory = [back.id, f1.id]
+            c.closedWindows.insert(f1.id)
+            c.lastClose = (pid: finder, id: f1.id, at: CACurrentMediaTime())
+            c.focusSettled(on: f2.id)
+            check(c, back, f2)
+        }
+    }
+
+    @Test("TRACK-47 Closing the window you're in goes back to the one before: on screen, it just gets focus (logic)")
+    func track47a() {
+        Self.closeAfter(CGRect(x: 100, y: 300, width: 500, height: 400)) { c, back, _ in
+            #expect(c.glideTarget == nil)
+            #expect(c.animation == nil)
+            #expect(c.lastFocusRequest?.id == back.id)
+            // macOS's pick had focus only for a moment: it isn't a window you were in.
+            #expect(c.focusHistory == [back.id, 4702, back.id])
+        }
+    }
+
+    @Test("TRACK-47 Off screen, the view glides back to it; with auto-centre off only one on screen gets focus (logic)")
+    func track47b() {
+        let far = CGRect(x: -6000, y: 300, width: 500, height: 400), part = CGRect(x: -300, y: 300, width: 500, height: 400)
+        Self.closeAfter(far) { c, back, _ in
+            #expect(c.glideTarget === back)
+            #expect(c.focusHistory == [back.id, 4702])
+        }
+        Self.closeAfter(part) { c, back, _ in
+            #expect(c.glideTarget === back) // partly in view: centred, as a click on it would be
+        }
+        Self.closeAfter(far, autoCentre: false) { c, _, _ in
+            #expect(c.glideTarget == nil)
+            #expect(c.lastFocusRequest == nil)
+        }
+        Self.closeAfter(part, autoCentre: false) { c, back, _ in
+            #expect(c.glideTarget == nil)
+            #expect(c.lastFocusRequest?.id == back.id)
+        }
+    }
+
+    @Test("TRACK-47 The window before can be macOS's pick; closed ones are skipped; the history is capped (logic)")
+    func track47c() {
+        Env.withDefaults(["autoCentre": true]) {
+            let pid: pid_t = 94_711
+            let f2 = Self.parked(4712, pid: pid, canvas: CGRect(x: 6000, y: 200, width: 500, height: 400))
+            let c = Self.canvas([f2])
+            defer { Self.finish(c) }
+            Self.watchGlides(c)
+            c.clickedOrTyped = { _ in false }
+            // You were in F2, then F3 (closed a moment ago, not yet off the canvas), then F1.
+            c.focusHistory = [f2.id, 4713, 4711]
+            c.closedWindows.insert(4713)
+            c.lastClose = (pid: pid, id: 4711, at: CACurrentMediaTime())
+            c.focusSettled(on: f2.id)
+            #expect(c.glideTarget === f2)
+            // At most 64 kept, the latest.
+            for id in CGWindowID(1)...100 { c.noteFocus(id) }
+            #expect(c.focusHistory.count == 64 && c.focusHistory.last == 100)
+            c.noteFocus(100)
+            #expect(c.focusHistory.count == 64, "the same window again isn't another entry")
+        }
+    }
+
+    @Test("TRACK-47 Not the window you were in, or its next tab taking over: no going back (logic)")
+    func track47d() {
+        Env.withDefaults(["autoCentre": true]) {
+            let pid: pid_t = 94_721
+            let back = Self.placed(4721, pid: 94_722, canvas: CGRect(x: 100, y: 300, width: 500, height: 400))
+            let f2 = Self.parked(4723, pid: pid, canvas: CGRect(x: 6000, y: 200, width: 500, height: 400))
+            let c = Self.canvas([back, f2])
+            defer { Self.finish(c) }
+            Self.watchGlides(c)
+            c.clickedOrTyped = { _ in false }
+            // A window of the app you weren't in closed (its red button, from behind).
+            c.focusHistory = [4722, back.id]
+            c.lastClose = (pid: pid, id: 4722, at: CACurrentMediaTime())
+            c.focusSettled(on: f2.id)
+            #expect(c.glideTarget == nil && c.lastFocusRequest == nil)
+        }
+        // A tab closes, and the next one of the same window gets focus where it was: 36pt shorter
+        // (its tab bar gone), bottom edge kept. The window's partly off screen.
+        let gone = CGRect(x: 1200, y: 300, width: 600, height: 436), next = CGRect(x: 1200, y: 336, width: 600, height: 400)
+        #expect(CanvasController.sameWindowNextTab(next, gone))
+        #expect(CanvasController.sameWindowNextTab(gone, gone))
+        #expect(!CanvasController.sameWindowNextTab(next.offsetBy(dx: 30, dy: 0), gone))
+        #expect(!CanvasController.sameWindowNextTab(CGRect(x: 1200, y: 360, width: 600, height: 300), gone))
+        Env.withDefaults(["autoCentre": true]) {
+            let pid: pid_t = 94_731
+            let back = Self.placed(4731, pid: 94_732, canvas: CGRect(x: 100, y: 300, width: 500, height: 400))
+            let tab = Self.placed(4733, pid: pid, canvas: next)
+            let c = Self.canvas([back, tab])
+            defer { Self.finish(c) }
+            Self.watchGlides(c)
+            c.clickedOrTyped = { _ in false }
+            c.recentlyRemoved[4732] = CanvasController.Departed(pid: pid, bundleID: "com.example.app", appName: "Example", title: "", canvasFrame: gone,
+                                               originalFrame: gone, preferredSize: gone.size, home: nil, parked: false, at: Date(), closed: true)
+            c.focusHistory = [back.id, 4732]
+            c.lastClose = (pid: pid, id: 4732, at: CACurrentMediaTime())
+            c.focusSettled(on: tab.id)
+            #expect(c.glideTarget == nil && c.lastFocusRequest == nil)
+        }
     }
 }

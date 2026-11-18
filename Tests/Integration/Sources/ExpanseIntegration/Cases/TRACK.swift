@@ -562,38 +562,40 @@ import AppKit
             t.link("exit")
             try await t.until("back at 100%") { try await !t.settle().active }
         },
-        Case("TRACK-35", "Closing a window keeps the view where it is") { t in
+        Case("TRACK-35", "Closing a window doesn't glide to the app's other window") { t in
             let old = expanseDefault("autoCentre")
             setExpanseDefault("autoCentre", true)
             defer { setExpanseDefault("autoCentre", old) }
-            let f = try await t.fixture("Track35", windows: 2)
+            let f = try await t.fixture("Track35", windows: 2, size: CGSize(width: 400, height: 300))
             guard f.windows.count == 2, let pid = f.pid else { throw Failure("the fixture should have two windows") }
             let f1 = f.windows[0], f2 = f.windows[1]
+            let beside = try await t.window("TRACK-35 Beside", CGRect(x: 200, y: 200, width: 400, height: 300))
             try await t.trackOnCanvas([f1, f2], "the app's two windows")
-            try await t.trackPlace([(f1, trackAt(0, 0)), (f2, trackAt(8000, 3000))])
-            // F1 in view, with the keyboard; F2 far off screen.
-            try await t.trackShow(f1)
+            try await t.trackPlace([(f1, trackAt(0, 0)), (beside.id, trackAt(420, 0)), (f2, trackAt(8000, 3000))])
+            // You were in Beside, then F1, both in view; F2 far off screen.
+            try await t.trackShow(beside.id)
+            try await trackKeyboard(t, beside)
+            let s = try await t.trackShow(f1)
             try await t.until("F1 with the keyboard", timeout: 4) { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid }
+            guard let bf = s.window(beside.id)?.canvas, s.visibleCanvas.insetBy(dx: -1, dy: -1).contains(bf) else {
+                throw Failure("Beside should be in view with F1")
+            }
             // Past the second after Expanse focused F1, in which another window of the app taking
             // focus is put right (see focusSettled): closing F1 is something you do later.
             try await t.pause(1.2)
             let before = try await t.settle()
             let mark = t.log.mark()
-            // ⌘W in F1; macOS gives F2 the keyboard.
+            // F1 closes; macOS gives F2 the keyboard, and Expanse gives it to Beside, in view (TRACK-47).
             try await f.closeWindow(0)
-            try await t.trackLine("[\(f2)] got focus after a window of its app closed; the view stays", since: mark, timeout: 4)
-            try await t.pause(2)
+            try await t.trackLine("[\(f2)] got focus after [\(f1)] closed; back to ", "[\(beside.id)]", "on screen", since: mark, timeout: 4)
+            try await trackKeyboard(t, beside)
+            try await t.pause(1.5)
             let after = try await t.settle()
             try t.expectNear(after.camera, before.camera, within: 1, "the view after F1 closed")
-            let glides = t.trackLines("glide to ", "[\(f2)]", since: mark)
-            try t.expect(glides.isEmpty, "Expanse glided to F2 after F1 closed: \(glides.first ?? "")")
+            let glides = t.trackLines("glide to ", since: mark)
+            try t.expect(glides.isEmpty, "Expanse glided after F1 closed: \(glides.first ?? "")")
             try t.expect(after.window(f1) == nil, "F1 should be off the canvas")
-            // Afterwards, a switch of yours to the app is followed as usual: away to Finder, and back.
-            guard let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first else {
-                throw Skip("the rest passed; switching back needs Finder running")
-            }
-            await bringForward(finder)
-            try await t.pause(1.5)
+            // Afterwards, a switch of yours to the app is followed as usual: to F2, its window.
             let since = t.log.mark()
             await trackActivate(f)
             try await t.trackLine("glide to ", "[\(f2)]", since: since, timeout: 8)
@@ -788,6 +790,31 @@ import AppKit
             try t.expectNear(spot.origin, oldSpot.origin, "its old spot on the canvas")
             try await t.noLog("placed new window \(appName)", since: since, within: 0)
         },
+        Case("TRACK-47", "Closing the window you're in goes back to the one you were in before") { t in
+            let old = expanseDefault("autoCentre")
+            setExpanseDefault("autoCentre", true)
+            defer { setExpanseDefault("autoCentre", old) }
+            let f = try await t.fixture("Track47", windows: 2, size: CGSize(width: 400, height: 300))
+            guard f.windows.count == 2, let pid = f.pid else { throw Failure("the fixture should have two windows") }
+            let f1 = f.windows[0], f2 = f.windows[1]
+            let before = try await t.window("TRACK-47 Before", CGRect(x: 200, y: 200, width: 400, height: 300))
+            try await t.trackOnCanvas([f1, f2], "the app's two windows")
+            try await t.trackPlace([(before.id, trackAt(0, 0)), (f1, trackAt(6000, 0)), (f2, trackAt(8000, 3000))])
+            // You were in Before, then F1, far apart; F2, the app's other window, far from both.
+            try await t.trackShow(before.id)
+            try await trackKeyboard(t, before)
+            try await t.trackShow(f1)
+            try await t.until("F1 with the keyboard", timeout: 4) { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid }
+            try await t.pause(1.2)
+            let mark = t.log.mark()
+            // F1 closes: macOS gives F2 the keyboard; the view glides back to Before, which gets it.
+            try await f.closeWindow(0)
+            try await t.trackLine("[\(f2)] got focus after [\(f1)] closed; back to ", "[\(before.id)]", "gliding to it", since: mark, timeout: 4)
+            try await t.trackViewOn(before.id, "the view back on Before")
+            try await trackKeyboard(t, before)
+            let glides = t.trackLines("glide to ", "[\(f2)]", since: mark)
+            try t.expect(glides.isEmpty, "Expanse glided to F2 after F1 closed: \(glides.first ?? "")")
+        },
     ]
 }
 
@@ -812,6 +839,11 @@ private func trackBeside(_ a: CGRect, _ b: CGRect) -> Bool {
 /// Brings a fixture's app forward, as ⌘-Tab does. Through Accessibility when Expanse Tests has it (at once,
 /// whichever app is active, as Expanse itself does); otherwise with NSRunningApplication, which macOS may refuse
 /// to an app that isn't active itself.
+/// Waits until `w`, one of Expanse Tests' windows, has the keyboard.
+@MainActor private func trackKeyboard(_ t: Ctx, _ w: TestWindow, timeout: TimeInterval = 4) async throws {
+    try await t.until("“\(w.title)” with the keyboard", timeout: timeout) { NSApp.isActive && w.window?.isKeyWindow == true }
+}
+
 @MainActor private func trackActivate(_ f: Fixture) async {
     guard let app = f.app else { return }
     await bringForward(app)

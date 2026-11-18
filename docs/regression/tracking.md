@@ -418,18 +418,21 @@
 - **Check in log:** no `follow <App>[<id>] moved to …` lines for parked windows, and no `gave up on windows landing after …` lines.
 - **Automate:** unit: CanvasController.parkingCorner and inParkingCorner, given a screen frame and a visibleFrame with a bottom or right Dock.
 
-## TRACK-35 Closing a window keeps the view where it is
+## TRACK-35 Closing a window doesn't glide to the app's other window
 - **Type:** Bug fix
 - **Area:** TRACK
 - **Commits:** ed61c70 (0.1.27)
 - **Before:** After you closed a window, macOS gave focus to another of the app's windows, wherever it was on the canvas, and the view glided there, which looked like a window reopening.
-- **Setup:** At 100%, two Finder windows: F1 in view, F2 far off screen. Auto-centre on (default).
+- **Setup:** At 100%, two Finder windows: F1 in view, F2 far off screen. A window of another app, B, in view beside F1. Auto-centre on (default).
 - **Steps:**
-  1. In F1, ⌘W (or click its red close button).
-  2. Don't click or press anything for 2 s.
-- **Expected:** F1 closes and the view stays where it was; Expanse doesn't glide to F2, though F2 now has focus. A click or key press of yours afterwards is followed as usual.
-- **Check in log:** `Finder[<F2 id>] got focus after a window of its app closed; the view stays`.
-- **Automate:** manual: needs macOS's focus change after a close (the rule: same app, within 1.5 s of the close, no click or key since, in `focusSettled`).
+  1. Click B, then F1.
+  2. In F1, ⌘W (or click its red close button).
+  3. Don't click or press anything for 2 s.
+  4. ⌘-Tab to Finder.
+- **Expected:** Step 2: F1 closes and the view stays where it was; Expanse doesn't glide to F2, though macOS gave F2 focus. B, the window you were in before F1, gets the keyboard (TRACK-47). With no window you were in before F1 still open, F2 keeps the keyboard and the view still stays. Step 4: a switch of yours to Finder is followed as usual, to F2.
+- **Check in log:** `Finder[<F2 id>] got focus after [<F1 id>] closed; back to <B's app>[<B id>], the window you were in before, on screen`. With none to go back to, `Finder[<F2 id>] got focus after a window of its app closed; the view stays`.
+- **Automate:** manual: needs macOS's focus change after a close. Unit: CanvasController.focusSettled after a close (same app, within 1.5 s of the close, no click or key since), with and without a window to go back to. End-to-end: the fixture app's window closes beside one of Expanse Tests'; the view stays, that window gets the keyboard, and bringing the fixture forward afterwards glides to its other window.
+- **Note:** Since TRACK-47, focus goes back to the window you were in before the one that closed.
 
 ## TRACK-36 Hiding an app, then ⌘-Tab to it, glides to its window
 - **Type:** Bug fix
@@ -576,3 +579,18 @@
 - **Expected:** Step 1: Calculator's window doesn't appear. Step 2: it comes back at its old spot, at its own size, and the view goes there. Step 3: started again after a key press, it's opened again by you: its window is new and goes beside Terminal (TRACK-39). The same goes for one started more than 20s after it quit.
 - **Check in log:** notice "Calculator restarted itself 2.0s after it quit: its window's spot is kept for when it shows", then "Calculator[id] back at its spot: its app restarted itself", and no "placed new window Calculator". Step 3: "Calculator opened again … after a click or key press: its windows are new".
 - **Automate:** unit: CanvasController.appLaunched after appQuit (the 20s gap, a click or key press since it quit, another app starting) and the window taking its spot through a window scan, after scans with it out of view. End-to-end: the fixture app quits and starts again hidden with nothing clicked or typed; its window isn't taken on while hidden, and comes back at its old spot when it's shown.
+
+## TRACK-47 Closing the window you're in goes back to the window you were in before
+- **Type:** Feature
+- **Area:** TRACK
+- **Commits:** unreleased (16 Nov)
+- **Setup:** At 100%, auto-centre on. A Safari window S, and far from it two Finder windows, F1 and F2, F2 far from both.
+- **Steps:**
+  1. Click S, then go to F1 (⌃ + arrow keys, or ⌘-Tab).
+  2. In F1, ⌘W.
+  3. Put S and F1 side by side in view, click S, then F1, and ⌘W in F1 again (open another Finder window to close).
+  4. Turn auto-centre off (⌥⇧`), and do step 1 and 2 again.
+  5. In a Terminal window with two tabs, partly off screen, close the tab in front.
+- **Expected:** Step 2: the view glides back to S, which gets the keyboard; it doesn't go to F2, though macOS gave F2 focus. Step 3: S just gets the keyboard; the view doesn't move. Step 4: the view stays, and F2 keeps the keyboard (with S partly in view, S gets it). Step 5: the other tab stays in front, where the window was. Closing a window behind the one you're in, or the last window of an app (it stays in front, so ⌘N and ⌘Q still go to it), changes nothing.
+- **Check in log:** step 2: `Finder[<F2 id>] got focus after [<F1 id>] closed; back to Safari[<S id>], the window you were in before: gliding to it`; step 3: the same ending `on screen`; step 5: `got focus after [<id>] closed: its next tab, where it was`.
+- **Automate:** manual: needs macOS's focus change after a close. Unit: CanvasController.focusSettled after a close: the window before on screen (focus only), off screen (a glide), with auto-centre off, macOS's pick as the window before, closed windows skipped, a close of a window you weren't in, the next tab taking over; the focus history's cap. End-to-end: an Expanse Tests window far from the fixture app's; the fixture's window you went to from it closes, and the view glides back to it, which gets the keyboard.

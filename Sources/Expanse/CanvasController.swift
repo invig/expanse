@@ -196,9 +196,14 @@ final class CanvasController: NSObject {
     /// Windows the app has closed (Accessibility says their element is gone), not yet dropped by
     /// a scan: minimised or hidden windows are told apart from them this way.
     private var closedWindows = Set<CGWindowID>()
-    /// The app whose window just closed, and when: macOS then gives focus to another of its
-    /// windows, which isn't you picking that one (see focusSettled).
-    private var lastClose: (pid: pid_t, at: CFTimeInterval)?
+    /// The window that just closed, its app, and when: macOS then gives focus to another of the
+    /// app's windows, which isn't you picking that one (see focusSettled).
+    private var lastClose: (pid: pid_t, id: CGWindowID, at: CFTimeInterval)?
+    /// The windows you've been in, the latest last (one can be in it more than once, a window
+    /// not on the canvas yet too): when the one you're in closes, focus goes back to the one
+    /// before (see focusSettled(on:)).
+    private var focusHistory: [CGWindowID] = []
+    private static let focusHistoryKept = 64
     /// When an app was last unhidden (by pid), and a window last brought back from the Dock (by
     /// ID): its windows coming back then are ones you asked for (see arrive).
     private var shownAgainAt: [pid_t: CFTimeInterval] = [:]
@@ -824,6 +829,30 @@ final class CanvasController: NSObject {
         }
     }
 
+    /// `id` has focus now (see focusHistory).
+    private func noteFocus(_ id: CGWindowID) {
+        guard focusHistory.last != id else { return }
+        focusHistory.append(id)
+        if focusHistory.count > Self.focusHistoryKept { focusHistory.removeFirst(focusHistory.count - Self.focusHistoryKept) }
+    }
+
+    /// The window you were in before `closed`, still on the canvas, when `closed` is the one you
+    /// were in last (`wereIn`: the focus history before macOS moved focus for the close).
+    private func windowBefore(_ closed: CGWindowID, in wereIn: [CGWindowID]) -> ManagedWindow? {
+        guard wereIn.last == closed else { return nil }
+        for id in wereIn.reversed() where id != closed && !closedWindows.contains(id) {
+            if let w = windows.first(where: { $0.id == id }) { return w }
+        }
+        return nil
+    }
+
+    /// Whether a window at `a` is where `b` was, give or take a tab bar: a window's next tab
+    /// taking over when the one in front closes.
+    static func sameWindowNextTab(_ a: CGRect, _ b: CGRect) -> Bool {
+        abs(a.minX - b.minX) < 2 && abs(a.width - b.width) < 2 && abs(a.height - b.height) <= tabBarAllowance
+            && (abs(a.minY - b.minY) < 2 || abs(a.maxY - b.maxY) < 2)
+    }
+
     private var focusQuery = 0
     /// The window Expanse last focused, when, and whether that was already putting it back.
     private var lastFocusRequest: (id: CGWindowID, pid: pid_t, at: CFTimeInterval, reasserted: Bool)?
@@ -845,7 +874,11 @@ final class CanvasController: NSObject {
     }
 
     private func focusSettled(on id: CGWindowID, switchedAt: CFTimeInterval? = nil) {
-        guard !isPaused, let w = windows.first(where: { $0.id == id }) else { return }
+        guard !isPaused else { return }
+        // (Noted before the window's on the canvas: a new window has focus before a scan adds it.)
+        let wereIn = focusHistory
+        noteFocus(id)
+        guard let w = windows.first(where: { $0.id == id }) else { return }
         if suspendTracking {
             // While displays change, and for 20s after (waking or unlocking is one), macOS moves
             // focus about by itself, so only a switch you just made is followed. (Ignoring them all
@@ -873,16 +906,42 @@ final class CanvasController: NSObject {
            CACurrentMediaTime() - request.at < 1, !Self.inputSince(request.at),
            let picked = windows.first(where: { $0.id == request.id }), !(picked.knownAX.map(AX.isMinimized) ?? false) {
             logger.info("\(w.appName, privacy: .public)[\(id)] took focus just after [\(request.id)] was picked; giving it back")
+            focusHistory = wereIn
             focusWindow(picked, reasserting: true)
             return
         }
+        let screen = CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1)
         let r = camera.toView(w.canvasFrame)
-        let fullyVisible = !w.parked && CGRect(origin: .zero, size: viewSize).insetBy(dx: -1, dy: -1).contains(r)
+        let fullyVisible = !w.parked && screen.contains(r)
         guard !fullyVisible else { return }
-        if let close = lastClose, close.pid == w.pid, CACurrentMediaTime() - close.at < 1.5, !Self.inputSince(close.at) {
+        if let close = lastClose, close.pid == w.pid, CACurrentMediaTime() - close.at < 1.5, !clickedOrTyped(close.at) {
             // You closed a window, and macOS gave focus to another of the app's, wherever that is.
-            // The view stays where you were; going to it looked like a window reopening.
-            logger.info("\(w.appName, privacy: .public)[\(w.id)] got focus after a window of its app closed; the view stays")
+            // Going there looked like the closed window reopening (TRACK-35), and staying put left
+            // the keyboard in a window you couldn't see. Back to the window you were in before the
+            // one that closed, any app's (TRACK-47); the view only moves if that one isn't on screen.
+            let gone = windows.first { $0.id == close.id }?.canvasFrame ?? recentlyRemoved[close.id]?.canvasFrame
+            if let gone, Self.sameWindowNextTab(w.canvasFrame, gone) {
+                logger.info("\(w.appName, privacy: .public)[\(w.id)] got focus after [\(close.id)] closed: its next tab, where it was")
+                return
+            }
+            guard let back = windowBefore(close.id, in: wereIn) else {
+                logger.info("\(w.appName, privacy: .public)[\(w.id)] got focus after a window of its app closed; the view stays")
+                return
+            }
+            let b = camera.toView(back.canvasFrame)
+            let whole = !back.parked && screen.contains(b), some = !back.parked && screen.intersects(b)
+            let name = "\(w.appName)[\(w.id)] got focus after [\(close.id)] closed; back to \(back.appName)[\(back.id)], the window you were in before"
+            if whole || (some && (viewPlaced || !autoCentre)) {
+                logger.info("\(name, privacy: .public), on screen")
+                focusHistory = wereIn
+                focusWindow(back)
+            } else if autoCentre {
+                logger.info("\(name, privacy: .public): gliding to it")
+                focusHistory = wereIn
+                glide(to: back)
+            } else {
+                logger.info("\(w.appName, privacy: .public)[\(w.id)] got focus after a window of its app closed; the view stays (auto-centre off)")
+            }
             return
         }
         if viewPlaced, !w.parked {
@@ -984,6 +1043,7 @@ final class CanvasController: NSObject {
     /// `applied`, if given, runs on the main thread once the app has taken focus.
     private func focusWindow(_ w: ManagedWindow, reasserting: Bool = false, applied: (() -> Void)? = nil) {
         lastFocusRequest = (w.id, w.pid, CACurrentMediaTime(), reasserting)
+        noteFocus(w.id)
         activationRequest = (w.appPID, CACurrentMediaTime())
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == w.appPID { activationRequest = nil }
         // The app has to answer each of these; a busy one takes 30ms+, so they go on the
@@ -1106,7 +1166,7 @@ final class CanvasController: NSObject {
              kAXWindowDeminiaturizedNotification:
             if notification == kAXUIElementDestroyedNotification as String, let id, let w = windows.first(where: { $0.id == id }) {
                 closedWindows.insert(id)
-                lastClose = (w.pid, CACurrentMediaTime())
+                lastClose = (w.pid, id, CACurrentMediaTime())
             }
             if notification == kAXWindowDeminiaturizedNotification as String, let id {
                 restoredAt[id] = CACurrentMediaTime()
